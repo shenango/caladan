@@ -14,10 +14,11 @@ git clone https://github.com/abelay/shenango
 cd shenango
 ```
 
-2) Setup DPDK and build the IOKernel and Shenango runtime.
+2) Setup DPDK/SPDK and build the IOKernel and Shenango runtime.
 
 ```
 ./dpdk.sh
+./spdk.sh
 ./scripts/setup_machine.sh
 make clean && make
 ```

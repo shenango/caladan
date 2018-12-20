@@ -16,4 +16,5 @@ test_runtime_timer
 test_smalloc
 test_thread
 test_udp_echo
+test_storage
 netperf

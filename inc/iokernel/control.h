@@ -28,6 +28,9 @@ struct thread_spec {
 	shmptr_t		q_ptrs;
 	pid_t			tid;
 	int32_t			park_efd;
+	shmptr_t		nvme_qpair_cpl;
+	shmptr_t		nvme_qpair_cq_head;
+	shmptr_t		nvme_qpair_phase;
 };
 
 enum {
@@ -52,6 +55,7 @@ struct control_hdr {
 	unsigned int		magic;
 	unsigned int		thread_count;
 	unsigned long		egress_buf_count;
+	int			spdk_shm_id;
 	struct eth_addr		mac;
 	struct sched_spec	sched_cfg;
 	struct thread_spec	threads[];

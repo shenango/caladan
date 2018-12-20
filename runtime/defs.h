@@ -222,6 +222,7 @@ struct iokernel_control {
 	struct thread_spec threads[NCPU];
 	void *tx_buf;
 	size_t tx_len;
+	unsigned int spdk_shm_id;
 };
 
 extern struct iokernel_control iok;
@@ -305,7 +306,12 @@ struct kthread {
 	struct timer_idx	*timers;
 	unsigned long		pad2[6];
 
-	/* 9th cache-line, statistics counters */
+	/* 9th cache-line, storage nvme queues */
+	void		*nvme_io_pair;
+	spinlock_t		io_pair_lock;
+	unsigned long		pad3[6];
+
+	/* 10th cache-line, statistics counters */
 	uint64_t		stats[STAT_NR];
 };
 
@@ -315,6 +321,7 @@ BUILD_ASSERT(offsetof(struct kthread, q_ptrs) % CACHE_LINE_SIZE == 0);
 BUILD_ASSERT(offsetof(struct kthread, txpktq) % CACHE_LINE_SIZE == 0);
 BUILD_ASSERT(offsetof(struct kthread, rq) % CACHE_LINE_SIZE == 0);
 BUILD_ASSERT(offsetof(struct kthread, timer_lock) % CACHE_LINE_SIZE == 0);
+BUILD_ASSERT(offsetof(struct kthread, nvme_io_pair) % CACHE_LINE_SIZE == 0);
 BUILD_ASSERT(offsetof(struct kthread, stats) % CACHE_LINE_SIZE == 0);
 
 extern __thread struct kthread *mykthread;
@@ -460,6 +467,7 @@ extern int sched_init_thread(void);
 extern int stat_init_thread(void);
 extern int net_init_thread(void);
 extern int smalloc_init_thread(void);
+extern int storage_init_thread(void);
 
 /* global initialization */
 extern int ioqueues_init(unsigned int threads);
@@ -470,6 +478,7 @@ extern int net_init(void);
 extern int arp_init(void);
 extern int trans_init(void);
 extern int smalloc_init(void);
+extern int storage_init(void);
 
 /* late initialization */
 extern int ioqueues_register_iokernel(void);

@@ -1,5 +1,9 @@
 DPDK_PATH = dpdk
 INC     = -I./inc -I$(DPDK_PATH)/build/include
+ifneq ($(SPDK),)
+SPDK_PATH = spdk
+INC += -I$(SPDK_PATH)/include
+endif
 CFLAGS  = -g -Wall -std=gnu11 -D_GNU_SOURCE $(INC) -mssse3
 LDFLAGS = -T base/base.ld -no-pie
 LD	= gcc
@@ -68,7 +72,6 @@ DPDK_LIBS += -lrte_ethdev
 DPDK_LIBS += -lrte_hash
 DPDK_LIBS += -lrte_mbuf
 DPDK_LIBS += -lrte_mempool
-DPDK_LIBS += -lrte_mempool
 DPDK_LIBS += -lrte_mempool_stack
 DPDK_LIBS += -lrte_ring
 # additional libs for running with Mellanox NICs
@@ -78,6 +81,22 @@ else
 ifneq ($(MLX4),)
 DPDK_LIBS += -lrte_pmd_mlx4 -libverbs -lmlx4
 endif
+endif
+
+ifneq ($(SPDK),)
+SPDK_LIBS= -L$(SPDK_PATH)/build/lib -L$(SPDK_PATH)/dpdk/build/lib
+SPDK_LIBS += -lspdk_nvme
+SPDK_LIBS += -lspdk_util
+SPDK_LIBS += -lspdk_env_dpdk
+SPDK_LIBS += -lspdk_log
+SPDK_LIBS += -lspdk_sock
+SPDK_LIBS += -ldpdk
+SPDK_LIBS += -lpthread
+SPDK_LIBS += -lrt
+SPDK_LIBS += -luuid
+SPDK_LIBS += -lcrypto
+SPDK_LIBS += -lnuma
+SPDK_LIBS += -ldl
 endif
 
 # must be first
@@ -101,7 +120,11 @@ iokerneld-noht: $(iokernel_noht_obj) libbase.a libnet.a base/base.ld
 	 -lpthread -lnuma -ldl
 
 $(test_targets): $(test_obj) libbase.a libruntime.a libnet.a base/base.ld
+ifneq ($(SPDK),)
+	$(LD) $(LDFLAGS) -o $@ $@.o libruntime.a libnet.a libbase.a -lpthread $(SPDK_LIBS)
+else
 	$(LD) $(LDFLAGS) -o $@ $@.o libruntime.a libnet.a libbase.a -lpthread
+endif
 
 # general build rules for all targets
 src = $(base_src) $(net_src) $(runtime_src) $(iokernel_src) $(test_src)

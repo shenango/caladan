@@ -728,6 +728,26 @@ static bool cores_is_proc_congested(struct proc *p)
 
 	}
 
+#if __has_include("spdk/nvme.h")
+	for (i = 0; i < p->thread_count; i++) {
+		struct spdk_nvme_cpl *cpl =
+			&(p->nvmeq[i].cpl_ref)[*p->nvmeq[i].nvme_io_cq_head];
+		uint8_t phase = ACCESS_ONCE(*p->nvmeq[i].nvme_io_phase);
+		bool currently_queued = ACCESS_ONCE(cpl->status).p == phase;
+
+		if (currently_queued) {
+			if (p->active_thread_count == 0) {
+				congested = true;
+			} else if (p->nvmeq[i].last_cpl == cpl &&
+					p->nvmeq[i].last_pending) {
+				congested = true;
+			}
+		}
+		p->nvmeq[i].last_cpl = cpl;
+		p->nvmeq[i].last_pending = currently_queued;
+	}
+#endif
+
 	if (p->pending_timer && microtime() >= p->deadline_us)
 		congested = true;
 

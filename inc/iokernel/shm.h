@@ -11,6 +11,10 @@
 #include <base/lrpc.h>
 #include <base/stddef.h>
 
+#define SPDK_BASE_ADDR 0x200000000000
+#define SPDK_BASE_ADDR_OFFSET 0x10000000
+#define SPDK_NUM_PAGES_MAPPED 100
+
 #define INGRESS_MBUF_SHM_KEY 0x696d736b /* "imsk" */
 #define INGRESS_MBUF_SHM_SIZE 0x20000000
 

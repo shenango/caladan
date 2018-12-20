@@ -22,6 +22,11 @@
 
 #include "defs.h"
 
+#include <sys/mman.h>
+#include <stdio.h>
+#include <fcntl.h>
+#include <errno.h>
+
 static int controlfd;
 static int clientfds[IOKERNEL_MAX_PROC];
 static struct proc *clients[IOKERNEL_MAX_PROC];
@@ -31,6 +36,52 @@ struct lrpc_params lrpc_data_to_control_params;
 static struct lrpc_chan_out lrpc_control_to_data;
 static struct lrpc_chan_in lrpc_data_to_control;
 static int nr_guaranteed;
+
+#if __has_include("spdk/nvme.h")
+static uint64_t spdk_map_idx;
+static int map_spdk_hugepages(struct shm_region* reg, unsigned int shm_id) {
+	int page_no, fd;
+	uint64_t offset;
+	char buffer [50];
+
+	reg->base = (void *)SPDK_BASE_ADDR +
+		SPDK_BASE_ADDR_OFFSET * spdk_map_idx;
+	reg->len = 0;
+
+	for (page_no = 0; page_no < SPDK_NUM_PAGES_MAPPED; page_no++) {
+		offset = 0x200000 * (page_no + 1);
+		sprintf(buffer, "/dev/hugepages/spdk%umap_%d", shm_id, page_no);
+		fd = open(buffer, O_RDONLY);
+		if (fd == -1) {
+			if (errno == 2) {
+				close(fd);
+				break;
+			} else {
+				log_err("error opening spdk page, errno=%d", errno);
+				close(fd);
+				goto spdk_unmap;
+			}
+		}
+		if ((void *)-1 == mmap(reg->base + offset, PGSIZE_2MB, PROT_READ,
+					MAP_SHARED|MAP_FIXED|MAP_POPULATE, fd, 0)) {
+			log_err("error mapping spdk page, errno=%d", errno);
+			close(fd);
+			goto spdk_unmap;
+		}
+		reg->len += PGSIZE_2MB;
+		close(fd);
+	}
+	spdk_map_idx++;
+	return 0;
+
+spdk_unmap:
+	if (-1 == munmap(reg->base, reg->len)) {
+		log_err("error unmapping spdk pages, errno=%d", errno);
+	}
+	return -1;
+}
+#endif
+
 
 static struct proc *control_create_proc(mem_key_t key, size_t len, pid_t pid,
 		int *fds, int n_fds)
@@ -42,6 +93,9 @@ static struct proc *control_create_proc(mem_key_t key, size_t len, pid_t pid,
 	struct thread_spec *threads;
 	void *shbuf;
 	int i, ret;
+#if __has_include("spdk/nvme.h")
+	struct shm_region spdk_reg;
+#endif
 
 	/* attach the shared memory region */
 	if (len < sizeof(hdr))
@@ -75,7 +129,7 @@ static struct proc *control_create_proc(mem_key_t key, size_t len, pid_t pid,
 	if (!threads)
 		goto fail_free_just_proc;
 	memcpy(threads, ((struct control_hdr *)shbuf)->threads,
-	       sizeof(*threads) * hdr.thread_count);
+		sizeof(*threads) * hdr.thread_count);
 
 	p->pid = pid;
 	ref_init(&p->ref);
@@ -90,6 +144,11 @@ static struct proc *control_create_proc(mem_key_t key, size_t len, pid_t pid,
 	p->mac = hdr.mac;
 	p->pending_timer = false;
 	p->uniqid = rdtsc();
+
+#if __has_include("spdk/nvme.h")
+	if (map_spdk_hugepages(&spdk_reg, hdr.spdk_shm_id))
+		goto fail_free_proc;
+#endif
 
 	/* initialize the threads */
 	for (i = 0; i < hdr.thread_count; i++) {
@@ -110,6 +169,25 @@ static struct proc *control_create_proc(mem_key_t key, size_t len, pid_t pid,
 		ret = shm_init_lrpc_in(&reg, &s->txcmdq, &th->txcmdq);
 		if (ret)
 			goto fail_free_proc;
+
+#if __has_include("spdk/nvme.h")
+		/* set SPDK pointers */
+		p->nvmeq[i].cpl_ref = (struct spdk_nvme_cpl *)shmptr_to_ptr(&spdk_reg,
+				(shmptr_t)s->nvme_qpair_cpl,
+				sizeof(p->nvmeq[i].cpl_ref));
+		if (!p->nvmeq[i].cpl_ref)
+			goto fail_free_proc;
+		p->nvmeq[i].nvme_io_cq_head = (uint16_t *)shmptr_to_ptr(&spdk_reg,
+				(shmptr_t)s->nvme_qpair_cq_head,
+				sizeof(p->nvmeq[i].nvme_io_cq_head));
+		if (!p->nvmeq[i].nvme_io_cq_head)
+			goto fail_free_proc;
+		p->nvmeq[i].nvme_io_phase = (uint8_t *)shmptr_to_ptr(&spdk_reg,
+				(shmptr_t)s->nvme_qpair_phase,
+				sizeof(p->nvmeq[i].nvme_io_phase));
+		if (!p->nvmeq[i].nvme_io_phase)
+			goto fail_free_proc;
+#endif
 
 		th->tid = s->tid;
 		th->park_efd = fds[i];
@@ -481,13 +559,13 @@ int control_init(void)
 	memset(&addr, 0x0, sizeof(struct sockaddr_un));
 	addr.sun_family = AF_UNIX;
 	strncpy(addr.sun_path, CONTROL_SOCK_PATH, sizeof(addr.sun_path) - 1);
- 
+
 	sfd = socket(AF_UNIX, SOCK_STREAM, 0);
 	if (sfd == -1) {
 		log_err("control: socket() failed [%s]", strerror(errno));
 		return -errno;
 	}
- 
+
 	if (bind(sfd, (struct sockaddr *)&addr,
 		 sizeof(struct sockaddr_un)) == -1) {
 		log_err("control: bind() failed [%s]", strerror(errno));
@@ -516,5 +594,5 @@ int control_init(void)
 		return -errno;
 	}
 
-	return 0;	
+	return 0;
 }

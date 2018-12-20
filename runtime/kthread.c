@@ -117,6 +117,7 @@ void kthread_detach(struct kthread *r)
 	struct kthread *k = myk();
 	int i;
 
+	return;
 	assert_spin_lock_held(&r->lock);
 	assert(r != k);
 	assert(r->parked == true);

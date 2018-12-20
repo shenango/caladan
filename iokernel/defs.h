@@ -14,6 +14,7 @@
 
 #include "mlx.h"
 #include "ref.h"
+#include "spdk.h"
 
 /* #define STATS 1 */
 
@@ -106,6 +107,16 @@ struct proc {
 	size_t max_overflows;
 	size_t nr_overflows;
 	unsigned long *overflow_queue;
+
+	unsigned int nvmeq_cnt;
+	struct {
+		void* last_cpl;
+		bool last_pending;
+
+		struct spdk_nvme_cpl	*cpl_ref;
+		uint16_t		*nvme_io_cq_head;
+		uint8_t			*nvme_io_phase;
+	} nvmeq[NCPU];
 
 	/* table of physical addresses for shared memory */
 	physaddr_t		page_paddrs[];
