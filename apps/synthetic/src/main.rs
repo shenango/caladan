@@ -18,7 +18,7 @@ extern crate test;
 use std::collections::BTreeMap;
 use std::f32::INFINITY;
 use std::io;
-use std::io::{ErrorKind, Write};
+use std::io::{ErrorKind, Read, Write};
 use std::net::{Ipv4Addr, SocketAddrV4};
 use std::slice;
 use std::str::FromStr;
@@ -185,10 +185,11 @@ fn run_linux_udp_server(backend: Backend, addr: SocketAddrV4, nthreads: usize, w
 }
 
 fn socket_worker(socket: &mut Connection, worker: FakeWorker) {
-    let mut v = vec![0; 4096];
+    let mut v = vec![0; 16];
     let mut r = || {
+        socket.read_exact(&mut v[..16])?;
+        let payload = Payload::deserialize(&mut &v[..16])?;
         v.clear();
-        let payload = Payload::deserialize(socket)?;
         worker.work(payload.work_iterations);
         payload.serialize_into(&mut v)?;
         Ok(socket.write_all(&v[..])?)
