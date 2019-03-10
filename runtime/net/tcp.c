@@ -941,16 +941,30 @@ ssize_t tcp_write(tcpconn_t *c, const void *buf, size_t len)
 	size_t winlen;
 	ssize_t ret;
 
-	/* block until the data can be sent */
-	ret = tcp_write_wait(c, &winlen);
-	if (ret)
-		return ret;
+	spin_lock_np(&c->lock);
+
+	/* block until there is an actionable event */
+	while (!c->tx_closed &&
+	       (c->pcb.state < TCP_STATE_ESTABLISHED || c->tx_exclusive ||
+		wraps_lte(c->pcb.snd_una + c->pcb.snd_wnd, c->pcb.snd_nxt))) {
+		waitq_wait(&c->tx_wq, &c->lock);
+	}
+
+	/* is the socket closed? */
+	if (c->tx_closed) {
+		spin_unlock_np(&c->lock);
+		return c->err ? -c->err : -EPIPE;
+	}
+
+	/* TODO: must allow at least one byte to avoid zero window deadlock */
+	winlen = c->pcb.snd_una + c->pcb.snd_wnd - c->pcb.snd_nxt;
 
 	/* actually send the data */
 	ret = tcp_tx_send(c, buf, MIN(len, winlen), len <= winlen);
 
-	/* catch up on any pending work */
-	tcp_write_finish(c);
+	c->ack_delayed = (ret < 0);
+	tcp_timer_update(c);
+	spin_unlock_np(&c->lock);
 
 	return ret;
 }
