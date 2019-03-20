@@ -132,7 +132,6 @@ static void drain_overflow(struct kthread *l)
 		if (!th)
 			break;
 		l->rq[l->rq_head++ % RUNTIME_RQ_SIZE] = th;
-		l->q_ptrs->rq_head++;
 	}
 }
 
@@ -163,19 +162,21 @@ static bool steal_work(struct kthread *l, struct kthread *r)
 		for (i = 0; i < avail; i++)
 			l->rq[i] = r->rq[rq_tail++ % RUNTIME_RQ_SIZE];
 		store_release(&r->rq_tail, rq_tail);
-		r->q_ptrs->rq_tail += avail;
+		ACCESS_ONCE(r->q_ptrs->rq_tail) += avail;
 		spin_unlock(&r->lock);
 
 		l->rq_head = avail;
-		l->q_ptrs->rq_head += avail;
+		ACCESS_ONCE(l->q_ptrs->rq_head) += avail;
 		STAT(THREADS_STOLEN) += avail;
 		return true;
 	}
 
 	/* check for overflow tasks */
 	th = list_pop(&r->rq_overflow, thread_t, link);
-	if (th)
+	if (th) {
+		ACCESS_ONCE(r->q_ptrs->rq_tail)++;
 		goto done;
+	}
 
 	/* check for softirqs */
 	th = softirq_run_thread(r, RUNTIME_SOFTIRQ_BUDGET);
@@ -188,7 +189,7 @@ done:
 	/* either enqueue the stolen work or detach the kthread */
 	if (th) {
 		l->rq[l->rq_head++] = th;
-		l->q_ptrs->rq_head++;
+		ACCESS_ONCE(l->q_ptrs->rq_head)++;
 		STAT(THREADS_STOLEN)++;
 	} else if (r->parked) {
 		kthread_detach(r);
@@ -312,7 +313,7 @@ done:
 	if (!th) {
 		assert(l->rq_head != l->rq_tail);
 		th = l->rq[l->rq_tail++ % RUNTIME_RQ_SIZE];
-		l->q_ptrs->rq_tail++;
+		ACCESS_ONCE(l->q_ptrs->rq_tail)++;
 	}
 
 	/* move overflow tasks into the runqueue */
@@ -362,7 +363,7 @@ void join_kthread(struct kthread *k)
 	/* drain the runqueue */
 	for (; k->rq_tail < k->rq_head; k->rq_tail++) {
 		list_add_tail(&tmp, &k->rq[k->rq_tail % RUNTIME_RQ_SIZE]->link);
-		k->q_ptrs->rq_tail++;
+		ACCESS_ONCE(k->q_ptrs->rq_tail)++;
 	}
 	k->rq_head = k->rq_tail = 0;
 
@@ -405,7 +406,7 @@ static __always_inline void enter_schedule(thread_t *myth)
 
 	/* pop the next runnable thread from the queue */
 	th = k->rq[k->rq_tail++ % RUNTIME_RQ_SIZE];
-	k->q_ptrs->rq_tail++;
+	ACCESS_ONCE(k->q_ptrs->rq_tail)++;
 	spin_unlock(&k->lock);
 
 	/* increment the RCU generation number (odd is in thread) */
@@ -470,7 +471,7 @@ void thread_yield(void)
 }
 
 /**
- * thread_ready - marks a thread as a runnable
+ * thread_ready - marks a uthread as a runnable
  * @th: the thread to mark runnable
  *
  * This function can only be called when @th is sleeping.
@@ -485,6 +486,7 @@ void thread_ready(thread_t *th)
 
 	k = getk();
 	rq_tail = load_acquire(&k->rq_tail);
+	ACCESS_ONCE(k->q_ptrs->rq_head)++;
 	if (unlikely(k->rq_head - rq_tail >= RUNTIME_RQ_SIZE)) {
 		assert(k->rq_head - rq_tail == RUNTIME_RQ_SIZE);
 		spin_lock(&k->lock);
@@ -496,11 +498,10 @@ void thread_ready(thread_t *th)
 
 	k->rq[k->rq_head % RUNTIME_RQ_SIZE] = th;
 	store_release(&k->rq_head, k->rq_head + 1);
-	k->q_ptrs->rq_head++;
 	putk();
 }
 
-static void thread_finish_yield_kthread(void)
+static void thread_finish_cede(void)
 {
 	struct kthread *k = myk();
 	thread_t *myth = thread_self();
@@ -522,13 +523,13 @@ static void thread_finish_yield_kthread(void)
 }
 
 /**
- * thread_yield_kthread - yields the running thread and immediately parks
+ * thread_cede - yields the running thread and gives the core back to iokernel
  */
-void thread_yield_kthread(void)
+void thread_cede(void)
 {
 	/* this will switch from the thread stack to the runtime stack */
 	preempt_disable();
-	jmp_runtime(thread_finish_yield_kthread);
+	jmp_runtime(thread_finish_cede);
 }
 
 static __always_inline thread_t *__thread_create(void)

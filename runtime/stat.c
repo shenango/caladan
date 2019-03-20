@@ -26,7 +26,6 @@ static const char *stat_names[] = {
 	"softirqs_local",
 	"parks",
 	"preemptions",
-	"preemptions_stolen",
 	"core_migrations",
 
 	/* network stack counters */
@@ -57,7 +56,6 @@ static ssize_t stat_write_buf(char *buf, size_t len)
 	memset(stats, 0, sizeof(stats));
 
 	/* gather stats from each kthread */
-	/* FIXME: not correct when parked kthreads removed from @ks */
 	for (i = 0; i < maxks; i++) {
 		for (j = 0; j < STAT_NR; j++)
 			stats[j] += allks[i]->stats[j];

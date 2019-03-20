@@ -248,7 +248,6 @@ enum {
 	STAT_SOFTIRQS_LOCAL,
 	STAT_PARKS,
 	STAT_PREEMPTIONS,
-	STAT_PREEMPTIONS_STOLEN,
 	STAT_CORE_MIGRATIONS,
 
 	/* network stack counters */
@@ -480,5 +479,5 @@ extern int cfg_load(const char *path);
 /* runtime entry helpers */
 extern void sched_start(void) __noreturn;
 extern int thread_spawn_main(thread_fn_t fn, void *arg);
-extern void thread_yield_kthread();
+extern void thread_cede(void);
 extern void join_kthread(struct kthread *k);

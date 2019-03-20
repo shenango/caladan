@@ -13,6 +13,7 @@
 
 /* the current preemption count */
 volatile __thread unsigned int preempt_cnt = PREEMPT_NOT_PENDING;
+volatile __thread bool preempt_cede;
 
 /* set a flag to indicate a preemption request is pending */
 static void set_preempt_needed(void)
@@ -20,11 +21,24 @@ static void set_preempt_needed(void)
 	preempt_cnt &= ~PREEMPT_NOT_PENDING;
 }
 
-/* handles preemption signals from the iokernel */
+/* handles preemption cede signals from the iokernel */
 static void handle_sigusr1(int s, siginfo_t *si, void *c)
 {
-	struct kthread *k = myk();
+	STAT(PREEMPTIONS)++;
+	set_preempt_needed();
 
+	/* resume execution if preemption is disabled */
+	if (!preempt_enabled()) {
+		preempt_cede = true;
+		return;
+	}
+
+	thread_cede();
+}
+
+/* handles preemption yield signals from the iokernel */
+static void handle_sigusr2(int s, siginfo_t *si, void *c)
+{
 	STAT(PREEMPTIONS)++;
 	set_preempt_needed();
 
@@ -32,11 +46,7 @@ static void handle_sigusr1(int s, siginfo_t *si, void *c)
 	if (!preempt_enabled())
 		return;
 
-	thread_yield_kthread();
-
-	/* note: gcc does seem to recompute myk() */
-	if (myk() != k)
-		STAT(PREEMPTIONS_STOLEN)++;
+	thread_yield();
 }
 
 /**
@@ -45,7 +55,12 @@ static void handle_sigusr1(int s, siginfo_t *si, void *c)
 void preempt(void)
 {
 	assert(preempt_needed());
-	thread_yield_kthread();
+	if (preempt_cede) {
+		preempt_cede = false;
+		thread_cede();
+	} else {
+		thread_yield();
+	}
 }
 
 /**
@@ -57,7 +72,6 @@ int preempt_init(void)
 {
 	struct sigaction act;
 
-	act.sa_sigaction = handle_sigusr1;
 	act.sa_flags = SA_SIGINFO | SA_ONSTACK | SA_NODEFER | SA_RESTART;
 
 	if (sigemptyset(&act.sa_mask) != 0) {
@@ -65,10 +79,18 @@ int preempt_init(void)
 		return -errno;
 	}
 
+	act.sa_sigaction = handle_sigusr1;
 	if (sigaction(SIGUSR1, &act, NULL) == -1) {
 		log_err("couldn't register signal handler");
 		return -errno;
 	}
+
+	act.sa_sigaction = handle_sigusr2;
+	if (sigaction(SIGUSR2, &act, NULL) == -1) {
+		log_err("couldn't register signal handler");
+		return -errno;
+	}
+
 
 	return 0;
 }
