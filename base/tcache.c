@@ -17,15 +17,23 @@
 #include <base/log.h>
 #include <base/lock.h>
 #include <base/tcache.h>
+#include <base/thread.h>
 
 static DEFINE_SPINLOCK(tcache_lock);
 static LIST_HEAD(tcache_list);
+
+DEFINE_PERTHREAD(uint64_t, mag_alloc);
+DEFINE_PERTHREAD(uint64_t, mag_free);
+DEFINE_PERTHREAD(uint64_t, pool_alloc);
+DEFINE_PERTHREAD(uint64_t, pool_free);
 
 static struct tcache_hdr *tcache_alloc_mag(struct tcache *tc)
 {
 	void *items[TCACHE_MAX_MAG_SIZE];
 	struct tcache_hdr *head, **pos;
 	int err, i;
+
+	perthread_get(mag_alloc)++;
 
 	err = tc->ops->alloc(tc, tc->mag_size, items);
 	if (err)
@@ -47,6 +55,8 @@ static void tcache_free_mag(struct tcache *tc, struct tcache_hdr *hdr)
 {
 	void *items[TCACHE_MAX_MAG_SIZE];
 	int nr = 0;
+
+	perthread_get(mag_free)++;
 
 	do {
 		items[nr++] = hdr;
@@ -74,6 +84,8 @@ void *__tcache_alloc(struct tcache_perthread *ltc)
 		ltc->previous = NULL;
 		goto alloc;
 	}
+
+	perthread_get(pool_alloc)++;
 
 	/* CASE 2: grab a magazine from the shared pool */
 	spin_lock(&tc->lock);
@@ -112,6 +124,8 @@ void __tcache_free(struct tcache_perthread *ltc, void *item)
 		ltc->previous = ltc->loaded;
 		goto free;
 	}
+
+	perthread_get(pool_free)++;
 
 	/* CASE 2: return a magazine to the shared pool */
 	spin_lock(&tc->lock);

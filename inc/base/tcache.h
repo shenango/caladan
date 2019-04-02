@@ -8,6 +8,7 @@
 #include <base/lock.h>
 #include <base/list.h>
 #include <base/atomic.h>
+#include <base/thread.h>
 
 #define TCACHE_MAX_MAG_SIZE	64
 #define TCACHE_DEFAULT_MAG_SIZE	8
@@ -49,6 +50,14 @@ struct tcache {
 
 extern void *__tcache_alloc(struct tcache_perthread *ltc);
 extern void __tcache_free(struct tcache_perthread *ltc, void *item);
+
+/*
+ * stat counters
+ */
+DECLARE_PERTHREAD(uint64_t, mag_alloc);
+DECLARE_PERTHREAD(uint64_t, mag_free);
+DECLARE_PERTHREAD(uint64_t, pool_alloc);
+DECLARE_PERTHREAD(uint64_t, pool_free);
 
 /**
  * tcache_alloc - allocates an item from the thread cache
