@@ -61,7 +61,7 @@ static inline void *__perthread_get(void __perthread *key)
 
 static inline int __thread_next_active(int thread)
 {
-	while (thread < thread_count) {
+	while (thread < (int)thread_count) {
 		if (thread_is_active(++thread))
 			return thread;
 	}
