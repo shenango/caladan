@@ -27,6 +27,10 @@ static const char *stat_names[] = {
 	"parks",
 	"preemptions",
 	"core_migrations",
+	"local_runs",
+	"remote_runs",
+	"local_wakes",
+	"remote_wakes",
 
 	/* network stack counters */
 	"rx_bytes",

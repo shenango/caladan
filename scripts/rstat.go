@@ -21,7 +21,8 @@ func prettyPrint(m, lastm map[string]uint64, interval int) {
 		   dm["rx_tcp_text_cycles"] / (dm["sched_cycles"] + dm["program_cycles"]) * 100)
 	fmt.Printf("sched: %.1f rescheds (%.1f%% sched time, %.1f%% local)," +
 		   " %.1f softirqs (%.1f%% stolen), %.1f %%CPU, %.1f parks" +
-		   " (%.1f%% migrated), %.1f preempts (%.1f stolen)\n",
+		   " (%.1f%% migrated), %.1f preempts (%.1f stolen)," +
+		   " thread_run_locality %.1f%%, thread_wake_locality %.1f%%\n",
 		   dm["reschedules"],
 		   dm["sched_cycles"] / (dm["sched_cycles"] + dm["program_cycles"]) * 100,
 		   (1 - dm["threads_stolen"] / dm["reschedules"]) * 100,
@@ -31,7 +32,9 @@ func prettyPrint(m, lastm map[string]uint64, interval int) {
 		   (dm["sched_cycles"] + dm["program_cycles"]) * 100 /
 		    (float64(m["cycles_per_us"]) * 1000000), dm["parks"],
 		   dm["core_migrations"] * 100 / dm["parks"],
-		   dm["preemptions"], dm["preemptions_stolen"])
+		   dm["preemptions"], dm["preemptions_stolen"],
+		   (dm["local_runs"] / (dm["local_runs"] + dm["remote_runs"])) * 100,
+		   (dm["local_wakes"] / (dm["local_wakes"] + dm["remote_wakes"])) * 100)
 }
 
 func main() {

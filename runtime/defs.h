@@ -98,6 +98,7 @@ struct thread {
 	unsigned int		main_thread:1;
 	unsigned int		state;
 	unsigned int		stack_busy;
+	unsigned int		last_cpu;
 };
 
 typedef void (*runtime_fn_t)(void);
@@ -249,6 +250,10 @@ enum {
 	STAT_PARKS,
 	STAT_PREEMPTIONS,
 	STAT_CORE_MIGRATIONS,
+	STAT_LOCAL_RUNS,
+	STAT_REMOTE_RUNS,
+	STAT_LOCAL_WAKES,
+	STAT_REMOTE_WAKES,
 
 	/* network stack counters */
 	STAT_RX_BYTES,

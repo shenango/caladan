@@ -47,6 +47,17 @@ static __thread uint64_t last_watchdog_tsc;
 thread_t *thread_self(void);
 
 /**
+ * cores_have_affinity - returns true if two cores have cache affinity
+ * @cpua: the first core
+ * @cpub: the second core
+ */
+static inline bool cores_have_affinity(unsigned int cpua, unsigned int cpub)
+{
+	return cpua == cpub ||
+	       cpu_map[cpua].sibling_core == cpub;
+}
+
+/**
  * jmp_thread - runs a thread, popping its trap frame
  * @th: the thread to run
  *
@@ -326,6 +337,10 @@ done:
 	end_tsc = rdtsc();
 	STAT(SCHED_CYCLES) += end_tsc - start_tsc;
 	last_tsc = end_tsc;
+	if (cores_have_affinity(th->last_cpu, l->curr_cpu))
+		STAT(LOCAL_RUNS)++;
+	else
+		STAT(REMOTE_RUNS)++;
 
 	/* increment the RCU generation number (odd is in thread) */
 	store_release(&l->rcu_gen, l->rcu_gen + 1);
@@ -426,6 +441,10 @@ static __always_inline void enter_schedule(thread_t *myth)
 
 	/* switch stacks and enter the next thread */
 	STAT(RESCHEDULES)++;
+	if (cores_have_affinity(th->last_cpu, k->curr_cpu))
+		STAT(LOCAL_RUNS)++;
+	else
+		STAT(REMOTE_RUNS)++;
 	jmp_thread_direct(myth, th);
 }
 
@@ -444,6 +463,7 @@ void thread_park_and_unlock_np(spinlock_t *l)
 
 	myth->state = THREAD_STATE_SLEEPING;
 	myth->stack_busy = true;
+	myth->last_cpu = myk()->curr_cpu;
 	spin_unlock(l);
 
 	enter_schedule(myth);
@@ -464,6 +484,7 @@ void thread_yield(void)
 	preempt_disable();
 	assert(myth->state == THREAD_STATE_RUNNING);
 	myth->state = THREAD_STATE_SLEEPING;
+	myth->last_cpu = myk()->curr_cpu;
 	store_release(&myth->stack_busy, true);
 	thread_ready(myth);
 
@@ -485,6 +506,10 @@ void thread_ready(thread_t *th)
 	th->state = THREAD_STATE_RUNNABLE;
 
 	k = getk();
+	if (cores_have_affinity(th->last_cpu, k->curr_cpu))
+		STAT(LOCAL_WAKES)++;
+	else
+		STAT(REMOTE_WAKES)++;
 	rq_tail = load_acquire(&k->rq_tail);
 	ACCESS_ONCE(k->q_ptrs->rq_head)++;
 	if (unlikely(k->rq_head - rq_tail >= RUNTIME_RQ_SIZE)) {
@@ -508,6 +533,7 @@ static void thread_finish_cede(void)
 
 	assert(myth->state == THREAD_STATE_RUNNING);
 	myth->state = THREAD_STATE_SLEEPING;
+	myth->last_cpu = k->curr_cpu;
 	thread_ready(myth);
 
 	STAT(PROGRAM_CYCLES) += rdtsc() - last_tsc;
