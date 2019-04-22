@@ -69,6 +69,9 @@ use memcached::MemcachedProtocol;
 mod dns;
 use dns::DnsProtocol;
 
+mod reflex;
+use reflex::ReflexProtocol;
+
 #[derive(Copy, Clone, Debug)]
 enum Distribution {
     Zero,
@@ -123,6 +126,7 @@ enum Protocol {
     Synthetic,
     Memcached,
     Dns,
+    Reflex,
 }}
 
 impl Protocol {
@@ -131,6 +135,7 @@ impl Protocol {
             Protocol::Memcached => MemcachedProtocol::gen_request(i, p, buf, tport),
             Protocol::Synthetic => SyntheticProtocol::gen_request(i, p, buf, tport),
             Protocol::Dns => DnsProtocol::gen_request(i, p, buf, tport),
+            Protocol::Reflex => ReflexProtocol::gen_request(i, p, buf, tport),
         }
     }
 
@@ -144,6 +149,7 @@ impl Protocol {
             Protocol::Synthetic => SyntheticProtocol::read_response(sock, tport, scratch),
             Protocol::Memcached => MemcachedProtocol::read_response(sock, tport, scratch),
             Protocol::Dns => DnsProtocol::read_response(sock, tport, scratch),
+            Protocol::Reflex => ReflexProtocol::read_response(sock, tport, scratch),
         }
     }
 }
@@ -801,7 +807,7 @@ fn main() {
                 .short("p")
                 .long("protocol")
                 .value_name("PROTOCOL")
-                .possible_values(&["synthetic", "memcached", "dns"])
+                .possible_values(&["synthetic", "memcached", "dns", "reflex"])
                 .default_value("synthetic")
                 .help("Server protocol"),
         )
