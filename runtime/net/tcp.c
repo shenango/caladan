@@ -30,6 +30,9 @@ void tcp_timer_update(tcpconn_t *c)
 	if (unlikely(c->pcb.state == TCP_STATE_TIME_WAIT))
 		next_timeout = c->time_wait_ts + TCP_TIME_WAIT_TIMEOUT;
 
+	if (unlikely(c->pcb.state < TCP_STATE_ESTABLISHED))
+		next_timeout = c->attach_ts + TCP_CONNECT_TIMEOUT;
+
 	if (c->ack_delayed)
 		next_timeout = min(next_timeout, c->ack_ts + TCP_ACK_TIMEOUT);
 
@@ -51,7 +54,14 @@ static void tcp_handle_timeouts(tcpconn_t *c, uint64_t now)
 	bool do_ack = false, do_retransmit = false;
 
 	spin_lock_np(&c->lock);
-	if (c->pcb.state == TCP_STATE_CLOSED) {
+	if (unlikely(c->pcb.state == TCP_STATE_CLOSED)) {
+		spin_unlock_np(&c->lock);
+		return;
+	}
+
+	if (unlikely(c->pcb.state < TCP_STATE_ESTABLISHED) &&
+	    now - c->attach_ts >= TCP_CONNECT_TIMEOUT) {
+		tcp_conn_fail(c, ETIMEDOUT);
 		spin_unlock_np(&c->lock);
 		return;
 	}
@@ -277,6 +287,8 @@ int tcp_conn_attach(tcpconn_t *c, struct netaddr laddr, struct netaddr raddr)
 
 	if (start_worker)
 		BUG_ON(thread_spawn(tcp_worker, NULL));
+
+	c->attach_ts = microtime();
 
 	return 0;
 }

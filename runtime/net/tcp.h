@@ -19,6 +19,7 @@
 #define TCP_MSS	(ETH_MTU - sizeof(struct ip_hdr) - sizeof(struct tcp_hdr))
 #define TCP_WIN	((65535 / TCP_MSS) * TCP_MSS)
 #define TCP_ACK_TIMEOUT (10 * ONE_MS)
+#define TCP_CONNECT_TIMEOUT (5 * ONE_SECOND) /* FIXME */
 #define TCP_OOQ_ACK_TIMEOUT (300 * ONE_MS)
 #define TCP_TIME_WAIT_TIMEOUT (1 * ONE_SECOND) /* FIXME: should be 8 minutes */
 #define TCP_RETRANSMIT_TIMEOUT (300 * ONE_MS) /* FIXME: should be dynamic */
@@ -98,7 +99,10 @@ struct tcpconn {
 	bool			ack_delayed;
 	bool			rcv_wnd_full;
 	uint64_t		ack_ts;
-	uint64_t		time_wait_ts;
+	union {
+		uint64_t		time_wait_ts;
+		uint64_t		attach_ts;
+	};
 	int			rep_acks;
 };
 
