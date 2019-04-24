@@ -179,6 +179,7 @@ static inline void bitmap_init(unsigned long *bits, int nbits, bool state)
 
 extern int bitmap_find_next_set(unsigned long *bits, int nbits, int pos);
 extern int bitmap_find_next_cleared(unsigned long *bits, int nbits, int pos);
+extern int string_to_bitmap(const char *str, unsigned long *bits, int nbits);
 
 /**
  * bitmap_for_each_set - generates a loop iteration over each set bit
