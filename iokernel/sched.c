@@ -459,6 +459,9 @@ int sched_init(void)
 		if (cpu_info_tbl[i].package != 0)
 			continue;
 
+		if (allowed_cores_supplied && !bitmap_test(input_allowed_cores, i))
+			continue;
+
 		bitmap_set(sched_allowed_cores, i);
 	}
 	/* check for minimum number of cores required */

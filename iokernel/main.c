@@ -16,6 +16,9 @@
 struct iokernel_cfg cfg;
 struct dataplane dp;
 
+bool allowed_cores_supplied;
+DEFINE_BITMAP(input_allowed_cores, NCPU);
+
 struct init_entry {
 	const char *name;
 	int (*init)(void);
@@ -128,6 +131,15 @@ int main(int argc, char *argv[])
 	if (argc >= 2) {
 		if (!strcmp(argv[1], "noht"))
 			cfg.noht = true;
+		else {
+			allowed_cores_supplied = true;
+			ret = string_to_bitmap(argv[1], input_allowed_cores, NCPU);
+			if (ret) {
+				fprintf(stderr, "invalid cpu list: %s\n", argv[1]);
+				fprintf(stderr, "example list: 0-24,26-48:2,49-255\n");
+				return ret;
+			}
+		}
 	}
 
 	ret = run_init_handlers("iokernel", iok_init_handlers,

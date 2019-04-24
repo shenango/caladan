@@ -325,6 +325,9 @@ extern int tx_init(void);
 extern int dp_clients_init(void);
 extern int dpdk_late_init(void);
 
+extern bool allowed_cores_supplied;
+extern DEFINE_BITMAP(input_allowed_cores, NCPU);
+
 /*
  * dataplane RX/TX functions
  */
