@@ -2,6 +2,7 @@
  * sched.c - a scheduler for user-level threads
  */
 
+#include <sched.h>
 #include <signal.h>
 #include <stdlib.h>
 #include <string.h>
@@ -581,6 +582,7 @@ static __always_inline thread_t *__thread_create(void)
 	th->stack = s;
 	th->state = THREAD_STATE_SLEEPING;
 	th->main_thread = false;
+	th->last_cpu = myk()->curr_cpu;
 
 	return th;
 }
@@ -669,6 +671,7 @@ int thread_spawn_main(thread_fn_t fn, void *arg)
 	if (!th)
 		return -ENOMEM;
 	th->main_thread = true;
+	th->last_cpu = sched_getcpu();
 	thread_ready(th);
 	return 0;
 }
