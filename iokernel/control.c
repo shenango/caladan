@@ -142,7 +142,6 @@ static struct proc *control_create_proc(mem_key_t key, size_t len, pid_t pid,
 	if (eth_addr_is_multicast(&hdr.mac) || eth_addr_is_zero(&hdr.mac))
 		goto fail_free_proc;
 	p->mac = hdr.mac;
-	p->pending_timer = false;
 	p->uniqid = rdtsc();
 
 #if __has_include("spdk/nvme.h")
@@ -192,8 +191,7 @@ static struct proc *control_create_proc(mem_key_t key, size_t len, pid_t pid,
 		th->tid = s->tid;
 		th->park_efd = fds[i];
 		th->p = p;
-		th->parked = true;
-		th->waking = false;
+		th->state = THREAD_STATE_IDLE;
 		th->reaffinitize = true;
 		th->at_idx = -1;
 		th->ts_idx = -1;

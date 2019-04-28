@@ -37,10 +37,18 @@
 
 struct proc;
 
+enum {
+	/* the thread is actively running on a core */
+	THREAD_STATE_RUNNING,
+	/* the thread is parked (not running on a core) */
+	THREAD_STATE_PARKED,
+	/* the thread is parked and all of its work has been stolen */
+	THREAD_STATE_IDLE,
+};
+
 struct thread {
 	struct proc		*p;
-	unsigned int		parked:1;
-	unsigned int		waking:1;
+	unsigned int		state;
 	unsigned int		reaffinitize:1;
 	struct lrpc_chan_out	rxq;
 	struct lrpc_chan_in	txpktq;
@@ -90,11 +98,6 @@ struct proc {
 
 	/* network data */
 	struct eth_addr		mac;
-
-	/* next pending timer, only valid if pending_timer is true */
-	bool			pending_timer;
-	uint64_t		deadline_us;
-	unsigned int		timer_idx;
 
 	/* Unique identifier -- never recycled across runtimes*/
 	uintptr_t		uniqid;

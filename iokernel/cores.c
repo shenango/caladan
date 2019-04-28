@@ -229,7 +229,7 @@ static inline void thread_reserve(struct thread *th, unsigned int core)
 	struct proc *p = th->p;
 	unsigned int kthread = th - p->threads;
 
-	assert(th->parked == true);
+	assert(th->state >= THREAD_STATE_PARKED);
 
 	bitmap_clear(p->available_threads, kthread);
 	if (unlikely(core != th->core))
@@ -245,8 +245,7 @@ static inline void thread_reserve(struct thread *th, unsigned int core)
 	proc_clear_overloaded(p);
 
 	/* add the thread to the polling array */
-	th->parked = false;
-	th->waking = true;
+	th->state = THREAD_STATE_RUNNING;
 	poll_thread(th);
 }
 
@@ -260,7 +259,7 @@ static inline void thread_cede(struct thread *th)
 	struct proc *p = th->p;
 	unsigned int kthread = th - p->threads;
 
-	assert(!th->parked);
+	assert(th->state == THREAD_STATE_RUNNING);
 
 	bitmap_set(p->available_threads, kthread);
 	p->active_threads[th->at_idx] = p->active_threads[--p->active_thread_count];
@@ -271,7 +270,7 @@ static inline void thread_cede(struct thread *th)
 		proc_clear_bursting(p);
 
 	/* remove the thread from the polling array (if queues are empty) */
-	th->parked = true;
+	th->state = THREAD_STATE_PARKED;
 	if (lrpc_empty(&th->txpktq))
 		unpoll_thread(th);
 }
@@ -335,12 +334,12 @@ static struct thread *pick_thread_for_proc(struct proc *p, int core)
 
 	/* try to reuse the same kthread on this core */
 	lastth = core_history[core].current;
-	if (lastth && lastth->p == p && lastth->parked)
+	if (lastth && lastth->p == p && lastth->state != THREAD_STATE_RUNNING)
 		return lastth;
 
 	/* try to reuse the previous kthread on this core */
 	lastth = core_history[core].prev;
-	if (lastth && lastth->p == p && lastth->parked)
+	if (lastth && lastth->p == p && lastth->state != THREAD_STATE_RUNNING)
 		return lastth;
 
 	/* return the least recently parked kthread */
@@ -483,7 +482,7 @@ static void wake_kthread_on_core(struct thread *th, int core)
 
 	/* mark core and kthread as reserved */
 	core_reserve(core, th);
-	if (th->parked)
+	if (th->state != THREAD_STATE_RUNNING)
 		thread_reserve(th, core);
 
 	/* assign the kthread to its core */
@@ -576,9 +575,6 @@ struct thread *cores_add_core(struct proc *p)
 	/* can't add cores if we're already using all available kthreads */
 	if (p->active_thread_count == p->thread_count)
 		return NULL;
-
-	/* Cancel pending timers */
-	p->pending_timer = false;
 
 	/* pick a core to add and a thread to run on it */
 	core = pick_core_for_proc(p);
@@ -691,8 +687,12 @@ static bool cores_is_proc_congested(struct proc *p)
 	bool congested = false;
 	int i;
 
-	for (i = 0; i < p->active_thread_count; i++) {
-		th = p->active_threads[i];
+	for (i = 0; i < p->thread_count; i++) {
+		th = &p->threads[i];
+
+		/* all the work has been stolen from this thread, so skip */
+		if (th->state == THREAD_STATE_IDLE)
+			continue;
 
 		/* update the queue positions */
 		rq_tail = load_acquire(&th->q_ptrs->rq_tail);
@@ -702,15 +702,17 @@ static bool cores_is_proc_congested(struct proc *p)
 		th->last_rq_head = ACCESS_ONCE(th->q_ptrs->rq_head);
 		th->last_rxq_head = ACCESS_ONCE(th->rxq.send_head);
 
+		/* check if the thread is parked and has become idle */
+		if (th->state == THREAD_STATE_PARKED &&
+		    th->last_rq_head == rq_tail &&
+		    th->last_rxq_head == rxq_tail) {
+			th->state = THREAD_STATE_IDLE;
+			continue;
+		}
+
 		/* if one prior queue was congested, no need to find more */
 		if (congested)
 			continue;
-
-		/* if the thread just woke up, give it a pass this round */
-		if (th->waking) {
-			th->waking = false;
-			continue;
-		}
 
 		/* check if the runqueue is congested */
 		if (wraps_lt(rq_tail, last_rq_head)) {
@@ -747,9 +749,6 @@ static bool cores_is_proc_congested(struct proc *p)
 		p->nvmeq[i].last_pending = currently_queued;
 	}
 #endif
-
-	if (p->pending_timer && microtime() >= p->deadline_us)
-		congested = true;
 
 	return congested;
 }

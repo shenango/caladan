@@ -33,7 +33,7 @@
 #define RUNTIME_SOFTIRQ_BUDGET		16
 #define RUNTIME_MAX_TIMERS		4096
 #define RUNTIME_SCHED_POLL_ITERS	4
-#define RUNTIME_SCHED_MIN_POLL_US	2
+#define RUNTIME_SCHED_MIN_POLL_US	4
 #define RUNTIME_WATCHDOG_US		50
 
 
@@ -281,8 +281,7 @@ struct kthread {
 	struct list_head	rq_overflow;
 	struct lrpc_chan_in	rxq;
 	int			park_efd;
-	unsigned int		parked:1;
-	unsigned int		detached:1;
+	bool			parked;
 
 	/* 2nd cache-line */
 	struct q_ptrs		*q_ptrs;
@@ -290,7 +289,7 @@ struct kthread {
 	struct mbufq		txcmdq_overflow;
 	unsigned int		rcu_gen;
 	unsigned int		curr_cpu;
-	uint64_t		park_us;
+	bool			detached;
 	unsigned long		pad1[1];
 
 	/* 3rd cache-line */
@@ -360,9 +359,7 @@ extern unsigned int spinks;
 extern unsigned int guaranteedks;
 extern unsigned int nrks;
 extern struct kthread *ks[NCPU];
-extern struct kthread *allks[NCPU];
 
-extern void kthread_detach(struct kthread *r);
 extern void kthread_park(bool voluntary);
 extern void kthread_wait_to_attach(void);
 

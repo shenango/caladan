@@ -115,7 +115,7 @@ bool tx_send_completion(void *obj)
 
 	/* send completion to runtime */
 	th = priv_data->th;
-	if (!th->parked) {
+	if (th->state == THREAD_STATE_RUNNING) {
 		if (likely(lrpc_send(&th->rxq, RX_NET_COMPLETE,
 			       priv_data->completion_data))) {
 			goto success;
@@ -187,7 +187,7 @@ static int tx_drain_queue(struct thread *t, int n,
 		unsigned long payload;
 
 		if (!lrpc_recv(&t->txpktq, &cmd, &payload)) {
-			if (unlikely(t->parked))
+			if (unlikely(t->state != THREAD_STATE_RUNNING))
 				unpoll_thread(t);
 			break;
 		}

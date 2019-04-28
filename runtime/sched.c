@@ -155,14 +155,10 @@ static bool steal_work(struct kthread *l, struct kthread *r)
 	assert_spin_lock_held(&l->lock);
 	assert(l->rq_head == 0 && l->rq_tail == 0);
 
+	if (ACCESS_ONCE(r->detached) && lrpc_empty(&r->rxq))
+		return false;
 	if (!spin_try_lock(&r->lock))
 		return false;
-
-	/* harmless race condition */
-	if (unlikely(r->detached)) {
-		spin_unlock(&r->lock);
-		return false;
-	}
 
 	/* try to steal directly from the runqueue */
 	avail = load_acquire(&r->rq_head) - r->rq_tail;
@@ -198,13 +194,12 @@ static bool steal_work(struct kthread *l, struct kthread *r)
 	}
 
 done:
-	/* either enqueue the stolen work or detach the kthread */
 	if (th) {
 		l->rq[l->rq_head++] = th;
 		ACCESS_ONCE(l->q_ptrs->rq_head)++;
 		STAT(THREADS_STOLEN)++;
-	} else if (r->parked) {
-		kthread_detach(r);
+	} else if (r->timern == 0) {
+		r->detached = true;
 	}
 
 	spin_unlock(&r->lock);
@@ -239,7 +234,6 @@ static __noreturn __noinline void schedule(void)
 
 	assert_spin_lock_held(&l->lock);
 	assert(l->parked == false);
-	assert(l->detached == false);
 
 	/* unmark busy for the stack of the last uthread */
 	if (__self != NULL) {
@@ -349,55 +343,6 @@ done:
 
 	/* and jump into the next thread */
 	jmp_thread(th);
-}
-
-/**
- * join_kthread - detaches a kthread immediately (rather than through stealing)
- * @k: the kthread to detach
- *
- * Can and must be called from thread context.
- */
-void join_kthread(struct kthread *k)
-{
-	thread_t *waketh;
-	struct list_head tmp;
-
-	//log_info_ratelimited("join_kthread() %p", k);
-
-	list_head_init(&tmp);
-
-	/* if the lock can't be acquired, the kthread is unparking */
-	if (!spin_try_lock_np(&k->lock))
-		return;
-
-	/* harmless race conditions */
-	if (k->detached || !k->parked || k == myk()) {
-		spin_unlock_np(&k->lock);
-		return;
-	}
-
-	/* drain the runqueue */
-	for (; k->rq_tail < k->rq_head; k->rq_tail++) {
-		list_add_tail(&tmp, &k->rq[k->rq_tail % RUNTIME_RQ_SIZE]->link);
-		ACCESS_ONCE(k->q_ptrs->rq_tail)++;
-	}
-	k->rq_head = k->rq_tail = 0;
-
-	/* drain the overflow runqueue */
-	list_append_list(&tmp, &k->rq_overflow);
-
-	/* detach the kthread */
-	kthread_detach(k);
-	spin_unlock_np(&k->lock);
-
-	/* re-wake all the runnable threads belonging to the detached kthread */
-	while (true) {
-		waketh = list_pop(&tmp, thread_t, link);
-		if (!waketh)
-			break;
-		waketh->state = THREAD_STATE_SLEEPING;
-		thread_ready(waketh);
-	}
 }
 
 static __always_inline void enter_schedule(thread_t *myth)
@@ -539,13 +484,21 @@ static void thread_finish_cede(void)
 
 	STAT(PROGRAM_CYCLES) += rdtsc() - last_tsc;
 
+	/* increment the RCU generation number (even - pretend in sched) */
 	store_release(&k->rcu_gen, k->rcu_gen + 1);
-	spin_lock(&k->lock);
-	clear_preempt_needed();
+	assert((k->rcu_gen & 0x1) == 0x0);
+
+	/* cede this kthread to the iokernel */
 	kthread_park(false);
 	last_tsc = rdtsc();
-	store_release(&k->rcu_gen, k->rcu_gen + 1);
 
+	/* increment the RCU generation number (odd - back in thread) */
+	store_release(&k->rcu_gen, k->rcu_gen + 1);
+	assert((k->rcu_gen & 0x1) == 0x1);
+
+	/* re-enter the scheduler */
+	spin_lock(&k->lock);
+	k->detached = false;
 	schedule();
 }
 
@@ -718,6 +671,7 @@ static __noreturn void schedule_start(void)
 	store_release(&k->rcu_gen, 1);
 
 	spin_lock(&k->lock);
+	k->detached = false;
 	schedule();
 }
 

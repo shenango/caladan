@@ -60,9 +60,9 @@ static ssize_t stat_write_buf(char *buf, size_t len)
 	memset(stats, 0, sizeof(stats));
 
 	/* gather stats from each kthread */
-	for (i = 0; i < maxks; i++) {
+	for (i = 0; i < nrks; i++) {
 		for (j = 0; j < STAT_NR; j++)
-			stats[j] += allks[i]->stats[j];
+			stats[j] += ks[i]->stats[j];
 	}
 
 	/* write out the stats to the buffer */

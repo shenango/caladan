@@ -10,11 +10,10 @@
 #include "net/defs.h"
 
 struct softirq_work {
-	unsigned int recv_cnt, compl_cnt, join_cnt, timer_budget, storage_cnt;
+	unsigned int recv_cnt, compl_cnt, timer_budget, storage_cnt;
 	struct kthread *k;
 	struct rx_net_hdr *recv_reqs[SOFTIRQ_MAX_BUDGET];
 	struct mbuf *compl_reqs[SOFTIRQ_MAX_BUDGET];
-	struct kthread *join_reqs[SOFTIRQ_MAX_BUDGET];
 	struct thread *storage_threads[SOFTIRQ_MAX_BUDGET];
 };
 
@@ -34,19 +33,14 @@ static void softirq_fn(void *arg)
 	if (timer_needed(w->k))
 		timer_softirq(w->k, w->timer_budget);
 
-	/* join parked kthreads */
-	for (i = 0; i < w->join_cnt; i++)
-		join_kthread(w->join_reqs[i]);
-
 	for (i = 0; i < w->storage_cnt; i++)
 		thread_ready(w->storage_threads[i]);
-
 }
 
 static void softirq_gather_work(struct softirq_work *w, struct kthread *k,
 				unsigned int budget)
 {
-	unsigned int recv_cnt = 0, compl_cnt = 0, join_cnt = 0;
+	unsigned int recv_cnt = 0, compl_cnt = 0;
 	int budget_left;
 
 	budget_left = min(budget, SOFTIRQ_MAX_BUDGET);
@@ -70,10 +64,6 @@ static void softirq_gather_work(struct softirq_work *w, struct kthread *k,
 			w->compl_reqs[compl_cnt++] = (struct mbuf *)payload;
 			break;
 
-		case RX_JOIN:
-			w->join_reqs[join_cnt++] = (struct kthread *)payload;
-			break;
-
 		default:
 			log_err_ratelimited("net: invalid RXQ cmd '%ld'", cmd);
 		}
@@ -89,7 +79,6 @@ static void softirq_gather_work(struct softirq_work *w, struct kthread *k,
 	w->k = k;
 	w->recv_cnt = recv_cnt;
 	w->compl_cnt = compl_cnt;
-	w->join_cnt = join_cnt;
 	w->timer_budget = budget_left;
 }
 

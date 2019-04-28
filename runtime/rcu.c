@@ -57,16 +57,16 @@ static void rcu_worker(void *arg)
 		spin_unlock_np(&rcu_lock);
 
 		/* read the RCU generation counters */
-		for (i = 0; i < maxks; i++)
-			last_rcu_gen[i] = load_acquire(&allks[i]->rcu_gen);
+		for (i = 0; i < nrks; i++)
+			last_rcu_gen[i] = load_acquire(&ks[i]->rcu_gen);
 
 		while (true) {
 			/* wait for RCU generation counters to increase */
 			timer_sleep(RCU_SLEEP_PERIOD);
 
 			/* read the RCU generation counters again */
-			for (i = 0; i < maxks; i++) {
-				gen = load_acquire(&allks[i]->rcu_gen);
+			for (i = 0; i < nrks; i++) {
+				gen = load_acquire(&ks[i]->rcu_gen);
 				if ((gen & 0x1) == 0x1 &&
 				    gen == last_rcu_gen[i]) {
 					break;
