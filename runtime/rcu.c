@@ -31,7 +31,6 @@
 static DEFINE_SPINLOCK(rcu_lock);
 /* The head of the list of objects waiting to be freed */
 static struct rcu_head *rcu_head;
-static bool rcu_worker_launched;
 
 #ifdef DEBUG
 __thread int rcu_read_count;
@@ -96,19 +95,12 @@ static void rcu_worker(void *arg)
  */
 void rcu_free(struct rcu_head *head, rcu_callback_t func)
 {
-	bool launch_worker = false;
-
 	head->func = func;
 
 	spin_lock_np(&rcu_lock);
-	if (unlikely(!rcu_worker_launched))
-		launch_worker = rcu_worker_launched = true;
 	head->next = rcu_head;
 	rcu_head = head;
 	spin_unlock_np(&rcu_lock);
-
-	if (unlikely(launch_worker))
-		BUG_ON(thread_spawn(rcu_worker, NULL));
 }
 
 struct sync_arg {
@@ -129,21 +121,15 @@ static void synchronize_rcu_finish(struct rcu_head *head)
  */
 void synchronize_rcu(void)
 {
-	bool launch_worker = false;
 	struct sync_arg tmp;
 
 	tmp.rcu.func = synchronize_rcu_finish;
 	tmp.th = thread_self();
 
 	spin_lock_np(&rcu_lock);
-	if (unlikely(!rcu_worker_launched))
-		launch_worker = rcu_worker_launched = true;
 	tmp.rcu.next = rcu_head;
 	rcu_head = &tmp.rcu;
 	thread_park_and_unlock_np(&rcu_lock);
-
-	if (unlikely(launch_worker))
-		BUG_ON(thread_spawn(rcu_worker, NULL));
 }
 
 /**
@@ -153,5 +139,5 @@ void synchronize_rcu(void)
  */
 int rcu_init_late(void)
 {
-	return 0;
+	return thread_spawn(rcu_worker, NULL);
 }

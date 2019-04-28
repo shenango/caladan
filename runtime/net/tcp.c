@@ -277,16 +277,9 @@ int tcp_conn_attach(tcpconn_t *c, struct netaddr laddr, struct netaddr raddr)
 	if (ret)
 		return ret;
 
-	static bool worker_running;
-	bool start_worker = false;
 	spin_lock_np(&tcp_lock);
-	if (unlikely(!worker_running))
-		worker_running = start_worker = true;
 	list_add_tail(&tcp_conns, &c->global_link);
 	spin_unlock_np(&tcp_lock);
-
-	if (start_worker)
-		BUG_ON(thread_spawn(tcp_worker, NULL));
 
 	c->attach_ts = microtime();
 
@@ -1137,5 +1130,5 @@ void tcp_close(tcpconn_t *c)
  */
 int tcp_init_late(void)
 {
-	return 0;
+	return thread_spawn(tcp_worker, NULL);
 }

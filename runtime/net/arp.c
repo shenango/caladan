@@ -51,8 +51,6 @@ struct arp_entry {
 static DEFINE_SPINLOCK(arp_lock);
 static struct rcu_hlist_head arp_tbl[ARP_TABLE_CAPACITY];
 
-static void arp_worker(void *arg);
-
 static inline int hash_ip(uint32_t ip)
 {
 	return hash_crc32c_one(ARP_SEED, ip) % ARP_TABLE_CAPACITY;
@@ -94,14 +92,7 @@ static void delete_entry(struct arp_entry *e)
 
 static void insert_entry(struct arp_entry *e, int idx)
 {
-	static bool worker_running;
-
 	rcu_hlist_add_head(&arp_tbl[idx], &e->link);
-
-	if (unlikely(!worker_running && e->state != ARP_STATE_STATIC)) {
-		worker_running = true;
-		BUG_ON(thread_spawn(arp_worker, NULL));
-	}
 
 }
 
@@ -394,5 +385,5 @@ int arp_init_late(void)
 
 	spin_unlock_np(&arp_lock);
 
-	return 0;
+	return thread_spawn(arp_worker, NULL);
 }
