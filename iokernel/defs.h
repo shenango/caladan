@@ -86,6 +86,9 @@ struct proc {
 	/* scheduler data */
 	struct sched_spec	sched_cfg;
 
+	/* the flow steering table */
+	unsigned int		flow_tbl[NCPU];
+
 	/* runtime threads */
 	unsigned int		thread_count;
 	unsigned int		active_thread_count;

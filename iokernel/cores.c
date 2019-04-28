@@ -220,6 +220,47 @@ static inline struct proc *get_bursting_proc()
 }
 
 /**
+ * steer_flows - redirects flows to active kthreads
+ * @p: the proc for which to reallocate flows
+ *
+ * This main goal of this function is to ensure a subset of the flow space is
+ * consistently allocated to the same kthreads, so that port hacking can be used
+ * to maintain egress cache affinity.
+ *
+ * For ingress affinity, the benefits of smarter algorithms appear to be
+ * insignificant because, in general, cores tend to be reallocated slowly enough
+ * (~ every 100us is acceptable) for the overhead of changes in flow mappings to
+ * be amortized. Therefore, our goal for the rest of the flow space is merely to
+ * ensure it is distributed evenly.
+ */
+static void steer_flows(struct proc *p)
+{
+	struct thread *th;
+	int i, j = 0;
+
+	/* don't do anything if zero threads are active */
+	if (p->active_thread_count == 0)
+		return;
+
+	/* clear the flow table */
+	memset(p->flow_tbl, 0xFF, sizeof(p->flow_tbl));
+
+	/* first assign the identity rxq to each active thread */
+	for (i = 0; i < p->active_thread_count; i++) {
+		ptrdiff_t idx = p->active_threads[i] - p->threads;
+		p->flow_tbl[idx] = idx;
+	}
+
+	/* then assign the rest round-robin */
+	for (i = 0; i < p->thread_count; i++) {
+		if (p->flow_tbl[i] != UINT_MAX)
+			continue;
+		th = p->active_threads[j++ % p->active_thread_count];
+		p->flow_tbl[i] = th - p->threads;
+	}
+}
+
+/**
  * thread_reserve - record that thread th will now run on core.
  * @th: the thread to reserve
  * @core: the core this kthread will run on
@@ -246,6 +287,7 @@ static inline void thread_reserve(struct thread *th, unsigned int core)
 
 	/* add the thread to the polling array */
 	th->state = THREAD_STATE_RUNNING;
+	steer_flows(p);
 	poll_thread(th);
 }
 
@@ -271,6 +313,7 @@ static inline void thread_cede(struct thread *th)
 
 	/* remove the thread from the polling array (if queues are empty) */
 	th->state = THREAD_STATE_PARKED;
+	steer_flows(p);
 	if (lrpc_empty(&th->txpktq))
 		unpoll_thread(th);
 }
