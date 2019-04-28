@@ -16,21 +16,24 @@ extern int storage_num_blocks();
 
 #else
 
-int storage_write(const void *payload,
+static inline int storage_write(const void *payload,
 		uint64_t lba, uint32_t lba_count)
 {
 	return -1;
 }
-int storage_read(void *dest,
+
+static inline int storage_read(void *dest,
 		uint64_t lba, uint32_t lba_count)
 {
 	return -1;
 }
-int storage_block_size()
+
+static inline int storage_block_size()
 {
 	return -1;
 }
-int storage_num_blocks()
+
+static inline int storage_num_blocks()
 {
 	return -1;
 }
