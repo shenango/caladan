@@ -122,7 +122,8 @@ int storage_init_thread(void)
 		uint16_t cq_head;
 		uint8_t pad2[2];
 		uint8_t phase;
-		uint8_t pad3[157];
+		bool  is_enabled;
+		void *qpair;
 	}* qpair;
 	void *qpair_addr;
 	uint32_t max_xfer_size, entries, depth;
@@ -156,7 +157,7 @@ int storage_init_thread(void)
 	putk();
 
 
-	qpair = (struct nvme_pcie_qpair*)qpair_addr;
+	qpair = container_of((void **)qpair_addr, typeof(*qpair), qpair);
 	r.base = (void *)SPDK_BASE_ADDR;
 	r.len = SPDK_BASE_ADDR_OFFSET;
 	spin_lock(&qlock);
