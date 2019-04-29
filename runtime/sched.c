@@ -149,6 +149,7 @@ static void drain_overflow(struct kthread *l)
 
 static bool steal_work(struct kthread *l, struct kthread *r)
 {
+	bool parked;
 	thread_t *th;
 	uint32_t i, avail, rq_tail;
 
@@ -159,6 +160,8 @@ static bool steal_work(struct kthread *l, struct kthread *r)
 		return false;
 	if (!spin_try_lock(&r->lock))
 		return false;
+
+	parked = load_acquire(&r->parked);
 
 	/* try to steal directly from the runqueue */
 	avail = load_acquire(&r->rq_head) - r->rq_tail;
@@ -198,7 +201,8 @@ done:
 		l->rq[l->rq_head++] = th;
 		ACCESS_ONCE(l->q_ptrs->rq_head)++;
 		STAT(THREADS_STOLEN)++;
-	} else if (r->timern == 0) {
+	} else if (parked && r->timern == 0) {
+		/* safely race with preemption by checking parked flag BEFORE polling the runqueues */
 		r->detached = true;
 	}
 
@@ -234,6 +238,7 @@ static __noreturn __noinline void schedule(void)
 
 	assert_spin_lock_held(&l->lock);
 	assert(l->parked == false);
+	assert(l->detached == false);
 
 	/* unmark busy for the stack of the last uthread */
 	if (__self != NULL) {

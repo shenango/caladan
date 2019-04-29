@@ -127,7 +127,7 @@ void kthread_park(bool voluntary)
 		return;
 	}
 
-	k->parked = true;
+	store_release(&k->parked, true);
 	STAT(PARKS)++;
 
 	/* signal to iokernel that we're about to park */
@@ -138,7 +138,7 @@ void kthread_park(bool voluntary)
 
 	/* iokernel has unparked us */
 
-	k->parked = false;
+	store_release(&k->parked, false);
 	atomic_inc(&runningks);
 }
 
