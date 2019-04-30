@@ -33,8 +33,10 @@ static void softirq_fn(void *arg)
 	if (timer_needed(w->k))
 		timer_softirq(w->k, w->timer_budget);
 
+#if __has_include("spdk/nvme.h")
 	for (i = 0; i < w->storage_cnt; i++)
 		thread_ready(w->storage_threads[i]);
+#endif
 }
 
 static void softirq_gather_work(struct softirq_work *w, struct kthread *k,
