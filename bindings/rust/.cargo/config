@@ -1,2 +1,2 @@
 [build]
-rustflags = ["-C", "link-arg=-T../../../../../base/base.ld", "-C", "link-arg=-no-pie"]
+rustflags = ["-C", "link-arg=-T../../../../../base/base.ld"]

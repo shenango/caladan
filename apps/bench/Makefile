@@ -5,7 +5,7 @@ CXXPATH = ../../bindings/cc
 SPDK_PATH = $(BASEPATH)/spdk
 INC     = -I../../inc -I../../bindings/cc -I$(SPDK_PATH)/include
 CXXFLAGS  = -g -Wall -std=gnu++11 -D_GNU_SOURCE $(INC) -mssse3
-LDFLAGS = -T../../base/base.ld -no-pie
+LDFLAGS = -T../../base/base.ld
 
 LD	= g++
 CC	= g++
