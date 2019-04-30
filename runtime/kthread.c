@@ -116,7 +116,6 @@ void kthread_park(bool voluntary)
 	struct kthread *k = myk();
 
 	assert_preempt_disabled();
-	assert(k->parked == false);
 
 	/* atomically verify we have at least @spinks kthreads running */
 	if (voluntary && atomic_read(&runningks) <= spinks)
@@ -127,18 +126,16 @@ void kthread_park(bool voluntary)
 		return;
 	}
 
-	store_release(&k->parked, true);
 	STAT(PARKS)++;
 
 	/* signal to iokernel that we're about to park */
 	while (!lrpc_send(&k->txcmdq, TXCMD_PARKED, 0))
 		cpu_relax();
 
+	/* perform the actual parking */
 	kthread_yield_to_iokernel();
 
 	/* iokernel has unparked us */
-
-	store_release(&k->parked, false);
 	atomic_inc(&runningks);
 }
 

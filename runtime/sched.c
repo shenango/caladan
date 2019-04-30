@@ -149,7 +149,6 @@ static void drain_overflow(struct kthread *l)
 
 static bool steal_work(struct kthread *l, struct kthread *r)
 {
-	bool parked;
 	thread_t *th;
 	uint32_t i, avail, rq_tail;
 
@@ -160,8 +159,6 @@ static bool steal_work(struct kthread *l, struct kthread *r)
 		return false;
 	if (!spin_try_lock(&r->lock))
 		return false;
-
-	parked = load_acquire(&r->parked);
 
 	/* try to steal directly from the runqueue */
 	avail = load_acquire(&r->rq_head) - r->rq_tail;
@@ -201,8 +198,7 @@ done:
 		l->rq[l->rq_head++] = th;
 		ACCESS_ONCE(l->q_ptrs->rq_head)++;
 		STAT(THREADS_STOLEN)++;
-	} else if (parked && r->timern == 0) {
-		/* safely race with preemption by checking parked flag BEFORE polling the runqueues */
+	} else if (r->parked && r->timern == 0) {
 		r->detached = true;
 	}
 
@@ -311,12 +307,18 @@ again:
 	     rdtsc() - start_tsc < cycles_per_us * RUNTIME_SCHED_MIN_POLL_US))
 		goto again;
 
+	l->parked = true;
+	spin_unlock(&l->lock);
+
 	/* did not find anything to run, park this kthread */
 	STAT(SCHED_CYCLES) += rdtsc() - start_tsc;
 	/* we may have got a preempt signal before voluntarily yielding */
 	kthread_park(!preempt_needed());
 	start_tsc = rdtsc();
 
+	spin_lock(&l->lock);
+	l->parked = false;
+	l->detached = false;
 	goto again;
 
 done:
@@ -494,6 +496,7 @@ static void thread_finish_cede(void)
 	assert((k->rcu_gen & 0x1) == 0x0);
 
 	/* cede this kthread to the iokernel */
+	ACCESS_ONCE(k->parked) = true; /* deliberately racy */
 	kthread_park(false);
 	last_tsc = rdtsc();
 
@@ -503,6 +506,7 @@ static void thread_finish_cede(void)
 
 	/* re-enter the scheduler */
 	spin_lock(&k->lock);
+	k->parked = false;
 	k->detached = false;
 	schedule();
 }
