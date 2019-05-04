@@ -3,9 +3,6 @@
  */
 
 #include <sched.h>
-#include <signal.h>
-#include <stdlib.h>
-#include <string.h>
 
 #include <base/stddef.h>
 #include <base/lock.h>
@@ -308,6 +305,7 @@ again:
 		goto again;
 
 	l->parked = true;
+	l->detached = l->timern == 0;
 	spin_unlock(&l->lock);
 
 	/* did not find anything to run, park this kthread */
