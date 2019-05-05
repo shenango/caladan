@@ -78,6 +78,7 @@ struct proc {
 	unsigned int		overloaded:1; /* the proc needs more cores */
 	unsigned int		bursting:1;   /* the proc is using past resv. */
 	unsigned int		launched:1;   /* executing the first time */
+	int			*congestion_signal;
 
 	/* intrusive list links */
 	struct list_node	overloaded_link;

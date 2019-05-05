@@ -18,6 +18,7 @@
 #include <base/thread.h>
 
 #include <iokernel/shm.h>
+#include <runtime/thread.h>
 
 #include <net/ethernet.h>
 #include <net/mbuf.h>
@@ -62,6 +63,9 @@ static size_t calculate_shm_space(unsigned int thread_count)
 	ret += sizeof(struct control_hdr);
 	ret += sizeof(struct thread_spec) * thread_count;
 	ret = align_up(ret, CACHE_LINE_SIZE);
+
+	// Compute congestion signal line
+	ret += CACHE_LINE_SIZE;
 
 	// RX queues (wb is not included)
 	q = sizeof(struct lrpc_msg) * PACKET_QUEUE_MCOUNT;
@@ -158,12 +162,15 @@ static int ioqueues_shm_setup(unsigned int threads)
 	}
 	ingress_region->len = INGRESS_MBUF_SHM_SIZE;
 
-	/* set up queues in shared memory */
+	/* set up control header */
 	iok.thread_count = threads;
 	ptr = r->base;
-	ptr += sizeof(struct control_hdr) + sizeof(struct thread_spec) * threads;
+	ptr += sizeof(struct control_hdr);
 	ptr = (char *)align_up((uintptr_t)ptr, CACHE_LINE_SIZE);
+	congestion_signal = (int *)ptr;
+	ptr += CACHE_LINE_SIZE + sizeof(struct thread_spec) * threads;
 
+	/* set up queues in shared memory */
 	for (i = 0; i < threads; i++) {
 		struct thread_spec *tspec = &iok.threads[i];
 		ioqueue_alloc(r, &tspec->rxq, &ptr, PACKET_QUEUE_MCOUNT, false);
@@ -242,6 +249,8 @@ int ioqueues_register_iokernel(void)
 	hdr->egress_buf_count = EGRESS_POOL_SIZE(iok.thread_count) / MBUF_DEFAULT_LEN;
 	hdr->thread_count = iok.thread_count;
 	hdr->mac = netcfg.mac;
+	hdr->congestion_signal = ptr_to_shmptr(r, congestion_signal,
+					       sizeof(int));
 
 	hdr->sched_cfg.priority = SCHED_PRIORITY_NORMAL;
 	hdr->sched_cfg.max_cores = iok.thread_count;

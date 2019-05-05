@@ -49,3 +49,14 @@ extern int runtime_set_initializers(initializer_fn_t global_fn,
 				    initializer_fn_t perthread_fn,
 				    initializer_fn_t late_fn);
 extern int runtime_init(const char *cfgpath, thread_fn_t main_fn, void *arg);
+
+
+extern int *congestion_signal;
+
+/**
+ * runtime_is_congested - returns true if experiencing compute congestion
+ */
+static inline bool runtime_is_congested(void)
+{
+	return ACCESS_ONCE(congestion_signal) > 0;
+}

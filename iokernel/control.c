@@ -143,6 +143,11 @@ static struct proc *control_create_proc(mem_key_t key, size_t len, pid_t pid,
 		goto fail_free_proc;
 	p->mac = hdr.mac;
 	p->uniqid = rdtsc();
+	p->congestion_signal =
+		(int *)shmptr_to_ptr(&reg, hdr.congestion_signal, sizeof(int));
+	if (!p->congestion_signal)
+		goto fail_free_proc;
+	*p->congestion_signal = false;
 
 #if __has_include("spdk/nvme.h")
 	if (map_spdk_hugepages(&spdk_reg, hdr.spdk_shm_id))

@@ -27,6 +27,9 @@ static __thread void *runtime_stack_base;
 /* Flag to prevent watchdog from running */
 bool disable_watchdog;
 
+/* the compute congestion signal (shared with the iokernel) */
+int *congestion_signal;
+
 /* fast allocation of struct thread */
 static struct slab thread_slab;
 static struct tcache *thread_tcache;

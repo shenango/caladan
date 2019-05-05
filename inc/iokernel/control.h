@@ -15,9 +15,9 @@
 
 /* describes a queue */
 struct q_ptrs {
-	uint32_t rxq_wb; /* must be first */
-	uint32_t rq_head;
-	uint32_t rq_tail;
+	uint32_t		rxq_wb; /* must be first */
+	uint32_t		rq_head;
+	uint32_t		rq_tail;
 };
 
 /* describes a runtime kernel thread */
@@ -55,6 +55,7 @@ struct control_hdr {
 	unsigned int		magic;
 	unsigned int		thread_count;
 	unsigned long		egress_buf_count;
+	shmptr_t		congestion_signal;
 	int			spdk_shm_id;
 	struct eth_addr		mac;
 	struct sched_spec	sched_cfg;
