@@ -144,6 +144,11 @@ static void drain_overflow(struct kthread *l)
 	}
 }
 
+static bool inline kthread_detachable(struct kthread *k)
+{
+	return k->timern == 0 && k->outstanding_reqs == 0;
+}
+
 static bool steal_work(struct kthread *l, struct kthread *r)
 {
 	thread_t *th;
@@ -195,7 +200,7 @@ done:
 		l->rq[l->rq_head++] = th;
 		ACCESS_ONCE(l->q_ptrs->rq_head)++;
 		STAT(THREADS_STOLEN)++;
-	} else if (r->parked && r->timern == 0) {
+	} else if (r->parked && kthread_detachable(r)) {
 		r->detached = true;
 	}
 
@@ -305,7 +310,7 @@ again:
 		goto again;
 
 	l->parked = true;
-	l->detached = l->timern == 0;
+	l->detached = kthread_detachable(l);
 	spin_unlock(&l->lock);
 
 	/* did not find anything to run, park this kthread */

@@ -186,6 +186,7 @@ int storage_proc_completions(struct kthread *k,
 		return 0;
 	}
 	spdk_nvme_qpair_process_completions(k->nvme_io_pair, budget);
+	k->outstanding_reqs -= nrcb_ths;
 	spin_unlock(&k->io_pair_lock);
 	return nrcb_ths;
 }
@@ -232,6 +233,7 @@ int storage_write(const void* payload, int lba, int lba_count)
 		putk();
 		return -EIO;
 	}
+	k->outstanding_reqs++;
 	thread_park_and_unlock_np(&k->io_pair_lock);
 	preempt_disable();
 	spdk_free(spdk_payload);
@@ -270,6 +272,7 @@ int storage_read(void* dest, int lba, int lba_count)
 		putk();
 		return -EIO;
 	}
+	k->outstanding_reqs++;
 	thread_park_and_unlock_np(&k->io_pair_lock);
 	memcpy(dest, spdk_dest, lba_count * block_size);
 	preempt_disable();

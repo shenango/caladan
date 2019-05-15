@@ -308,7 +308,8 @@ struct kthread {
 	/* 9th cache-line, storage nvme queues */
 	void		*nvme_io_pair;
 	spinlock_t		io_pair_lock;
-	unsigned long		pad3[6];
+	unsigned long		outstanding_reqs;
+	unsigned long		pad3[5];
 
 	/* 10th cache-line, statistics counters */
 	uint64_t		stats[STAT_NR];
