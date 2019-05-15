@@ -14,7 +14,11 @@
 #include <linux/sched/task.h>
 #include <linux/sched.h>
 #include <linux/uaccess.h>
+#include <linux/capability.h>
+#include <linux/cpuidle.h>
+#include <asm/local.h>
 #include <asm/mwait.h>
+#include <asm/local.h>
 
 #include "ksched.h"
 
@@ -23,21 +27,22 @@ MODULE_LICENSE("GPL");
 /* the character device that provides the ksched IOCTL interface */
 static struct cdev ksched_cdev;
 
-struct ksched_percpu {
-	unsigned long	gen;
-	unsigned long	last_gen;
-	pid_t		prev_pid;
-	pid_t		next_pid;
-} ____cacheline_aligned_in_smp;
+/* shared memory between the IOKernel and the Linux Kernel */
+static __read_mostly struct ksched_shm_cpu *shm;
+#define SHM_SIZE (NR_CPUS * sizeof(struct ksched_shm_cpu))
 
-/* per-cpu data shared between parked cores and the waker core */
+struct ksched_percpu {
+	unsigned int	last_gen;
+	pid_t		tid;
+	local_t		busy;
+};
+
+/* per-cpu data to coordinate context switching and signal delivery */
 static DEFINE_PER_CPU(struct ksched_percpu, kp);
 
 /**
  * ksched_lookup_task - retreives a task from a pid number
  * @nr: the pid number
- *
- * WARNING: must be called inside an RCU read critical section.
  *
  * Returns a task pointer or NULL if none was found.
  */
@@ -72,15 +77,78 @@ static int ksched_wakeup_pid(int cpu, pid_t pid)
 	return 0;
 }
 
+static int ksched_mwait_on_addr(const unsigned int *addr, unsigned int val)
+{
+	unsigned int cur;
+
+	lockdep_assert_irqs_disabled();
+
+	/* first see if the condition is met without waiting */
+	cur = smp_load_acquire(addr);
+	if (cur != val)
+		return cur;
+
+	/* then arm the monitor address and recheck to avoid a race */
+	__monitor(addr, 0, 0);
+	cur = smp_load_acquire(addr);
+	if (cur != val)
+		return cur;
+
+	/* finally, execute mwait, and recheck after waking up */
+	__mwait(0, MWAIT_ECX_INTERRUPT_BREAK);
+	return smp_load_acquire(addr);
+}
+
+static int __cpuidle ksched_idle(struct cpuidle_device *dev,
+				 struct cpuidle_driver *drv, int index)
+{
+	struct ksched_percpu *p;
+	struct ksched_shm_cpu *s;
+	unsigned long gen;
+	pid_t tid;
+	int cpu;
+
+	lockdep_assert_irqs_disabled();
+
+	cpu = get_cpu();
+	p = this_cpu_ptr(&kp);
+	s = &shm[cpu];
+
+	local_set(&p->busy, false);
+	WRITE_ONCE(s->busy, false);
+
+	while (true) {
+		/* use the mwait instruction to efficiently poll memory */
+		gen = ksched_mwait_on_addr(&s->gen, p->last_gen);
+		if (gen != p->last_gen) {
+			tid = READ_ONCE(s->tid);
+			WRITE_ONCE(s->tid, 0);
+			p->last_gen = gen;
+			ksched_wakeup_pid(cpu, tid);
+			WRITE_ONCE(s->busy, true);
+			local_set(&p->busy, true);
+			break;
+		}
+		if (need_resched())
+			break;
+	}
+
+	put_cpu();
+
+	return index;
+}
+
 static long ksched_park(void)
 {
 	struct ksched_percpu *p;
+	struct ksched_shm_cpu *s;
 	unsigned long gen;
-	pid_t pid;
+	pid_t tid;
 	int cpu;
 
 	cpu = get_cpu();
 	p = this_cpu_ptr(&kp);
+	s = &shm[cpu];
 
 	local_irq_disable();
 	if (unlikely(signal_pending(current))) {
@@ -88,31 +156,23 @@ static long ksched_park(void)
 		put_cpu();
 		return -ERESTARTSYS;
 	}
+	local_set(&p->busy, false);
+	WRITE_ONCE(s->busy, false);
 
 	while (true) {
-		/* first see if the condition is met without waiting */
-		gen = smp_load_acquire(&p->gen);
-		if (gen != p->last_gen)
-			break;
+		/* use the mwait instruction to efficiently poll memory */
+		gen = ksched_mwait_on_addr(&s->gen, p->last_gen);
 
-		/* then arm the monitor address and recheck to avoid a race */
-		__monitor(&p->gen, 0, 0);
-		gen = smp_load_acquire(&p->gen);
-		if (gen != p->last_gen)
-			break;
-
-		/* finally, execute mwait, and recheck after waking up */
-		__mwait(0, MWAIT_ECX_INTERRUPT_BREAK);
-		gen = smp_load_acquire(&p->gen);
-		if (gen != p->last_gen)
-			break;
-
-		/* we woke up for some reason other than our condition */
+		/* find out why we woke up */
 		local_irq_enable();
 		if (unlikely(signal_pending(current))) {
+			smp_store_release(&s->busy, true);
+			local_set(&p->busy, true);
 			put_cpu();
 			return -ERESTARTSYS;
 		}
+		if (gen != p->last_gen)
+			break;
 		put_cpu();
 
 		/* run another task if needed */
@@ -121,20 +181,24 @@ static long ksched_park(void)
 
 		cpu = get_cpu();
 		p = this_cpu_ptr(&kp);
+		s = &shm[cpu];
 		local_irq_disable();
 	}
 
 	/* the pid was set before the generation number (x86 is TSO) */
-	pid = READ_ONCE(p->next_pid);
+	tid = READ_ONCE(s->tid);
 	p->last_gen = gen;
-	local_irq_enable();
+	p->tid = tid;
+	WRITE_ONCE(s->tid, 0);
+	WRITE_ONCE(s->busy, true);
+	local_set(&p->busy, true);
 
 	/* are we waking the current pid? */
-	if (pid == current->pid) {
+	if (tid == current->pid) {
 		put_cpu();
 		return 0;
 	}
-	ksched_wakeup_pid(cpu, pid);
+	ksched_wakeup_pid(cpu, tid);
 	put_cpu();
 
 	/* put this task to sleep and reschedule so the next task can run */
@@ -155,72 +219,78 @@ static long ksched_start(void)
 
 static void ksched_ipi(void *unused)
 {
-	struct ksched_percpu *p = this_cpu_ptr(&kp);
+	struct ksched_percpu *p;
+	struct ksched_shm_cpu *s;
 	struct task_struct *t;
-	unsigned long gen;
+	int cpu, gen;
 
+	cpu = get_cpu();
+	p = this_cpu_ptr(&kp);
+	s = &shm[cpu];
 
-	/* if last_gen is the current gen, ksched_park() beat us here */
-	gen = smp_load_acquire(&p->gen);
-	if (gen == p->last_gen)
+	/* if core is already idle, don't bother delivering signals */
+	if (!local_read(&p->busy)) {
+		put_cpu();
 		return;
-
-	if (!p->prev_pid) {
-		/* wake up the next pid */
-		ksched_wakeup_pid(smp_processor_id(), p->next_pid);
-	} else {
-		/* otherwise send a signal to the old pid */ 
-		rcu_read_lock();
-		t = ksched_lookup_task(p->prev_pid);
-		if (!t) {
-			rcu_read_unlock();
-			return;
-		}
-		send_sig(SIGUSR1, t, 0);
-		rcu_read_unlock();
 	}
+
+	/* lookup the current task assigned to this core */
+	t = ksched_lookup_task(p->tid);
+	if (!t) {
+		put_cpu();
+		return;
+	}
+
+	/* check if yield has been requested (detecting race conditions) */
+	gen = smp_load_acquire(&s->yield);
+	if (gen == p->last_gen) {
+		send_sig(SIGUSR2, t, 0);
+		smp_store_release(&s->yield, 0);
+	}
+
+	/* check if cede has been requested (detecting race conditions) */
+	gen = smp_load_acquire(&s->cede);
+	if (gen == p->last_gen) {
+		send_sig(SIGUSR1, t, 0);
+		smp_store_release(&s->cede, 0);
+	}
+
+	put_cpu();
 }
 
-static long ksched_wake(struct ksched_wake_req __user *req)
+static int get_user_cpu_mask(const unsigned long __user *user_mask_ptr,
+			     unsigned len, struct cpumask *new_mask)
 {
-	static unsigned long gen = 0;
-	struct ksched_wakeup wakeup;
-	struct ksched_percpu *p;
+	if (len < cpumask_size())
+		cpumask_clear(new_mask);
+	else if (len > cpumask_size())
+		len = cpumask_size();
+
+	return copy_from_user(new_mask, user_mask_ptr, len) ? -EFAULT : 0;
+}
+
+static long ksched_intr(struct ksched_intr_req __user *ureq)
+{
 	cpumask_var_t mask;
-	unsigned int nr;
-	int ret, i;
+	struct ksched_intr_req req;
+
+	/* only the IOKernel can send interrupts (privileged) */
+	if (unlikely(!capable(CAP_SYS_ADMIN)))
+		return -EACCES;
 
 	/* validate inputs */
-	ret = copy_from_user(&nr, &req->nr, sizeof(nr));
-	if (unlikely(ret))
-		return ret;
+	if (unlikely(copy_from_user(&req, &ureq, sizeof(req))))
+		return -EFAULT;
 	if (unlikely(!alloc_cpumask_var(&mask, GFP_KERNEL)))
 		return -ENOMEM;
-	cpumask_clear(mask);
-
-	gen++;
-	for (i = 0; i < nr; i++) {
-		ret = copy_from_user(&wakeup, &req->wakeups[i],
-				     sizeof(wakeup));
-		if (unlikely(ret)) {
-			free_cpumask_var(mask);
-			return ret;
-		}
-		if (unlikely(!cpu_possible(wakeup.cpu))) {
-			free_cpumask_var(mask);
-			return -EINVAL;
-		}
-
-		p = per_cpu_ptr(&kp, wakeup.cpu);
-		p->prev_pid = wakeup.prev_tid;
-		p->next_pid = wakeup.next_tid;
-		smp_store_release(&p->gen, gen);
-		if (wakeup.preempt)
-			cpumask_set_cpu(wakeup.cpu, mask);
+	if (unlikely(get_user_cpu_mask((const unsigned long __user *)req.mask,
+				       req.len, mask))) {
+		free_cpumask_var(mask);
+		return -EFAULT;
 	}
 
-	if (!cpumask_empty(mask))
-		smp_call_function_many(mask, ksched_ipi, NULL, false);
+	/* send interrupts */
+	smp_call_function_many(mask, ksched_ipi, NULL, false);
 	free_cpumask_var(mask);
 	return 0;
 }
@@ -235,17 +305,26 @@ ksched_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		return -ENOTTY;
 
 	switch (cmd) {
-	case KSCHED_IOC_PARK:
-		return ksched_park();
 	case KSCHED_IOC_START:
 		return ksched_start();
-	case KSCHED_IOC_WAKE:
-		return ksched_wake((void __user *)arg);
+	case KSCHED_IOC_PARK:
+		return ksched_park();
+	case KSCHED_IOC_INTR:
+		return ksched_intr((void __user *)arg);
 	default:
 		break;
 	}
 
 	return -ENOTTY;
+}
+
+static int ksched_mmap(struct file *file, struct vm_area_struct *vma)
+{
+	/* only the IOKernel can access the shared region (privileged) */
+	if (!capable(CAP_SYS_ADMIN))
+		return -EACCES;
+
+	return remap_vmalloc_range(vma, (void *)shm, vma->vm_pgoff);
 }
 
 static int ksched_open(struct inode *inode, struct file *filp)
@@ -259,11 +338,50 @@ static int ksched_release(struct inode *inode, struct file *filp)
 }
 
 static struct file_operations ksched_ops = {
-	.owner =	THIS_MODULE,
-	.unlocked_ioctl = ksched_ioctl,
-	.open =		ksched_open,
-	.release =	ksched_release,
+	.owner		= THIS_MODULE,
+	.mmap		= ksched_mmap,
+	.unlocked_ioctl	= ksched_ioctl,
+	.open		= ksched_open,
+	.release	= ksched_release,
 };
+
+/* TODO: This is a total hack to make ksched work as a module */
+static struct cpuidle_state backup_state;
+static int backup_state_count;
+
+static int __init ksched_cpuidle_hijack(void)
+{
+	struct cpuidle_driver *drv;
+
+	drv = cpuidle_get_driver();
+	if (!drv)
+		return -ENOENT;
+	if (drv->state_count <= 0 || drv->states[0].disabled)
+		return -EINVAL;
+
+	cpuidle_pause_and_lock();
+	backup_state = drv->states[0];
+	backup_state_count = drv->state_count;
+	drv->states[0].enter = ksched_idle;
+	drv->state_count = 1;
+	cpuidle_resume_and_unlock();
+
+	return 0;
+}
+
+static void __exit ksched_cpuidle_unhijack(void)
+{
+	struct cpuidle_driver *drv;
+
+	drv = cpuidle_get_driver();
+	if (!drv)
+		return;
+
+	cpuidle_pause_and_lock();
+	drv->states[0] = backup_state;
+	drv->state_count = backup_state_count;
+	cpuidle_resume_and_unlock();
+}
 
 static int __init ksched_init(void)
 {
@@ -271,26 +389,43 @@ static int __init ksched_init(void)
 	int ret;
 
 	ret = register_chrdev_region(devno, 1, "ksched");
-	if (ret) {
-		printk(KERN_ERR "ksched: failed to reserve char dev region\n");
+	if (ret)
 		return ret;
-	}
 
 	cdev_init(&ksched_cdev, &ksched_ops);
 	ret = cdev_add(&ksched_cdev, devno, 1);
-	if (ret) {
-		printk(KERN_ERR "ksched: failed to add char dev\n");
-		return ret;
-	}
+	if (ret)
+		goto fail_cdev_add;
 
-	printk(KERN_INFO "ksched: API V1 ready");
+	shm = vmalloc(SHM_SIZE);
+	if (!shm) {
+		ret = -ENOMEM;
+		goto fail_shm;
+	}
+	memset(shm, 0, SHM_SIZE);
+
+	ret = ksched_cpuidle_hijack();
+	if (ret)
+		goto fail_hijack;
+
+	printk(KERN_INFO "ksched: API V2 enabled");
 	return 0;
+
+fail_hijack:
+	vfree(shm);
+fail_shm:
+	cdev_del(&ksched_cdev);
+fail_cdev_add:
+	unregister_chrdev_region(devno, 1);
+	return ret;
 }
 
 static void __exit ksched_exit(void)
 {
 	dev_t devno = MKDEV(KSCHED_MAJOR, KSCHED_MINOR);
 
+	ksched_cpuidle_unhijack();
+	vfree(shm);
 	cdev_del(&ksched_cdev);
 	unregister_chrdev_region(devno, 1);
 }
