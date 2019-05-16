@@ -11,7 +11,6 @@
 
 #include "defs.h"
 
-#define CORES_ADJUST_INTERVAL_US	5
 #define LOG_INTERVAL_US		(1000 * 1000)
 struct dataplane dp;
 

@@ -82,15 +82,34 @@ spdk_unmap:
 }
 #endif
 
+static void *copy_shm_data(struct shm_region *r, shmptr_t ptr, size_t len)
+{
+	void *in, *out;
+
+	in = shmptr_to_ptr(r, ptr, len);
+	if (!in)
+		return NULL;
+
+	out = malloc(len);
+	if (!out)
+		return NULL;
+
+	memcpy(out, in, len);
+
+	return out;
+}
 
 static struct proc *control_create_proc(mem_key_t key, size_t len, pid_t pid,
 		int *fds, int n_fds)
 {
 	struct control_hdr hdr;
-	struct shm_region reg;
+	struct shm_region reg = {0};
 	size_t nr_pages;
-	struct proc *p;
-	struct thread_spec *threads;
+	struct proc *p = NULL;
+	struct thread_spec *threads = NULL;
+	struct timer_spec *timers = NULL;
+	struct hardware_queue_spec *hwqs = NULL;
+	unsigned long *overflow_queue = NULL;
 	void *shbuf;
 	int i, ret;
 #if __has_include("spdk/nvme.h")
@@ -103,55 +122,68 @@ static struct proc *control_create_proc(mem_key_t key, size_t len, pid_t pid,
 	shbuf = mem_map_shm(key, NULL, len, PGSIZE_2MB, false);
 	if (shbuf == MAP_FAILED)
 		goto fail;
+	reg.base = shbuf;
+	reg.len = len;
 
 	/* parse the control header */
 	memcpy(&hdr, (struct control_hdr *)shbuf, sizeof(hdr)); /* TOCTOU */
 	if (hdr.magic != CONTROL_HDR_MAGIC)
-		goto fail_unmap;
+		goto fail;
+
 	if (hdr.thread_count > NCPU || hdr.thread_count == 0 ||
 			hdr.thread_count != n_fds)
-		goto fail_unmap;
+		goto fail;
 
 	if (hdr.sched_cfg.guaranteed_cores + nr_guaranteed > get_total_cores()) {
 		log_err("guaranteed cores exceeds total core count");
-		goto fail_unmap;
+		goto fail;
 	}
 
-	nr_guaranteed += hdr.sched_cfg.guaranteed_cores;
+	if (hdr.timer_count > NCPU || hdr.hwq_count > NCPU)
+		goto fail;
+
+	/* copy arrays of threads, timers, and hwq specs */
+	threads = copy_shm_data(&reg, hdr.thread_specs, hdr.thread_count * sizeof(*threads));
+	if (!threads)
+		goto fail;
+
+	if (hdr.timer_count) {
+		timers = copy_shm_data(&reg, hdr.timer_specs, hdr.timer_count * sizeof(*timers));
+		if (!timers)
+			goto fail;
+	}
+
+	if (hdr.hwq_count) {
+		hwqs = copy_shm_data(&reg, hdr.hwq_specs, hdr.hwq_count * sizeof(*hwqs));
+		if (!hwqs)
+			goto fail;
+	}
 
 	/* create the process */
 	nr_pages = div_up(len, PGSIZE_2MB);
 	p = malloc(sizeof(*p) + nr_pages * sizeof(physaddr_t));
 	if (!p)
-		goto fail_unmap;
-
-	threads = malloc(sizeof(*threads) * hdr.thread_count);
-	if (!threads)
-		goto fail_free_just_proc;
-	memcpy(threads, ((struct control_hdr *)shbuf)->threads,
-		sizeof(*threads) * hdr.thread_count);
+		goto fail;
+	memset(p, 0, sizeof(*p));
 
 	p->pid = pid;
 	ref_init(&p->ref);
-	reg.base = shbuf;
-	reg.len = len;
 	p->region = reg;
 	p->removed = false;
 	p->sched_cfg = hdr.sched_cfg;
 	p->thread_count = hdr.thread_count;
 	if (eth_addr_is_multicast(&hdr.mac) || eth_addr_is_zero(&hdr.mac))
-		goto fail_free_proc;
+		goto fail;
 	p->mac = hdr.mac;
-	p->uniqid = rdtsc();
 	p->congestion_signal =
 		(int *)shmptr_to_ptr(&reg, hdr.congestion_signal, sizeof(int));
 	if (!p->congestion_signal)
-		goto fail_free_proc;
+		goto fail;
 	*p->congestion_signal = false;
 
 #if __has_include("spdk/nvme.h")
 	if (map_spdk_hugepages(&spdk_reg, hdr.spdk_shm_id))
-		goto fail_free_proc;
+		goto fail;
 #endif
 
 	/* initialize the threads */
@@ -162,17 +194,17 @@ static struct proc *control_create_proc(mem_key_t key, size_t len, pid_t pid,
 		/* attach the RX queue */
 		ret = shm_init_lrpc_out(&reg, &s->rxq, &th->rxq);
 		if (ret)
-			goto fail_free_proc;
+			goto fail;
 
 		/* attach the TX packet queue */
 		ret = shm_init_lrpc_in(&reg, &s->txpktq, &th->txpktq);
 		if (ret)
-			goto fail_free_proc;
+			goto fail;
 
 		/* attach the TX command queue */
 		ret = shm_init_lrpc_in(&reg, &s->txcmdq, &th->txcmdq);
 		if (ret)
-			goto fail_free_proc;
+			goto fail;
 
 #if __has_include("spdk/nvme.h")
 		/* set SPDK pointers */
@@ -205,32 +237,73 @@ static struct proc *control_create_proc(mem_key_t key, size_t len, pid_t pid,
 		th->q_ptrs = (struct q_ptrs *) shmptr_to_ptr(&reg, s->q_ptrs,
 				sizeof(struct q_ptrs));
 		if (!th->q_ptrs)
-			goto fail_free_proc;
+			goto fail;
 	}
 
-	free(threads);
+	/* initialize timers */
+	p->timer_count = hdr.timer_count;
+	for (i = 0; i < hdr.timer_count; i++) {
+		struct timer_spec *ts = &timers[i];
+		struct timer *t = &p->timers[i];
+		t->timern = shmptr_to_ptr(&reg, ts->timern, sizeof(unsigned int));
+		t->next_tsc = shmptr_to_ptr(&reg, ts->next_tsc, sizeof(uint64_t));
+		if (!t->timern || !t->next_tsc)
+			goto fail;
+	}
+
+	/* initialize hardware queues */
+	p->hwq_count = hdr.hwq_count;
+	for (i = 0; i < hdr.timer_count; i++) {
+		struct hardware_queue_spec *hs = &hwqs[i];
+		struct hwq *h = &p->hwqs[i];
+
+		h->descriptor_table = shmptr_to_ptr(&reg, hs->descriptor_table, hs->descriptor_size * hs->nr_descriptors);
+		h->consumer_idx = shmptr_to_ptr(&reg, hs->consumer_idx, sizeof(*h->consumer_idx));
+		h->descriptor_size = hs->descriptor_size;
+		h->nr_descriptors = hs->nr_descriptors;
+		h->parity_byte_offset = hs->parity_byte_offset;
+		h->parity_bit_mask = hs->parity_bit_mask;
+		h->hwq_type = hs->hwq_type;
+
+		if (!h->descriptor_table || !h->consumer_idx)
+			goto fail;
+
+		if (!is_power_of_two(h->nr_descriptors))
+			goto fail;
+
+		if (h->parity_byte_offset > h->descriptor_size)
+			goto fail;
+	}
 
 	/* initialize the table of physical page addresses */
 	ret = mem_lookup_page_phys_addrs(p->region.base, p->region.len, PGSIZE_2MB,
 			p->page_paddrs);
 	if (ret)
-		goto fail_free_just_proc;
+		goto fail;
 
 	p->max_overflows = hdr.egress_buf_count;
 	p->nr_overflows = 0;
-	p->overflow_queue = malloc(sizeof(unsigned long) * p->max_overflows);
-	if (p->overflow_queue == NULL)
-		goto fail_free_just_proc;
+	p->overflow_queue = overflow_queue = malloc(sizeof(unsigned long) * p->max_overflows);
+	if (overflow_queue == NULL)
+		goto fail;
+
+	nr_guaranteed += hdr.sched_cfg.guaranteed_cores;
+
+	/* free temporary allocations */
+	free(threads);
+	free(timers);
+	free(hwqs);
 
 	return p;
 
-fail_free_proc:
-	free(threads);
-fail_free_just_proc:
-	free(p);
-fail_unmap:
-	mem_unmap_shm(shbuf);
 fail:
+	free(overflow_queue);
+	free(threads);
+	free(timers);
+	free(hwqs);
+	free(p);
+	if (reg.base)
+		mem_unmap_shm(shbuf);
 	log_err("control: couldn't attach pid %d", pid);
 	return NULL;
 }

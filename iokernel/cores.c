@@ -770,7 +770,25 @@ static bool cores_is_proc_congested(struct proc *p)
 			congested = true;
 			continue;
 		}
+	}
 
+	if (!congested) {
+		/* check for timeouts */
+		uint64_t cur_tsc = rdtsc();
+		for (i = 0; i < p->timer_count; i++) {
+			struct timer *t = &p->timers[i];
+			uint64_t next_tsc = ACCESS_ONCE(*t->next_tsc);
+			unsigned int timern = ACCESS_ONCE(*t->timern);
+
+			if (!timern || next_tsc > cur_tsc)
+				continue;
+
+			if (!p->active_thread_count ||
+				  next_tsc + CORES_ADJUST_INTERVAL_US * cycles_per_us < cur_tsc) {
+				congested = true;
+				break;
+			}
+		}
 	}
 
 #if __has_include("spdk/nvme.h")

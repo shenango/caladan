@@ -70,6 +70,7 @@ int kthread_init_thread(void)
 		return -ENOMEM;
 
 	spin_lock_np(&klock);
+	mykthread->kthread_idx = nrks;
 	ks[nrks++] = mykthread;
 	assert(nrks <= maxks);
 	spin_unlock_np(&klock);

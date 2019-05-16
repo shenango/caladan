@@ -12,6 +12,7 @@ AR	= ar
 SPARSE	= sparse
 MLX5=$(shell lspci | grep 'ConnectX-5' || echo "")
 MLX4=$(shell lspci | grep 'ConnectX-3' || echo "")
+SPDK=$(shell lspci | grep 'Optane SSD 900P' || echo "")
 
 CHECKFLAGS = -D__CHECKER__ -Waddress-space
 

@@ -104,8 +104,6 @@ int storage_init(void)
 	return 0;
 }
 
-static int thread_init_num;
-
 /**
  * storage_init_thread - initializes storage (per-thread)
  */
@@ -160,16 +158,13 @@ int storage_init_thread(void)
 	qpair = container_of((void **)qpair_addr, typeof(*qpair), qpair);
 	r.base = (void *)SPDK_BASE_ADDR;
 	r.len = SPDK_BASE_ADDR_OFFSET;
-	spin_lock(&qlock);
-	spec = &iok.threads[thread_init_num];
+	spec = &iok.threads[myk()->kthread_idx];
 	spec->nvme_qpair_cpl = ptr_to_shmptr(&r,
 			qpair->cpl, sizeof(qpair->cpl));
 	spec->nvme_qpair_cq_head = ptr_to_shmptr(&r,
 			&qpair->cq_head, sizeof(qpair->cq_head));
 	spec->nvme_qpair_phase = ptr_to_shmptr(&r,
 			&qpair->phase, sizeof(qpair->phase));
-	thread_init_num++;
-	spin_unlock(&qlock);
 	return 0;
 }
 
