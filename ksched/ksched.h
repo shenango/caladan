@@ -29,9 +29,9 @@ struct ksched_shm_cpu {
 
 	/* written by kernelspace */
 	unsigned int		busy;
+	unsigned int		last_gen;
 
 	/* extra space for future features (and cache alignment) */
-	unsigned int		pad;
 	unsigned long		rsv[5];
 };
 

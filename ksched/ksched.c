@@ -124,9 +124,10 @@ static int __cpuidle ksched_idle(struct cpuidle_device *dev,
 			tid = READ_ONCE(s->tid);
 			WRITE_ONCE(s->tid, 0);
 			p->last_gen = gen;
-			ksched_wakeup_pid(cpu, tid);
 			WRITE_ONCE(s->busy, true);
 			local_set(&p->busy, true);
+			smp_store_release(&s->last_gen, gen);
+			ksched_wakeup_pid(cpu, tid);
 			break;
 		}
 		if (need_resched())
@@ -162,20 +163,20 @@ static long ksched_park(void)
 	while (true) {
 		/* use the mwait instruction to efficiently poll memory */
 		gen = ksched_mwait_on_addr(&s->gen, p->last_gen);
-
-		/* find out why we woke up */
+		if (gen != p->last_gen)
+			break;
 		local_irq_enable();
+		put_cpu();
+
+		/* is a signal pending? */
 		if (unlikely(signal_pending(current))) {
 			smp_store_release(&s->busy, true);
 			local_set(&p->busy, true);
 			put_cpu();
 			return -ERESTARTSYS;
 		}
-		if (gen != p->last_gen)
-			break;
-		put_cpu();
 
-		/* run another task if needed */
+		/* do we need to run another task? */
 		if (need_resched())
 			schedule();
 
@@ -185,20 +186,24 @@ static long ksched_park(void)
 		local_irq_disable();
 	}
 
-	/* the pid was set before the generation number (x86 is TSO) */
+	/* determine the next task to run */
 	tid = READ_ONCE(s->tid);
 	p->last_gen = gen;
 	p->tid = tid;
-	WRITE_ONCE(s->tid, 0);
 	WRITE_ONCE(s->busy, true);
 	local_set(&p->busy, true);
+	local_irq_enable();
+	smp_store_release(&s->last_gen, gen);
 
 	/* are we waking the current pid? */
 	if (tid == current->pid) {
 		put_cpu();
 		return 0;
 	}
-	ksched_wakeup_pid(cpu, tid);
+
+	/* if the tid is zero, then simply idle this core */
+	if (tid != 0)
+		ksched_wakeup_pid(cpu, tid);
 	put_cpu();
 
 	/* put this task to sleep and reschedule so the next task can run */
