@@ -45,8 +45,8 @@
 
 #include "defs.h"
 
-#define RX_RING_SIZE 256
-#define TX_RING_SIZE 256
+#define RX_RING_SIZE 2048
+#define TX_RING_SIZE 2048
 
 static const struct rte_eth_conf port_conf_default = {
 	.rxmode = {
@@ -97,6 +97,8 @@ static inline int dpdk_port_init(uint8_t port, struct rte_mempool *mbuf_pool)
 	rxconf = &dev_info.default_rxconf;
 	rxconf->rx_free_thresh = 64;
 
+	dp.is_mlx = !strncmp(dev_info.driver_name, "net_mlx", 7);
+
 	/* Allocate and set up 1 RX queue per Ethernet port. */
 	for (q = 0; q < rx_rings; q++) {
 		retval = rte_eth_rx_queue_setup(port, q, nb_rxd,
@@ -126,9 +128,9 @@ static inline int dpdk_port_init(uint8_t port, struct rte_mempool *mbuf_pool)
 	/* Display the port MAC address. */
 	struct ether_addr addr;
 	rte_eth_macaddr_get(port, &addr);
-	log_info("dpdk: port %u MAC: %02" PRIx8 " %02" PRIx8 " %02" PRIx8
+	log_info("dpdk: driver: %s port %u MAC: %02" PRIx8 " %02" PRIx8 " %02" PRIx8
 			" %02" PRIx8 " %02" PRIx8 " %02" PRIx8 "",
-			(unsigned)port,
+			dev_info.driver_name, (unsigned)port,
 			addr.addr_bytes[0], addr.addr_bytes[1],
 			addr.addr_bytes[2], addr.addr_bytes[3],
 			addr.addr_bytes[4], addr.addr_bytes[5]);

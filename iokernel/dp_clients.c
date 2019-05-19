@@ -32,9 +32,11 @@ static void dp_clients_add_client(struct proc *p)
 		log_err("dp_clients: failed to add MAC to hash table in add_client");
 
 #ifdef MLX
-	p->mr = mlx_reg_mem(dp.port, p->region.base, p->region.len, &p->lkey);
-	if (!p->mr)
-		log_err("dp clients: failed to register memory with MLX nic");
+	if (dp.is_mlx) {
+		p->mr = mlx_reg_mem(dp.port, p->region.base, p->region.len, &p->lkey);
+		if (!p->mr)
+			log_err("dp clients: failed to register memory with MLX nic");
+	}
 #endif
 
 	cores_init_proc(p);
@@ -74,7 +76,8 @@ static void dp_clients_remove_client(struct proc *p)
 		log_err("dp_clients: failed to remove MAC from hash table in remove "
 				"client");
 #ifdef MLX
-	mlx_dereg_mem(p->mr);
+	if (dp.is_mlx)
+		mlx_dereg_mem(p->mr);
 #endif
 
 	/* TODO: free queued packets/commands? */

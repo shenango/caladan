@@ -5,6 +5,7 @@
 #include <rte_ethdev.h>
 #include <rte_ether.h>
 #include <rte_hash.h>
+#include <rte_malloc.h>
 #include <rte_mbuf.h>
 #include <rte_mempool.h>
 
@@ -204,9 +205,9 @@ static struct rte_mempool *rx_pktmbuf_pool_create_in_shm(const char *name,
 	unsigned elt_size;
 	struct rte_pktmbuf_pool_private mbp_priv;
 	struct rte_mempool *mp;
-	int ret;
+	int ret, heap_id;
 	size_t pg_size, pg_shift, min_chunk_size, align, len;
-	void *shbuf;
+	void *shbuf, *heap_area;
 
 	/* create rte_mempool */
 	if (RTE_ALIGN(priv_size, RTE_MBUF_PRIV_ALIGN) != priv_size) {
@@ -248,9 +249,30 @@ static struct rte_mempool *rx_pktmbuf_pool_create_in_shm(const char *name,
 	ingress_mbuf_region.base = shbuf;
 	ingress_mbuf_region.len = len;
 
+	/* hack to make sure that this memory area is registered in DPDK */
+	/* use rte_extmem_* and rte_dev_dma_map in the future */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+	ret = rte_malloc_heap_create("rx_buf_heap");
+	if (ret < 0)
+		goto fail_unmap_memory;
+
+	ret = rte_malloc_heap_memory_add("rx_buf_heap", shbuf, INGRESS_MBUF_SHM_SIZE, NULL, 0, PGSIZE_2MB);
+	if (ret < 0)
+		goto fail_unmap_memory;
+
+	heap_id = rte_malloc_heap_get_socket("rx_buf_heap");
+	if (heap_id < 0)
+		goto fail_unmap_memory;
+#pragma GCC diagnostic pop
+
+	heap_area = rte_malloc_socket(NULL, len, PGSIZE_2MB, heap_id);
+	if (!heap_area)
+		goto fail_unmap_memory;
+
 	/* populate mempool using shared memory */
-	ret = rte_mempool_populate_virt(mp, shbuf, len, pg_size,
-			rx_mempool_memchunk_free, shbuf);
+	ret = rte_mempool_populate_virt(mp, heap_area, len, pg_size,
+			rx_mempool_memchunk_free, heap_area);
 	if (ret < 0) {
 		log_err("rx: error populating mempool %d", ret);
 		goto fail_unmap_memory;

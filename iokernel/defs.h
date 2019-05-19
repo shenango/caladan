@@ -219,6 +219,7 @@ enum {
  */
 struct dataplane {
 	uint8_t			port;
+	bool			is_mlx;
 	struct rte_mempool	*rx_mbuf_pool;
 
 	struct proc		*clients[IOKERNEL_MAX_PROC];
