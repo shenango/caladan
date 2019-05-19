@@ -54,6 +54,23 @@ static inline bool bitmap_test(unsigned long *bits, int pos)
 }
 
 /**
+ * bitmap_popcount - calculates the bit weight of the bitmap
+ * @bits: the bitmap
+ * @nbits: the number of bits in the bitmap
+ *
+ * Returns the bit weight.
+ */
+static inline int bitmap_popcount(unsigned long *bits, int nbits)
+{
+	int i, val = 0;
+
+	for (i = 0; i < BITMAP_LONG_SIZE(nbits); i++)
+		val += __builtin_popcountl(bits[i]);
+
+	return val;
+}
+
+/**
  * bitmap_atomic_set - atomically sets a bit in the bitmap
  * @bits: the bitmap
  * @pos: the bit number
