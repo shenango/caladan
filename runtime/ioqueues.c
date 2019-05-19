@@ -165,10 +165,10 @@ static int ioqueues_shm_setup(unsigned int threads)
 	/* set up control header */
 	iok.thread_count = threads;
 	ptr = r->base;
-	ptr += sizeof(struct control_hdr);
+	ptr += sizeof(struct control_hdr) + sizeof(struct thread_spec) * threads;
 	ptr = (char *)align_up((uintptr_t)ptr, CACHE_LINE_SIZE);
 	congestion_signal = (int *)ptr;
-	ptr += CACHE_LINE_SIZE + sizeof(struct thread_spec) * threads;
+	ptr += CACHE_LINE_SIZE;
 
 	/* set up queues in shared memory */
 	for (i = 0; i < threads; i++) {
