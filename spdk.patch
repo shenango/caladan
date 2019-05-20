@@ -1,0 +1,93 @@
+diff --git a/include/spdk/nvme.h b/include/spdk/nvme.h
+index 0252cfb5e..8811b297b 100644
+--- a/include/spdk/nvme.h
++++ b/include/spdk/nvme.h
+@@ -958,6 +958,8 @@ int spdk_nvme_ctrlr_cmd_io_raw_with_md(struct spdk_nvme_ctrlr *ctrlr,
+ int32_t spdk_nvme_qpair_process_completions(struct spdk_nvme_qpair *qpair,
+ 		uint32_t max_completions);
+ 
++int32_t nvme_pcie_qpair_available_completions(struct spdk_nvme_qpair *qpair);
++
+ /**
+  * Send the given admin command to the NVMe controller.
+  *
+@@ -2132,6 +2134,8 @@ void spdk_nvme_qpair_remove_cmd_error_injection(struct spdk_nvme_ctrlr *ctrlr,
+ 		struct spdk_nvme_qpair *qpair,
+ 		uint8_t opc);
+ 
++extern void *(*spdk_nvme_allocator_hook)(size_t, size_t, uint64_t *);
++
+ #ifdef SPDK_CONFIG_RDMA
+ struct ibv_context;
+ struct ibv_pd;
+diff --git a/lib/nvme/nvme_internal.h b/lib/nvme/nvme_internal.h
+index 5804fdac8..278180760 100644
+--- a/lib/nvme/nvme_internal.h
++++ b/lib/nvme/nvme_internal.h
+@@ -976,6 +976,8 @@ struct spdk_nvme_ctrlr *spdk_nvme_get_ctrlr_by_trid_unsafe(
+ 	int nvme_ ## name ## _qpair_submit_request(struct spdk_nvme_qpair *qpair, struct nvme_request *req); \
+ 	int32_t nvme_ ## name ## _qpair_process_completions(struct spdk_nvme_qpair *qpair, uint32_t max_completions);
+ 
++int32_t nvme_pcie_qpair_available_completions(struct spdk_nvme_qpair *qpair);
++
+ DECLARE_TRANSPORT(transport) /* generic transport dispatch functions */
+ DECLARE_TRANSPORT(pcie)
+ DECLARE_TRANSPORT(tcp)
+diff --git a/lib/nvme/nvme_pcie.c b/lib/nvme/nvme_pcie.c
+index 22699cfa1..cdc3a1fdc 100644
+--- a/lib/nvme/nvme_pcie.c
++++ b/lib/nvme/nvme_pcie.c
+@@ -42,6 +42,8 @@
+ #include "nvme_internal.h"
+ #include "nvme_uevent.h"
+ 
++void *(*spdk_nvme_allocator_hook)(size_t, size_t, uint64_t *);
++
+ /*
+  * Number of completion queue entries to process before ringing the
+  *  completion queue doorbell.
+@@ -1022,9 +1024,15 @@ nvme_pcie_qpair_construct(struct spdk_nvme_qpair *qpair)
+ 		}
+ 	}
+ 
+-	pqpair->cpl = spdk_zmalloc(pqpair->num_entries * sizeof(struct spdk_nvme_cpl),
+-				   page_align, &pqpair->cpl_bus_addr,
+-				   SPDK_ENV_SOCKET_ID_ANY, flags);
++	if (spdk_nvme_allocator_hook) {
++		pqpair->cpl = spdk_nvme_allocator_hook(pqpair->num_entries * sizeof(struct spdk_nvme_cpl),
++			  page_align, &pqpair->cpl_bus_addr);
++	} else {
++		pqpair->cpl = spdk_zmalloc(pqpair->num_entries * sizeof(struct spdk_nvme_cpl),
++			  page_align, &pqpair->cpl_bus_addr,
++			  SPDK_ENV_SOCKET_ID_ANY, flags);
++	}
++
+ 	if (pqpair->cpl == NULL) {
+ 		SPDK_ERRLOG("alloc qpair_cpl failed\n");
+ 		return -ENOMEM;
+@@ -1583,7 +1591,10 @@ nvme_pcie_ctrlr_create_io_qpair(struct spdk_nvme_ctrlr *ctrlr, uint16_t qid,
+ 
+ 	assert(ctrlr != NULL);
+ 
+-	pqpair = spdk_zmalloc(sizeof(*pqpair), 64, NULL,
++	if (spdk_nvme_allocator_hook)
++		pqpair = spdk_nvme_allocator_hook(sizeof(*pqpair), 64, NULL);
++	else
++		pqpair = spdk_zmalloc(sizeof(*pqpair), 64, NULL,
+ 			      SPDK_ENV_SOCKET_ID_ANY, SPDK_MALLOC_SHARE);
+ 	if (pqpair == NULL) {
+ 		return NULL;
+@@ -2143,3 +2154,13 @@ nvme_pcie_qpair_process_completions(struct spdk_nvme_qpair *qpair, uint32_t max_
+ 
+ 	return num_completions;
+ }
++
++int32_t
++nvme_pcie_qpair_available_completions(struct spdk_nvme_qpair *qpair)
++{
++	struct nvme_pcie_qpair	*pqpair = nvme_pcie_qpair(qpair);
++	struct spdk_nvme_cpl	*cpl;
++	cpl = &pqpair->cpl[pqpair->cq_head];
++	return cpl->status.p == pqpair->phase;
++}
++

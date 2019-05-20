@@ -94,6 +94,9 @@ static size_t estimate_shm_space(void)
 	ret += EGRESS_POOL_SIZE(maxks);
 	ret = align_up(ret, PGSIZE_2MB);
 
+	// SPDK Memory - TODO: size this correctly
+	ret += 12 * PGSIZE_2MB;
+
 	return ret;
 }
 

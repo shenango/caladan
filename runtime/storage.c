@@ -8,6 +8,8 @@
 #include <runtime/storage.h>
 #include <runtime/sync.h>
 
+// Hack to prevent SPDK from pulling in extra headers here
+#define SPDK_STDINC_H
 #include "spdk/nvme.h"
 #include "spdk/env.h"
 
@@ -69,6 +71,16 @@ attach_cb(void *cb_ctx, const struct spdk_nvme_transport_id *trid,
 	num_blocks = (int)spdk_nvme_ns_get_num_sectors(namespace);
 }
 
+static void *spdk_custom_allocator(size_t size, size_t align, uint64_t *physaddr_out) {
+        void *out = iok_shm_alloc(size, align, NULL);
+
+	if (out && physaddr_out)
+		mem_lookup_page_phys_addr(out, PGSIZE_2MB, physaddr_out);
+
+	return out;
+
+}
+
 /**
  * storage_init - initializes storage
  *
@@ -83,6 +95,8 @@ int storage_init(void)
 	shm_id = rand_crc32c((uintptr_t)myk());
 	if (shm_id < 0) shm_id = -shm_id;
 	opts.shm_id = shm_id;
+
+	spdk_nvme_allocator_hook = spdk_custom_allocator;
 
 	if (spdk_env_init(&opts) < 0) {
 		log_err("Unable to initialize SPDK env");
@@ -112,7 +126,7 @@ int storage_init_thread(void)
 
 	struct spdk_nvme_io_qpair_opts opts;
 	struct kthread *k;
-	struct shm_region r;
+	struct shm_region *r = &netcfg.tx_region;
 	struct nvme_pcie_qpair {
 		uint8_t pad0[40];
 		struct spdk_nvme_cpl *cpl;
@@ -156,14 +170,12 @@ int storage_init_thread(void)
 
 
 	qpair = container_of((void **)qpair_addr, typeof(*qpair), qpair);
-	r.base = (void *)SPDK_BASE_ADDR;
-	r.len = SPDK_BASE_ADDR_OFFSET;
 	spec = &iok.threads[myk()->kthread_idx];
-	spec->nvme_qpair_cpl = ptr_to_shmptr(&r,
+	spec->nvme_qpair_cpl = ptr_to_shmptr(r,
 			qpair->cpl, sizeof(qpair->cpl));
-	spec->nvme_qpair_cq_head = ptr_to_shmptr(&r,
+	spec->nvme_qpair_cq_head = ptr_to_shmptr(r,
 			&qpair->cq_head, sizeof(qpair->cq_head));
-	spec->nvme_qpair_phase = ptr_to_shmptr(&r,
+	spec->nvme_qpair_phase = ptr_to_shmptr(r,
 			&qpair->phase, sizeof(qpair->phase));
 	return 0;
 }

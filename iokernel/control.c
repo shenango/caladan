@@ -37,51 +37,6 @@ static struct lrpc_chan_out lrpc_control_to_data;
 static struct lrpc_chan_in lrpc_data_to_control;
 static int nr_guaranteed;
 
-#if __has_include("spdk/nvme.h")
-static uint64_t spdk_map_idx;
-static int map_spdk_hugepages(struct shm_region* reg, unsigned int shm_id) {
-	int page_no, fd;
-	uint64_t offset;
-	char buffer [50];
-
-	reg->base = (void *)SPDK_BASE_ADDR +
-		SPDK_BASE_ADDR_OFFSET * spdk_map_idx;
-	reg->len = 0;
-
-	for (page_no = 0; page_no < SPDK_NUM_PAGES_MAPPED; page_no++) {
-		offset = 0x200000 * (page_no + 1);
-		sprintf(buffer, "/dev/hugepages/spdk%umap_%d", shm_id, page_no);
-		fd = open(buffer, O_RDONLY);
-		if (fd == -1) {
-			if (errno == 2) {
-				close(fd);
-				break;
-			} else {
-				log_err("error opening spdk page, errno=%d", errno);
-				close(fd);
-				goto spdk_unmap;
-			}
-		}
-		if ((void *)-1 == mmap(reg->base + offset, PGSIZE_2MB, PROT_READ,
-					MAP_SHARED|MAP_FIXED|MAP_POPULATE, fd, 0)) {
-			log_err("error mapping spdk page, errno=%d", errno);
-			close(fd);
-			goto spdk_unmap;
-		}
-		reg->len += PGSIZE_2MB;
-		close(fd);
-	}
-	spdk_map_idx++;
-	return 0;
-
-spdk_unmap:
-	if (-1 == munmap(reg->base, reg->len)) {
-		log_err("error unmapping spdk pages, errno=%d", errno);
-	}
-	return -1;
-}
-#endif
-
 static void *copy_shm_data(struct shm_region *r, shmptr_t ptr, size_t len)
 {
 	void *in, *out;
@@ -112,9 +67,6 @@ static struct proc *control_create_proc(mem_key_t key, size_t len, pid_t pid,
 	unsigned long *overflow_queue = NULL;
 	void *shbuf;
 	int i, ret;
-#if __has_include("spdk/nvme.h")
-	struct shm_region spdk_reg;
-#endif
 
 	/* attach the shared memory region */
 	if (len < sizeof(hdr))
@@ -181,11 +133,6 @@ static struct proc *control_create_proc(mem_key_t key, size_t len, pid_t pid,
 		goto fail;
 	*p->congestion_signal = false;
 
-#if __has_include("spdk/nvme.h")
-	if (map_spdk_hugepages(&spdk_reg, hdr.spdk_shm_id))
-		goto fail;
-#endif
-
 	/* initialize the threads */
 	for (i = 0; i < hdr.thread_count; i++) {
 		struct thread *th = &p->threads[i];
@@ -208,21 +155,21 @@ static struct proc *control_create_proc(mem_key_t key, size_t len, pid_t pid,
 
 #if __has_include("spdk/nvme.h")
 		/* set SPDK pointers */
-		p->nvmeq[i].cpl_ref = (struct spdk_nvme_cpl *)shmptr_to_ptr(&spdk_reg,
+		p->nvmeq[i].cpl_ref = (struct spdk_nvme_cpl *)shmptr_to_ptr(&reg,
 				(shmptr_t)s->nvme_qpair_cpl,
 				sizeof(p->nvmeq[i].cpl_ref));
 		if (!p->nvmeq[i].cpl_ref)
-			goto fail_free_proc;
-		p->nvmeq[i].nvme_io_cq_head = (uint16_t *)shmptr_to_ptr(&spdk_reg,
+			goto fail;
+		p->nvmeq[i].nvme_io_cq_head = (uint16_t *)shmptr_to_ptr(&reg,
 				(shmptr_t)s->nvme_qpair_cq_head,
 				sizeof(p->nvmeq[i].nvme_io_cq_head));
 		if (!p->nvmeq[i].nvme_io_cq_head)
-			goto fail_free_proc;
-		p->nvmeq[i].nvme_io_phase = (uint8_t *)shmptr_to_ptr(&spdk_reg,
+			goto fail;
+		p->nvmeq[i].nvme_io_phase = (uint8_t *)shmptr_to_ptr(&reg,
 				(shmptr_t)s->nvme_qpair_phase,
 				sizeof(p->nvmeq[i].nvme_io_phase));
 		if (!p->nvmeq[i].nvme_io_phase)
-			goto fail_free_proc;
+			goto fail;
 #endif
 
 		th->tid = s->tid;

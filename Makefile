@@ -1,9 +1,7 @@
 DPDK_PATH = dpdk
 INC     = -I./inc -I$(DPDK_PATH)/build/include
-ifneq ($(SPDK),)
 SPDK_PATH = spdk
-INC += -I$(SPDK_PATH)/include
-endif
+
 CFLAGS  = -g -Wall -std=gnu11 -D_GNU_SOURCE $(INC) -mssse3
 LDFLAGS = -T base/base.ld
 LD	= gcc
@@ -33,6 +31,10 @@ else
 ifneq ($(MLX4),)
 CFLAGS += -DMLX4
 endif
+endif
+
+ifneq ($(SPDK),)
+INC += -I$(SPDK_PATH)/include
 endif
 
 # handy for debugging

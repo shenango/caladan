@@ -225,7 +225,7 @@ struct iokernel_control {
 };
 
 extern struct iokernel_control iok;
-
+extern void *iok_shm_alloc(size_t size, size_t alignment, shmptr_t *shm_out);
 
 /*
  * Per-kernel-thread State
@@ -450,6 +450,29 @@ static inline bool timer_needed(struct kthread *k)
 	return k->timern > 0 && k->timers[0].deadline_us <= microtime();
 }
 
+
+/*
+ * Storage support
+ */
+
+#if __has_include("spdk/nvme.h")
+
+extern int storage_available_completions(struct kthread *k);
+extern int storage_proc_completions(struct kthread *k,
+	    unsigned int budget, struct thread **wakeable_threads);
+#else
+
+static inline int storage_available_completions(struct kthread *k)
+{
+	return 0;
+}
+static inline int storage_proc_completions(struct kthread *k,
+	    unsigned int budget, struct thread **wakeable_threads)
+{
+	return 0;
+}
+
+#endif
 
 /*
  * Init
