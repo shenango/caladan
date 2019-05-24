@@ -145,7 +145,7 @@ drain:
 
 		/* we got the next in-order segment */
 		list_del(&pos->link);
-		if ((m->flags & (TCP_PUSH | TCP_FIN)) > 0)
+		if ((pos->flags & (TCP_PUSH | TCP_FIN)) > 0)
 			*wake = true;
 		tcp_rx_append_text(c, pos);
 	}
