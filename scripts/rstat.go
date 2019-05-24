@@ -63,12 +63,13 @@ func main() {
 	lastm := make(map[string]uint64)
 
 	for {
+		last_write := time.Now()
 		_, err = c.Write([]byte("stat"))
 		if err != nil {
 			os.Exit(1)
 		}
 
-		c.SetReadDeadline(time.Now().Add(time.Duration(4) * time.Millisecond))
+		c.SetReadDeadline(time.Now().Add(time.Duration(100) * time.Millisecond))
 		n, err := c.Read(buf[0:])
 		if err != nil {
 			if nerr, ok := err.(net.Error); ok && nerr.Timeout() {
@@ -102,6 +103,6 @@ func main() {
 		}
 		lastm = m
 
-		time.Sleep(time.Duration(interval) * time.Second)
+		time.Sleep(time.Duration(interval) * time.Second - time.Since(last_write))
 	}
 }
