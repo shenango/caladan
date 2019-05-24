@@ -376,6 +376,8 @@ static __always_inline void enter_schedule(thread_t *myth)
 	}
 
 	/* fast path: switch directly to the next uthread */
+	STAT(PROGRAM_CYCLES) += rdtsc() - last_tsc;
+	last_tsc = rdtsc();
 
 	/* pop the next runnable thread from the queue */
 	th = k->rq[k->rq_tail++ % RUNTIME_RQ_SIZE];
@@ -681,6 +683,7 @@ static __noreturn void schedule_start(void)
 	 * schedule().
 	 */
 	kthread_wait_to_attach();
+	last_tsc = rdtsc();
 	store_release(&k->rcu_gen, 1);
 
 	spin_lock(&k->lock);
@@ -692,7 +695,6 @@ static __noreturn void schedule_start(void)
  */
 void sched_start(void)
 {
-	last_tsc = rdtsc();
 	preempt_disable();
 	jmp_runtime_nosave(schedule_start);
 }
