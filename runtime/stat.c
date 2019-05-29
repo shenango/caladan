@@ -84,6 +84,14 @@ static ssize_t stat_write_buf(char *buf, size_t len)
 	} else if (ret >= end - pos) {
 		return -E2BIG;
 	}
+	pos += ret;
+
+	ret = append_stat(pos, end - pos, "tsc", rdtsc());
+	if (ret < 0) {
+		return -EINVAL;
+	} else if (ret >= end - pos) {
+		return -E2BIG;
+	}
 
 	pos += ret;
 	pos[-1] = '\0'; /* clip off last ',' */

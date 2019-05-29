@@ -10,9 +10,12 @@ import (
 )
 
 func prettyPrint(m, lastm map[string]uint64, interval int) {
+	// compute the actual interval in seconds
+	measured_interval := (float64(m["tsc"] - lastm["tsc"])) / (float64(m["cycles_per_us"] * 1000 * 1000))
+
 	dm := make(map[string]float64)
 	for i, v := range m {
-		dm[i] = float64(v - lastm[i]) / float64(interval)
+		dm[i] = float64(v - lastm[i]) / measured_interval
 	}
 	fmt.Printf("net: RX %.1f pkts, %.1f bytes | TX %.1f pkts, %.1f bytes | %.1f drops | %.2f%% rx out of order (%.2f%% reorder time)\n",
 		   dm["rx_packets"], dm["rx_bytes"],
@@ -22,7 +25,8 @@ func prettyPrint(m, lastm map[string]uint64, interval int) {
 	fmt.Printf("sched: %.1f rescheds (%.1f%% sched time, %.1f%% local)," +
 		   " %.1f softirqs (%.1f%% stolen), %.1f %%CPU, %.1f parks" +
 		   " (%.1f%% migrated), %.1f preempts (%.1f stolen)," +
-		   " thread_run_locality %.1f%%, thread_wake_locality %.1f%%\n",
+		   " thread_run_locality %.1f%%, thread_wake_locality %.1f%%, %.1f program_cycles, %.1f sched_cycles," +
+		   " %.2f interval (s)\n",
 		   dm["reschedules"],
 		   dm["sched_cycles"] / (dm["sched_cycles"] + dm["program_cycles"]) * 100,
 		   (1 - dm["threads_stolen"] / dm["reschedules"]) * 100,
@@ -34,7 +38,8 @@ func prettyPrint(m, lastm map[string]uint64, interval int) {
 		   dm["core_migrations"] * 100 / dm["parks"],
 		   dm["preemptions"], dm["preemptions_stolen"],
 		   (dm["local_runs"] / (dm["local_runs"] + dm["remote_runs"])) * 100,
-		   (dm["local_wakes"] / (dm["local_wakes"] + dm["remote_wakes"])) * 100)
+		   (dm["local_wakes"] / (dm["local_wakes"] + dm["remote_wakes"])) * 100,
+		   dm["program_cycles"], dm["sched_cycles"], measured_interval)
 }
 
 func main() {
@@ -73,7 +78,11 @@ func main() {
 		n, err := c.Read(buf[0:])
 		if err != nil {
 			if nerr, ok := err.(net.Error); ok && nerr.Timeout() {
-				lastm = make(map[string]uint64)
+				 c.Close()
+				 c,err = net.DialUDP("udp", nil, uaddr)
+				      if err != nil {
+			                os.Exit(1)
+				}
 				continue
 			}
 			os.Exit(1)
