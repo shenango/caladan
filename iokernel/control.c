@@ -13,6 +13,9 @@
 #include <sys/types.h>
 #include <sys/un.h>
 #include <unistd.h>
+#include <sys/mman.h>
+#include <stdio.h>
+#include <fcntl.h>
 
 #include <base/stddef.h>
 #include <base/mem.h>
@@ -21,11 +24,7 @@
 #include <iokernel/control.h>
 
 #include "defs.h"
-
-#include <sys/mman.h>
-#include <stdio.h>
-#include <fcntl.h>
-#include <errno.h>
+#include "sched.h"
 
 static int controlfd;
 static int clientfds[IOKERNEL_MAX_PROC];
@@ -112,7 +111,8 @@ static struct proc *control_create_proc(mem_key_t key, size_t len, pid_t pid,
 			hdr.thread_count != n_fds)
 		goto fail_unmap;
 
-	if (hdr.sched_cfg.guaranteed_cores + nr_guaranteed > get_total_cores()) {
+	if (hdr.sched_cfg.guaranteed_cores + nr_guaranteed >
+	    bitmap_popcount(sched_allowed_cores, NCPU)) {
 		log_err("guaranteed cores exceeds total core count");
 		goto fail_unmap;
 	}
@@ -196,10 +196,8 @@ static struct proc *control_create_proc(mem_key_t key, size_t len, pid_t pid,
 		th->tid = s->tid;
 		th->park_efd = fds[i];
 		th->p = p;
-		th->state = THREAD_STATE_IDLE;
-		th->reaffinitize = true;
-		th->at_idx = -1;
-		th->ts_idx = -1;
+		th->at_idx = UINT_MAX;
+		th->ts_idx = UINT_MAX;
 
 		/* initialize pointer to queue pointers in shared memory */
 		th->q_ptrs = (struct q_ptrs *) shmptr_to_ptr(&reg, s->q_ptrs,
@@ -475,15 +473,38 @@ static void control_loop(void)
 	}
 }
 
+/*
+ * Pins thread tid to core. Returns 0 on success and < 0 on error. Note that
+ * this function can always fail with error ESRCH, because threads can be
+ * killed at any time.
+ */
+static int control_pin_thread(pid_t tid, int core)
+{
+	cpu_set_t cpuset;
+	int ret;
+
+	CPU_ZERO(&cpuset);
+	CPU_SET(core, &cpuset);
+
+	ret = sched_setaffinity(tid, sizeof(cpu_set_t), &cpuset);
+	if (ret < 0) {
+		log_warn("cores: failed to set affinity for thread %d with err %d",
+			 tid, errno);
+		return -errno;
+	}
+
+	return 0;
+}
+
 static void *control_thread(void *data)
 {
 	int ret;
 
 	/* pin to our assigned core */
-	ret = cores_pin_thread(gettid(), core_assign.ctrl_core);
+	ret = control_pin_thread(gettid(), sched_ctrl_core);
 	if (ret < 0) {
 		log_err("control: failed to pin control thread to core %d",
-				core_assign.ctrl_core);
+			sched_ctrl_core);
 		/* continue running but performance is unpredictable */
 	}
 

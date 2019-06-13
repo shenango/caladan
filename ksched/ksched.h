@@ -12,7 +12,7 @@
  * convenience we can use 240.  This value is zoned for "experimental
  * and internal use".
  */
-#define KSCHED_MAJOR		240
+#define KSCHED_MAJOR		260
 #define KSCHED_MINOR		0
 
 struct ksched_intr_req {

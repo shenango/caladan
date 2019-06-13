@@ -44,6 +44,7 @@
 #include <base/log.h>
 
 #include "defs.h"
+#include "sched.h"
 
 #define RX_RING_SIZE 256
 #define TX_RING_SIZE 256
@@ -142,7 +143,7 @@ static inline int dpdk_port_init(uint8_t port, struct rte_mempool *mbuf_pool)
 /*
  * Log some ethernet port stats.
  */
-void dpdk_print_eth_stats()
+void dpdk_print_eth_stats(void)
 {
 	int ret;
 	struct rte_eth_stats stats;
@@ -164,7 +165,7 @@ void dpdk_print_eth_stats()
 /*
  * Initialize dpdk, must be done as soon as possible.
  */
-int dpdk_init()
+int dpdk_init(void)
 {
 	char *argv[4];
 	char buf[10];
@@ -173,7 +174,7 @@ int dpdk_init()
 	argv[0] = "./iokerneld";
 	argv[1] = "-l";
 	/* use our assigned core */
-	sprintf(buf, "%d", core_assign.dp_core);
+	sprintf(buf, "%d", sched_dp_core);
 	argv[2] = buf;
 	argv[3] = "--socket-mem=128";
 
@@ -199,7 +200,7 @@ int dpdk_init()
 /*
  * Additional dpdk initialization that must be done after rx init.
  */
-int dpdk_late_init()
+int dpdk_late_init(void)
 {
 	/* initialize port */
 	dp.port = 0;

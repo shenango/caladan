@@ -680,8 +680,14 @@ static __noreturn void schedule_start(void)
 	/*
 	 * force kthread parking (iokernel assumes all kthreads are parked
 	 * initially). Update RCU generation so it stays even after entering
-	 * schedule().
+	 * schedule(). If threads were scheduled on this kthread, then start off
+	 * attached so they can be stolen by whichever kthread wakes up first.
 	 */
+	spin_lock(&k->lock);
+	if (k->rq_head != k->rq_tail)
+		k->detached = false;
+	spin_unlock(&k->lock);
+
 	kthread_wait_to_attach();
 	store_release(&k->rcu_gen, 1);
 

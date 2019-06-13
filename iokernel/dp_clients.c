@@ -11,6 +11,7 @@
 #include <base/lrpc.h>
 
 #include "defs.h"
+#include "sched.h"
 
 #define MAC_TO_PROC_ENTRIES	128
 
@@ -37,7 +38,7 @@ static void dp_clients_add_client(struct proc *p)
 		log_err("dp clients: failed to register memory with MLX nic");
 #endif
 
-	cores_init_proc(p);
+	sched_attach_proc(p);
 }
 
 void proc_release(struct ref *r)
@@ -81,14 +82,14 @@ static void dp_clients_remove_client(struct proc *p)
 
 	/* release cores assigned to this runtime */
 	p->kill = true;
-	cores_free_proc(p);
+	sched_detach_proc(p);
 	proc_put(p);
 }
 
 /*
  * Process a batch of messages from the control plane.
  */
-void dp_clients_rx_control_lrpcs()
+void dp_clients_rx_control_lrpcs(void)
 {
 	uint64_t cmd;
 	unsigned long payload;

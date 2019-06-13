@@ -16,6 +16,9 @@
 
 #define TX_PREFETCH_STRIDE 2
 
+unsigned int nrts;
+struct thread *ts[NCPU];
+
 static struct rte_mempool *tx_mbuf_pool;
 
 /*
@@ -115,7 +118,7 @@ bool tx_send_completion(void *obj)
 
 	/* send completion to runtime */
 	th = priv_data->th;
-	if (th->state == THREAD_STATE_RUNNING) {
+	if (th->active) {
 		if (likely(lrpc_send(&th->rxq, RX_NET_COMPLETE,
 			       priv_data->completion_data))) {
 			goto success;
@@ -157,7 +160,7 @@ static int drain_overflow_queue(struct proc *p, int n)
 	return i;
 }
 
-bool tx_drain_completions()
+bool tx_drain_completions(void)
 {
 	static unsigned long pos = 0;
 	unsigned long i;
@@ -187,7 +190,7 @@ static int tx_drain_queue(struct thread *t, int n,
 		unsigned long payload;
 
 		if (!lrpc_recv(&t->txpktq, &cmd, &payload)) {
-			if (unlikely(t->state != THREAD_STATE_RUNNING))
+			if (unlikely(!t->active))
 				unpoll_thread(t);
 			break;
 		}
@@ -346,7 +349,7 @@ static struct rte_mempool *tx_pktmbuf_completion_pool_create(const char *name,
 /*
  * Initialize tx state.
  */
-int tx_init()
+int tx_init(void)
 {
 	/* create a mempool to hold struct rte_mbufs and handle completions */
 	tx_mbuf_pool = tx_pktmbuf_completion_pool_create("TX_MBUF_POOL",

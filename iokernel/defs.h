@@ -2,6 +2,8 @@
  * defs.h - shared definitions local to the iokernel
  */
 
+#pragma once
+
 #include <base/stddef.h>
 #include <base/bitmap.h>
 #include <base/gen.h>
@@ -21,6 +23,7 @@
 /*
  * Constant limits
  */
+
 #define IOKERNEL_MAX_PROC		1024
 #define IOKERNEL_NUM_MBUFS		(8192 * 16)
 #define IOKERNEL_NUM_COMPLETIONS	32767
@@ -29,6 +32,7 @@
 #define IOKERNEL_CMD_BURST_SIZE		64
 #define IOKERNEL_RX_BURST_SIZE		64
 #define IOKERNEL_CONTROL_BURST_SIZE	4
+#define IOKERNEL_POLL_INTERVAL		5
 
 
 /*
@@ -37,19 +41,9 @@
 
 struct proc;
 
-enum {
-	/* the thread is actively running on a core */
-	THREAD_STATE_RUNNING,
-	/* the thread is parked (not running on a core) */
-	THREAD_STATE_PARKED,
-	/* the thread is parked and all of its work has been stolen */
-	THREAD_STATE_IDLE,
-};
-
 struct thread {
+	bool			active;
 	struct proc		*p;
-	unsigned int		state;
-	unsigned int		reaffinitize:1;
 	struct lrpc_chan_out	rxq;
 	struct lrpc_chan_in	txpktq;
 	struct lrpc_chan_in	txcmdq;
@@ -58,14 +52,9 @@ struct thread {
 	struct q_ptrs		*q_ptrs;
 	uint32_t		last_rq_head;
 	uint32_t		last_rxq_head;
-	/* current or most recent core this thread ran on, depending on whether
-	 * this thread is parked or not */
 	unsigned int		core;
-	/* the @ts index (if active) */
-	unsigned int		ts_idx;
-	/* the proc->active_threads index (if active) */
 	unsigned int		at_idx;
-	/* list link for when idle */
+	unsigned int		ts_idx;
 	struct list_node	idle_link;
 };
 
@@ -75,14 +64,9 @@ struct proc {
 	bool			removed;
 	struct ref		ref;
 	unsigned int		kill:1;       /* the proc is being torn down */
-	unsigned int		overloaded:1; /* the proc needs more cores */
-	unsigned int		bursting:1;   /* the proc is using past resv. */
-	unsigned int		launched:1;   /* executing the first time */
 	int			*congestion_signal;
 
-	/* intrusive list links */
-	struct list_node	overloaded_link;
-	struct list_node	bursting_link;
+	unsigned long		policy_data;
 
 	/* scheduler data */
 	struct sched_spec	sched_cfg;
@@ -95,9 +79,7 @@ struct proc {
 	unsigned int		active_thread_count;
 	struct thread		threads[NCPU];
 	struct thread		*active_threads[NCPU];
-	DEFINE_BITMAP(available_threads, NCPU);
 	struct list_head	idle_threads;
-	unsigned int		inflight_preempts;
 	unsigned int		next_thread_rr; // for spraying join requests/overflow completions
 
 	/* network data */
@@ -106,8 +88,8 @@ struct proc {
 	/* Unique identifier -- never recycled across runtimes*/
 	uintptr_t		uniqid;
 #ifdef MLX
-	uint32_t lkey;
-	void *mr;
+	uint32_t		lkey;
+	void			*mr;
 #endif
 
 	/* Overfloq queue for completion data */
@@ -165,7 +147,7 @@ extern struct thread *ts[NCPU];
  */
 static inline void poll_thread(struct thread *th)
 {
-	if (th->ts_idx != -1)
+	if (th->ts_idx != UINT_MAX)
 		return;
 	proc_get(th->p);
 	ts[nrts] = th;
@@ -178,11 +160,11 @@ static inline void poll_thread(struct thread *th)
  */
 static inline void unpoll_thread(struct thread *th)
 {
-	if (th->ts_idx == -1)
+	if (th->ts_idx == UINT_MAX)
 		return;
 	ts[th->ts_idx] = ts[--nrts];
 	ts[th->ts_idx]->ts_idx = th->ts_idx;
-	th->ts_idx = -1;
+	th->ts_idx = UINT_MAX;
 	proc_put(th->p);
 }
 
@@ -290,38 +272,27 @@ extern bool rx_send_to_runtime(struct proc *p, uint32_t hash, uint64_t cmd,
  * Initialization
  */
 
-extern int cores_init(void);
+extern int ksched_init(void);
+extern int sched_init(void);
+extern int simple_init(void);
 extern int control_init(void);
-extern int dpdk_init();
-extern int rx_init();
-extern int tx_init();
-extern int dp_clients_init();
-extern int dpdk_late_init();
+extern int dpdk_init(void);
+extern int rx_init(void);
+extern int tx_init(void);
+extern int dp_clients_init(void);
+extern int dpdk_late_init(void);
 
 /*
  * dataplane RX/TX functions
  */
-extern bool rx_burst();
-extern bool tx_burst();
+extern bool rx_burst(void);
+extern bool tx_burst(void);
 extern bool tx_send_completion(void *obj);
-extern bool tx_drain_completions();
+extern bool tx_drain_completions(void);
 
 /*
  * other dataplane functions
  */
-extern void dp_clients_rx_control_lrpcs();
-extern bool commands_rx();
-extern void dpdk_print_eth_stats();
-
-/*
- * functions for manipulating core assignments
- */
-extern void cores_init_proc(struct proc *p);
-extern void cores_free_proc(struct proc *p);
-extern int cores_pin_thread(pid_t tid, int core);
-extern bool cores_park_kthread(struct thread *t, bool force);
-extern struct thread *cores_add_core(struct proc *p);
-extern void cores_adjust_assignments();
-extern void proc_set_overloaded(struct proc *p);
-extern unsigned int get_nr_avail_cores(void);
-extern unsigned int get_total_cores(void);
+extern void dp_clients_rx_control_lrpcs(void);
+extern bool commands_rx(void);
+extern void dpdk_print_eth_stats(void);

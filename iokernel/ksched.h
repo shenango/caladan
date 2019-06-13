@@ -51,8 +51,7 @@ static inline bool ksched_poll_run_done(unsigned int core)
  */
 static inline bool ksched_poll_idle(unsigned int core)
 {
-	return ksched_poll_run_done(core) &&
-	       !load_acquire(&ksched_shm[core].busy);
+	return !load_acquire(&ksched_shm[core].busy);
 }
 
 enum {
@@ -67,12 +66,12 @@ enum {
  *
  * The interrupt will not be sent until ksched_send_intrs(). This is done to
  * create an opportunity for batching interrupts. If ksched_run() is called on
- * the same core after ksched_enqueue_intr(), it will prevent any pending
- * interrupts from being delivered.
+ * the same core after ksched_enqueue_intr(), it may prevent interrupts
+ * still pending for the last kthread from being delivered.
  */
 static inline void ksched_enqueue_intr(unsigned int core, int type)
 {
-	switch(type) {
+	switch (type) {
 	case KSCHED_INTR_CEDE:
 		store_release(&ksched_shm[core].cede, ksched_gens[core]);
 		break;

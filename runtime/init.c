@@ -30,6 +30,7 @@ static initializer_fn_t late_init_hook = NULL;
 /* global subsystem initialization */
 static const struct init_entry global_init_handlers[] = {
 	/* runtime core */
+	GLOBAL_INITIALIZER(kthread),
 	GLOBAL_INITIALIZER(stack),
 	GLOBAL_INITIALIZER(sched),
 	GLOBAL_INITIALIZER(preempt),

@@ -10,8 +10,8 @@
 #include <base/stddef.h>
 
 #include "defs.h"
+#include "sched.h"
 
-#define CORES_ADJUST_INTERVAL_US	5
 #define LOG_INTERVAL_US		(1000 * 1000)
 struct dataplane dp;
 
@@ -29,7 +29,9 @@ static const struct init_entry iok_init_handlers[] = {
 	IOK_INITIALIZER(base),
 
 	/* general iokernel */
-	IOK_INITIALIZER(cores),
+	IOK_INITIALIZER(ksched),
+	IOK_INITIALIZER(sched),
+	IOK_INITIALIZER(simple),
 
 	/* control plane */
 	IOK_INITIALIZER(control),
@@ -69,7 +71,6 @@ void dataplane_loop()
 #ifdef STATS
 	uint64_t next_log_time = microtime();
 #endif
-	uint64_t now, last_time = microtime();
 
 	/*
 	 * Check that the port is on the same NUMA node as the polling thread
@@ -94,13 +95,8 @@ void dataplane_loop()
 		if (!work_done)
 			dp_clients_rx_control_lrpcs();
 
-		now = microtime();
-
 		/* adjust core assignments */
-		if (now - last_time > CORES_ADJUST_INTERVAL_US) {
-			cores_adjust_assignments();
-			last_time = now;
-		}
+		sched_poll();
 
 		/* process a batch of commands from runtimes */
 		work_done |= commands_rx();

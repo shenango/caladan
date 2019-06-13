@@ -27,10 +27,6 @@ static int commands_drain_queue(struct thread *t, struct rte_mbuf **bufs, int n)
 			/* TODO: validate pointer @buf */
 			break;
 
-		case TXCMD_PARKED:
-			cores_park_kthread(t, false);
-			break;
-
 		default:
 			/* kill the runtime? */
 			BUG();

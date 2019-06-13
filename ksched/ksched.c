@@ -18,7 +18,6 @@
 #include <linux/cpuidle.h>
 #include <asm/local.h>
 #include <asm/mwait.h>
-#include <asm/local.h>
 
 #include "ksched.h"
 
@@ -117,21 +116,16 @@ static int __cpuidle ksched_idle(struct cpuidle_device *dev,
 	local_set(&p->busy, false);
 	WRITE_ONCE(s->busy, false);
 
-	while (true) {
-		/* use the mwait instruction to efficiently poll memory */
-		gen = ksched_mwait_on_addr(&s->gen, p->last_gen);
-		if (gen != p->last_gen) {
-			tid = READ_ONCE(s->tid);
-			WRITE_ONCE(s->tid, 0);
-			p->last_gen = gen;
-			WRITE_ONCE(s->busy, true);
-			local_set(&p->busy, true);
-			smp_store_release(&s->last_gen, gen);
-			ksched_wakeup_pid(cpu, tid);
-			break;
-		}
-		if (need_resched())
-			break;
+	/* use the mwait instruction to efficiently poll memory */
+	gen = ksched_mwait_on_addr(&s->gen, p->last_gen);
+	if (gen != p->last_gen) {
+		tid = READ_ONCE(s->tid);
+		p->last_gen = gen;
+		p->tid = tid;
+		WRITE_ONCE(s->busy, true);
+		local_set(&p->busy, true);
+		smp_store_release(&s->last_gen, gen);
+		ksched_wakeup_pid(cpu, tid);
 	}
 
 	put_cpu();
@@ -210,7 +204,7 @@ static long ksched_park(void)
 	__set_current_state(TASK_INTERRUPTIBLE);
 	schedule();
 	__set_current_state(TASK_RUNNING);
-	return 0;
+	return smp_processor_id();
 }
 
 static long ksched_start(void)
@@ -284,7 +278,7 @@ static long ksched_intr(struct ksched_intr_req __user *ureq)
 		return -EACCES;
 
 	/* validate inputs */
-	if (unlikely(copy_from_user(&req, &ureq, sizeof(req))))
+	if (unlikely(copy_from_user(&req, ureq, sizeof(req))))
 		return -EFAULT;
 	if (unlikely(!alloc_cpumask_var(&mask, GFP_KERNEL)))
 		return -ENOMEM;
@@ -393,6 +387,11 @@ static int __init ksched_init(void)
 	dev_t devno = MKDEV(KSCHED_MAJOR, KSCHED_MINOR);
 	int ret;
 
+	if (!cpu_has(&boot_cpu_data, X86_FEATURE_MWAIT)) {
+		printk(KERN_ERR "ksched: mwait support is required");
+		return -ENOTSUPP;
+	}
+
 	ret = register_chrdev_region(devno, 1, "ksched");
 	if (ret)
 		return ret;
@@ -402,7 +401,7 @@ static int __init ksched_init(void)
 	if (ret)
 		goto fail_cdev_add;
 
-	shm = vmalloc(SHM_SIZE);
+	shm = vmalloc_user(SHM_SIZE);
 	if (!shm) {
 		ret = -ENOMEM;
 		goto fail_shm;

@@ -15,8 +15,10 @@
 
 #define DEFINE_BITMAP(name, nbits) \
 	unsigned long name[BITMAP_LONG_SIZE(nbits)]
+#define DECLARE_BITMAP(name, nbits) \
+	extern DEFINE_BITMAP(name, nbits)
 
-typedef unsigned long *bitmap_ptr;
+typedef unsigned long *bitmap_ptr_t;
 
 #define BITMAP_POS_IDX(pos)	((pos) / BITS_PER_LONG)
 #define BITMAP_POS_SHIFT(pos)	((pos) % BITS_PER_LONG)
@@ -48,7 +50,7 @@ static inline void bitmap_clear(unsigned long *bits, int pos)
  *
  * Returns true if the bit is set, otherwise false.
  */
-static inline bool bitmap_test(unsigned long *bits, int pos)
+static inline bool bitmap_test(const unsigned long *bits, int pos)
 {
 	return (bits[BITMAP_POS_IDX(pos)] & (1ul << BITMAP_POS_SHIFT(pos))) != 0;
 }
@@ -60,7 +62,7 @@ static inline bool bitmap_test(unsigned long *bits, int pos)
  *
  * Returns the bit weight.
  */
-static inline int bitmap_popcount(unsigned long *bits, int nbits)
+static inline int bitmap_popcount(const unsigned long *bits, int nbits)
 {
 	int i, val = 0;
 
@@ -68,6 +70,54 @@ static inline int bitmap_popcount(unsigned long *bits, int nbits)
 		val += __builtin_popcountl(bits[i]);
 
 	return val;
+}
+
+/**
+ * bitmap_and - performs a bitwise AND operation
+ * @dst: the destination to store the result
+ * @src1: the first input
+ * @src2: the second input
+ * @nbits: the number of bits in the bitmap
+ */
+static inline void bitmap_and(unsigned long *dst, const unsigned long *src1,
+			      const unsigned long *src2, int nbits)
+{
+	int i;
+
+	for (i = 0; i < BITMAP_LONG_SIZE(nbits); i++)
+		dst[i] = src1[i] & src2[1];
+}
+
+/**
+ * bitmap_or - performs a bitwise OR operation
+ * @dst: the destination to store the result
+ * @src1: the first input
+ * @src2: the second input
+ * @nbits: the number of bits in the bitmap
+ */
+static inline void bitmap_or(unsigned long *dst, const unsigned long *src1,
+			     const unsigned long *src2, int nbits)
+{
+	int i;
+
+	for (i = 0; i < BITMAP_LONG_SIZE(nbits); i++)
+		dst[i] = src1[i] | src2[1];
+}
+
+/**
+ * bitmap_xor - performs a bitwise XOR operation
+ * @dst: the destination to store the result
+ * @src1: the first input
+ * @src2: the second input
+ * @nbits: the number of bits in the bitmap
+ */
+static inline void bitmap_xor(unsigned long *dst, const unsigned long *src1,
+			      const unsigned long *src2, int nbits)
+{
+	int i;
+
+	for (i = 0; i < BITMAP_LONG_SIZE(nbits); i++)
+		dst[i] = src1[i] ^ src2[1];
 }
 
 /**

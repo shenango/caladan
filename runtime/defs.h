@@ -469,6 +469,7 @@ extern int storage_init_thread(void);
 
 /* global initialization */
 extern int ioqueues_init(unsigned int threads);
+extern int kthread_init(void);
 extern int stack_init(void);
 extern int sched_init(void);
 extern int preempt_init(void);

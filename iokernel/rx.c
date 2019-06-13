@@ -13,6 +13,7 @@
 #include <iokernel/shm.h>
 
 #include "defs.h"
+#include "sched.h"
 
 #define MBUF_CACHE_SIZE 250
 #define RX_PREFETCH_STRIDE 2
@@ -59,18 +60,15 @@ bool rx_send_to_runtime(struct proc *p, uint32_t hash, uint64_t cmd,
 {
 	struct thread *th;
 
-	if (likely(p->active_thread_count > 0)) {
-		/* load balance between active threads */
-		th = &p->threads[p->flow_tbl[hash % p->thread_count]];
-	} else if (p->sched_cfg.guaranteed_cores > 0 ||
-		   get_nr_avail_cores() > 0) {
-		th = cores_add_core(p);
-		if (unlikely(!th))
-			return false;
-	} else {
-		/* enqueue to the first idle thread, which will be woken next */
+	if (unlikely(sched_threads_active(p) == 0))
+		sched_add_core(p);
+
+	if (unlikely(sched_threads_active(p) == 0)) {
+		/* enqueue to an idle thread (to be woken later) */
 		th = list_top(&p->idle_threads, struct thread, idle_link);
-		proc_set_overloaded(p);
+	} else {
+		/* use the flow table to route to an active thread */
+		th = &p->threads[p->flow_tbl[hash % p->thread_count]];
 	}
 
 	return lrpc_send(&th->rxq, cmd, payload);
