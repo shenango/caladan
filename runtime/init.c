@@ -31,6 +31,7 @@ static initializer_fn_t late_init_hook = NULL;
 static const struct init_entry global_init_handlers[] = {
 	/* runtime core */
 	GLOBAL_INITIALIZER(kthread),
+	GLOBAL_INITIALIZER(ioqueues),
 	GLOBAL_INITIALIZER(stack),
 	GLOBAL_INITIALIZER(sched),
 	GLOBAL_INITIALIZER(preempt),
@@ -170,12 +171,6 @@ int runtime_init(const char *cfgpath, thread_fn_t main_fn, void *arg)
 		return ret;
 
 	pthread_barrier_init(&init_barrier, NULL, maxks);
-
-	ret = ioqueues_init(maxks);
-	if (ret) {
-		log_err("couldn't initialize ioqueues, ret = %d", ret);
-		return ret;
-	}
 
 	ret = run_init_handlers("global", global_init_handlers,
 				ARRAY_SIZE(global_init_handlers));

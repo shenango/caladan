@@ -20,6 +20,30 @@ struct q_ptrs {
 	uint32_t		rq_tail;
 };
 
+enum {
+	HWQ_MLX5 = 0,
+	HWQ_MLX4,
+	HWQ_SPDK_NVME,
+	NR_HWQ,
+};
+
+struct hardware_queue_spec {
+	shmptr_t		descriptor_table;
+	shmptr_t		consumer_idx;
+	uint32_t		descriptor_size;
+	uint32_t		nr_descriptors;
+	uint32_t		parity_byte_offset;
+	uint32_t		parity_bit_mask;
+	uint32_t		hwq_type;
+};
+
+struct timer_spec {
+	shmptr_t		timern;
+	shmptr_t		next_tsc;
+	unsigned long		timer_resolution;
+};
+
+
 /* describes a runtime kernel thread */
 struct thread_spec {
 	struct queue_spec	rxq;
@@ -54,10 +78,14 @@ struct sched_spec {
 struct control_hdr {
 	unsigned int		magic;
 	unsigned int		thread_count;
+	unsigned int		timer_count;
+	unsigned int		hwq_count;
 	unsigned long		egress_buf_count;
 	shmptr_t		congestion_signal;
 	int			spdk_shm_id;
 	struct eth_addr		mac;
 	struct sched_spec	sched_cfg;
-	struct thread_spec	threads[];
+	shmptr_t			thread_specs;
+	shmptr_t			timer_specs;
+	shmptr_t			hwq_specs;
 };

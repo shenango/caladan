@@ -1,18 +1,16 @@
 DPDK_PATH = dpdk
 INC     = -I./inc -I$(DPDK_PATH)/build/include
-ifneq ($(SPDK),)
 SPDK_PATH = spdk
-INC += -I$(SPDK_PATH)/include
-endif
+
 CFLAGS  = -g -Wall -std=gnu11 -D_GNU_SOURCE $(INC) -mssse3
 LDFLAGS = -T base/base.ld
 LD	= gcc
 CC	= gcc
 AR	= ar
 SPARSE	= sparse
-# uncomment to autodetect MLX5
-# MLX5=$(shell lspci | grep 'ConnectX-5' || echo "")
+MLX5=$(shell lspci | grep 'ConnectX-5' || echo "")
 MLX4=$(shell lspci | grep 'ConnectX-3' || echo "")
+SPDK=$(shell lspci | grep 'Optane SSD 900P' || echo "")
 
 CHECKFLAGS = -D__CHECKER__ -Waddress-space
 
@@ -33,6 +31,10 @@ else
 ifneq ($(MLX4),)
 CFLAGS += -DMLX4
 endif
+endif
+
+ifneq ($(SPDK),)
+INC += -I$(SPDK_PATH)/include
 endif
 
 # handy for debugging

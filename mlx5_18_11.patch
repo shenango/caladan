@@ -1,6 +1,6 @@
-From 970312d4e39fad07a67683e24b0870efd9d7b3e1 Mon Sep 17 00:00:00 2001
+From 259b356cf3cc236fd98f2b7cb083c2976681f659 Mon Sep 17 00:00:00 2001
 From: Josh Fried <joshuafried@gmail.com>
-Date: Thu, 31 Jan 2019 12:53:00 -0500
+Date: Sun, 19 May 2019 03:06:31 -0400
 Subject: [PATCH] MLX5 support for the iokernel
 
 ---
@@ -9,9 +9,11 @@ Subject: [PATCH] MLX5 support for the iokernel
  drivers/net/mlx5/mlx5_custom.h            |  8 ++++++++
  drivers/net/mlx5/mlx5_mr.c                | 17 +++++++++++++++++
  drivers/net/mlx5/mlx5_mr.h                |  2 ++
+ drivers/net/mlx5/mlx5_rxq.c               |  4 ++--
+ drivers/net/mlx5/mlx5_rxtx.c              |  3 ++-
  drivers/net/mlx5/mlx5_rxtx.h              | 22 +++++++---------------
  drivers/net/mlx5/rte_pmd_mlx5_version.map |  4 ++++
- 7 files changed, 41 insertions(+), 16 deletions(-)
+ 9 files changed, 45 insertions(+), 19 deletions(-)
  create mode 100644 drivers/net/mlx5/mlx5_custom.h
 
 diff --git a/config/common_base b/config/common_base
@@ -92,6 +94,40 @@ index a57003fe9..9db10045e 100644
  /* Memory Region object. */
  struct mlx5_mr {
  	LIST_ENTRY(mlx5_mr) mr; /**< Pointer to the prev/next entry. */
+diff --git a/drivers/net/mlx5/mlx5_rxq.c b/drivers/net/mlx5/mlx5_rxq.c
+index 183da0e28..b61bd83b0 100644
+--- a/drivers/net/mlx5/mlx5_rxq.c
++++ b/drivers/net/mlx5/mlx5_rxq.c
+@@ -870,9 +870,9 @@ mlx5_rxq_ibv_new(struct rte_eth_dev *dev, uint16_t idx)
+ 		.pd = priv->pd,
+ 		.cq = tmpl->cq,
+ 		.comp_mask =
+-			IBV_WQ_FLAGS_CVLAN_STRIPPING |
++			IBV_WQ_INIT_ATTR_FLAGS | IBV_WQ_FLAGS_CVLAN_STRIPPING |
+ 			0,
+-		.create_flags = (rxq_data->vlan_strip ?
++		.create_flags = IBV_WQ_FLAGS_DELAY_DROP | (rxq_data->vlan_strip ?
+ 				 IBV_WQ_FLAGS_CVLAN_STRIPPING :
+ 				 0),
+ 	};
+diff --git a/drivers/net/mlx5/mlx5_rxtx.c b/drivers/net/mlx5/mlx5_rxtx.c
+index 6eceea5fe..e06f1b3d8 100644
+--- a/drivers/net/mlx5/mlx5_rxtx.c
++++ b/drivers/net/mlx5/mlx5_rxtx.c
+@@ -2405,7 +2405,7 @@ removed_rx_burst(void *dpdk_txq __rte_unused,
+  * stubs are needed for linkage when those are not included outside of this file
+  * (e.g.  mlx5_rxtx_vec_sse.c for x86).
+  */
+-
++#if 0
+ __rte_weak uint16_t
+ mlx5_tx_burst_raw_vec(void *dpdk_txq __rte_unused,
+ 		      struct rte_mbuf **pkts __rte_unused,
+@@ -2453,3 +2453,4 @@ mlx5_check_vec_rx_support(struct rte_eth_dev *dev __rte_unused)
+ {
+ 	return -ENOTSUP;
+ }
++#endif
 diff --git a/drivers/net/mlx5/mlx5_rxtx.h b/drivers/net/mlx5/mlx5_rxtx.h
 index f47d327cf..18612cc2d 100644
 --- a/drivers/net/mlx5/mlx5_rxtx.h

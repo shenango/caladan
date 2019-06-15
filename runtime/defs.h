@@ -211,22 +211,21 @@ stack_init_to_rsp_with_buf(struct stack *s, void **buf, size_t buf_len,
  * ioqueues
  */
 
-DECLARE_SPINLOCK(qlock);
-extern unsigned int nrqs;
 
 struct iokernel_control {
 	int fd;
 	mem_key_t key;
-	shmptr_t next_free;
-	unsigned int thread_count;
-	struct thread_spec threads[NCPU];
+	struct control_hdr *hdr;
+	struct thread_spec *threads;
+	struct timer_spec *timers;
+	struct hwq_spec *hwqs;
 	void *tx_buf;
 	size_t tx_len;
 	unsigned int spdk_shm_id;
 };
 
 extern struct iokernel_control iok;
-
+extern void *iok_shm_alloc(size_t size, size_t alignment, shmptr_t *shm_out);
 
 /*
  * Per-kernel-thread State
@@ -275,7 +274,7 @@ struct timer_idx;
 struct kthread {
 	/* 1st cache-line */
 	spinlock_t		lock;
-	uint32_t		generation;
+	uint32_t		kthread_idx;
 	uint32_t		rq_head;
 	uint32_t		rq_tail;
 	struct list_head	rq_overflow;
@@ -453,6 +452,29 @@ static inline bool timer_needed(struct kthread *k)
 
 
 /*
+ * Storage support
+ */
+
+#if __has_include("spdk/nvme.h")
+
+extern int storage_available_completions(struct kthread *k);
+extern int storage_proc_completions(struct kthread *k,
+	    unsigned int budget, struct thread **wakeable_threads);
+#else
+
+static inline int storage_available_completions(struct kthread *k)
+{
+	return 0;
+}
+static inline int storage_proc_completions(struct kthread *k,
+	    unsigned int budget, struct thread **wakeable_threads)
+{
+	return 0;
+}
+
+#endif
+
+/*
  * Init
  */
 
@@ -468,8 +490,8 @@ extern int smalloc_init_thread(void);
 extern int storage_init_thread(void);
 
 /* global initialization */
-extern int ioqueues_init(unsigned int threads);
 extern int kthread_init(void);
+extern int ioqueues_init(void);
 extern int stack_init(void);
 extern int sched_init(void);
 extern int preempt_init(void);

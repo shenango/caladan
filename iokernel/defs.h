@@ -34,12 +34,31 @@
 #define IOKERNEL_CONTROL_BURST_SIZE	4
 #define IOKERNEL_POLL_INTERVAL		5
 
+#define CORES_ADJUST_INTERVAL_US	5
 
 /*
  * Process Support
  */
 
 struct proc;
+
+struct hwq {
+	void		*descriptor_table;
+	uint32_t		*consumer_idx;
+	uint32_t		descriptor_size;
+	uint32_t		nr_descriptors;
+	uint32_t		parity_byte_offset;
+	uint32_t		parity_bit_mask;
+	uint32_t		hwq_type;
+
+	uint32_t		cq_idx;
+	bool		cq_pending;
+};
+
+struct timer {
+		unsigned int		*timern;
+		uint64_t		*next_tsc;
+};
 
 struct thread {
 	bool			active;
@@ -85,8 +104,15 @@ struct proc {
 	/* network data */
 	struct eth_addr		mac;
 
+	/* timer heaps */
+	unsigned int		timer_count;
+	struct timer		timers[NCPU];
+
+	/* hardware queues */
+	unsigned int		hwq_count;
+	struct hwq		hwqs[NCPU];
+
 	/* Unique identifier -- never recycled across runtimes*/
-	uintptr_t		uniqid;
 #ifdef MLX
 	uint32_t		lkey;
 	void			*mr;
@@ -201,6 +227,7 @@ enum {
  */
 struct dataplane {
 	uint8_t			port;
+	bool			is_mlx;
 	struct rte_mempool	*rx_mbuf_pool;
 
 	struct proc		*clients[IOKERNEL_MAX_PROC];
