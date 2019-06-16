@@ -145,7 +145,7 @@ int sched_run_on_core(struct proc *p, unsigned int core)
 	struct thread *th = NULL;
 
 	/* validate inputs --- mostly to catch bugs */
-	if (unlikely(list_empty(&p->idle_threads) || core >= NCPU ||
+	if (unlikely((p && list_empty(&p->idle_threads)) || core >= NCPU ||
 		     !bitmap_test(sched_allowed_cores, core))) {
 		WARN();
 		return -EINVAL;
@@ -164,7 +164,7 @@ int sched_run_on_core(struct proc *p, unsigned int core)
 	/* if we're still busy with the last run request than stop here */
 	if (s->wait) {
 		if (s->pending_th) {
-			sched_disable_kthread(th);
+			sched_disable_kthread(s->pending_th);
 			proc_put(s->pending_th->p);
 		}
 		s->pending_th = th;
@@ -173,7 +173,7 @@ int sched_run_on_core(struct proc *p, unsigned int core)
 	}
 
 	/* check if we need to interrupt the current core */
-	if (!ksched_poll_idle(core))
+	if (!s->idle)
 		ksched_enqueue_intr(core, KSCHED_INTR_CEDE);
 
 	/* finally request that the new kthread run on this core */
@@ -256,19 +256,6 @@ void sched_poll(void)
 	int core;
 
 	/*
-	 * slow pass --- runs every IOKERNEL_POLL_INTERVAL
-	 */
-
-	now = microtime();
-	if (now - last_time > IOKERNEL_POLL_INTERVAL) {
-		int i;
-
-		last_time = now;
-		for (i = 0; i < dp.nr_clients; i++)
-			sched_detect_congestion(dp.clients[i]);
-	}
-
-	/*
 	 * fast pass --- runs every poll loop
 	 */
 
@@ -310,6 +297,19 @@ void sched_poll(void)
 			s->idle = true;
 			bitmap_set(idle, core);
 		}
+	}
+
+	/*
+	 * slow pass --- runs every IOKERNEL_POLL_INTERVAL
+	 */
+
+	now = microtime();
+	if (now - last_time > IOKERNEL_POLL_INTERVAL) {
+		int i;
+
+		last_time = now;
+		for (i = 0; i < dp.nr_clients; i++)
+			sched_detect_congestion(dp.clients[i]);
 	}
 
 	/*

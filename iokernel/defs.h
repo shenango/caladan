@@ -34,8 +34,6 @@
 #define IOKERNEL_CONTROL_BURST_SIZE	4
 #define IOKERNEL_POLL_INTERVAL		5
 
-#define CORES_ADJUST_INTERVAL_US	5
-
 /*
  * Process Support
  */
@@ -43,7 +41,7 @@
 struct proc;
 
 struct hwq {
-	void		*descriptor_table;
+	void			*descriptor_table;
 	uint32_t		*consumer_idx;
 	uint32_t		descriptor_size;
 	uint32_t		nr_descriptors;
@@ -52,12 +50,12 @@ struct hwq {
 	uint32_t		hwq_type;
 
 	uint32_t		cq_idx;
-	bool		cq_pending;
+	bool			cq_pending;
 };
 
 struct timer {
-		unsigned int		*timern;
-		uint64_t		*next_tsc;
+	unsigned int		*timern;
+	uint64_t		*next_tsc;
 };
 
 struct thread {
@@ -84,7 +82,6 @@ struct proc {
 	struct ref		ref;
 	unsigned int		kill:1;       /* the proc is being torn down */
 	int			*congestion_signal;
-
 	unsigned long		policy_data;
 
 	/* scheduler data */

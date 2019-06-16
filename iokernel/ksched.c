@@ -35,7 +35,7 @@ int ksched_init(void)
 
 	/* then map the shared memory region with the kernel */
 	addr = mmap(NULL, sizeof(struct ksched_shm_cpu) * NCPU,
-		    PROT_READ | PROT_WRITE, MAP_PRIVATE, ksched_fd, 0);
+		    PROT_READ | PROT_WRITE, MAP_SHARED, ksched_fd, 0);
 	if (addr == MAP_FAILED)
 		return -errno;
 

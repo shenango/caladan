@@ -91,21 +91,21 @@ void dataplane_loop()
 		/* handle a burst of ingress packets */
 		work_done |= rx_burst();
 
-		/* handle control messages */
-		if (!work_done)
-			dp_clients_rx_control_lrpcs();
-
 		/* adjust core assignments */
 		sched_poll();
-
-		/* process a batch of commands from runtimes */
-		work_done |= commands_rx();
 
 		/* drain overflow completion queues */
 		work_done |= tx_drain_completions();
 
 		/* send a burst of egress packets */
 		work_done |= tx_burst();
+
+		/* process a batch of commands from runtimes */
+		work_done |= commands_rx();
+
+		/* handle control messages */
+		if (!work_done)
+			dp_clients_rx_control_lrpcs();
 
 		STAT_INC(BATCH_TOTAL, IOKERNEL_RX_BURST_SIZE);
 

@@ -47,7 +47,10 @@ static DEFINE_PER_CPU(struct ksched_percpu, kp);
  */
 static struct task_struct *ksched_lookup_task(pid_t nr)
 {
-	return pid_task(find_vpid(nr), PIDTYPE_PID);
+	struct pid *pid = find_vpid(nr);
+	if (unlikely(!pid))
+		return NULL;
+	return pid_task(pid, PIDTYPE_PID);
 }
 
 static int ksched_wakeup_pid(int cpu, pid_t pid)
@@ -57,21 +60,19 @@ static int ksched_wakeup_pid(int cpu, pid_t pid)
 
 	rcu_read_lock();
 	p = ksched_lookup_task(pid);
-	if (!p) {
+	if (unlikely(!p || p->on_cpu || p->state)) {
 		rcu_read_unlock();
-		return -ESRCH;
+		return -EINVAL;
 	}
-	get_task_struct(p);
-	rcu_read_unlock();
 
 	ret = set_cpus_allowed_ptr(p, cpumask_of(cpu));
-	if (ret) {
-		put_task_struct(p);
+	if (unlikely(ret)) {
+		rcu_read_unlock();
 		return ret;
 	}
 
 	wake_up_process(p);
-	put_task_struct(p);
+	rcu_read_unlock();
 
 	return 0;
 }
@@ -98,6 +99,21 @@ static int ksched_mwait_on_addr(const unsigned int *addr, unsigned int val)
 	return smp_load_acquire(addr);
 }
 
+static int ksched_spin_on_addr(const unsigned int *addr, unsigned int val)
+{
+	unsigned int cur;
+
+	while (true) {
+		cur = smp_load_acquire(addr);
+		if (cur != val || signal_pending(current) || need_resched())
+			break;
+
+		cpu_relax();
+	}
+
+	return cur;
+}
+
 static int __cpuidle ksched_idle(struct cpuidle_device *dev,
 				 struct cpuidle_driver *drv, int index)
 {
@@ -113,19 +129,33 @@ static int __cpuidle ksched_idle(struct cpuidle_device *dev,
 	p = this_cpu_ptr(&kp);
 	s = &shm[cpu];
 
-	local_set(&p->busy, false);
-	WRITE_ONCE(s->busy, false);
+	/* check if we entered the idle loop with a process still active */
+	if (p->tid != 0 && ksched_lookup_task(p->tid) != NULL) {
+		ksched_mwait_on_addr(&s->gen, s->gen);
+		put_cpu();
 
-	/* use the mwait instruction to efficiently poll memory */
+		return index;
+	}
+
+	/* mark the core as idle if a new request isn't waiting */
+	local_set(&p->busy, false);
+	if (s->busy && smp_load_acquire(&s->gen) == p->last_gen)
+		WRITE_ONCE(s->busy, false);
+
+	/* use the mwait instruction to efficiently wait for the next request */
 	gen = ksched_mwait_on_addr(&s->gen, p->last_gen);
 	if (gen != p->last_gen) {
 		tid = READ_ONCE(s->tid);
 		p->last_gen = gen;
+		/* if the TID is 0, then leave the core idle */
+		if (tid != 0) {
+			if (unlikely(ksched_wakeup_pid(cpu, tid)))
+				tid = 0;
+		}
 		p->tid = tid;
-		WRITE_ONCE(s->busy, true);
+		WRITE_ONCE(s->busy, tid != 0);
 		local_set(&p->busy, true);
 		smp_store_release(&s->last_gen, gen);
-		ksched_wakeup_pid(cpu, tid);
 	}
 
 	put_cpu();
@@ -145,21 +175,15 @@ static long ksched_park(void)
 	p = this_cpu_ptr(&kp);
 	s = &shm[cpu];
 
-	local_irq_disable();
-	if (unlikely(signal_pending(current))) {
-		local_irq_enable();
-		put_cpu();
-		return -ERESTARTSYS;
-	}
 	local_set(&p->busy, false);
-	WRITE_ONCE(s->busy, false);
+	if (smp_load_acquire(&s->gen) == p->last_gen)
+		WRITE_ONCE(s->busy, false);
 
 	while (true) {
-		/* use the mwait instruction to efficiently poll memory */
-		gen = ksched_mwait_on_addr(&s->gen, p->last_gen);
+		/* poll memory waiting for a request or rescheduling */
+		gen = ksched_spin_on_addr(&s->gen, p->last_gen);
 		if (gen != p->last_gen)
 			break;
-		local_irq_enable();
 		put_cpu();
 
 		/* is a signal pending? */
@@ -177,27 +201,30 @@ static long ksched_park(void)
 		cpu = get_cpu();
 		p = this_cpu_ptr(&kp);
 		s = &shm[cpu];
-		local_irq_disable();
 	}
 
 	/* determine the next task to run */
 	tid = READ_ONCE(s->tid);
 	p->last_gen = gen;
-	p->tid = tid;
-	WRITE_ONCE(s->busy, true);
-	local_set(&p->busy, true);
-	local_irq_enable();
-	smp_store_release(&s->last_gen, gen);
 
 	/* are we waking the current pid? */
 	if (tid == current->pid) {
+		WRITE_ONCE(s->busy, true);
+		local_set(&p->busy, true);
+		smp_store_release(&s->last_gen, gen);
 		put_cpu();
 		return 0;
 	}
 
 	/* if the tid is zero, then simply idle this core */
-	if (tid != 0)
-		ksched_wakeup_pid(cpu, tid);
+	if (tid != 0) {
+		if (unlikely(ksched_wakeup_pid(cpu, tid)))
+			tid = 0;
+	}
+	p->tid = tid;
+	smp_store_release(&s->last_gen, gen);
+	WRITE_ONCE(s->busy, tid != 0);
+	local_set(&p->busy, true);
 	put_cpu();
 
 	/* put this task to sleep and reschedule so the next task can run */
@@ -242,17 +269,13 @@ static void ksched_ipi(void *unused)
 
 	/* check if yield has been requested (detecting race conditions) */
 	gen = smp_load_acquire(&s->yield);
-	if (gen == p->last_gen) {
+	if (gen == p->last_gen)
 		send_sig(SIGUSR2, t, 0);
-		smp_store_release(&s->yield, 0);
-	}
 
 	/* check if cede has been requested (detecting race conditions) */
 	gen = smp_load_acquire(&s->cede);
-	if (gen == p->last_gen) {
+	if (gen == p->last_gen)
 		send_sig(SIGUSR1, t, 0);
-		smp_store_release(&s->cede, 0);
-	}
 
 	put_cpu();
 }
