@@ -222,9 +222,9 @@ static long ksched_park(void)
 			tid = 0;
 	}
 	p->tid = tid;
-	smp_store_release(&s->last_gen, gen);
 	WRITE_ONCE(s->busy, tid != 0);
 	local_set(&p->busy, true);
+	smp_store_release(&s->last_gen, gen);
 	put_cpu();
 
 	/* put this task to sleep and reschedule so the next task can run */
