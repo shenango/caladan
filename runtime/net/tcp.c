@@ -711,7 +711,7 @@ static size_t iov_len(const struct iovec *iov, int iovcnt)
 	int i;
 
 	for (i = 0; i < iovcnt; i++)
-		len += iov[iovcnt].iov_len;
+		len += iov[i].iov_len;
 
 	return len;
 }
@@ -751,10 +751,10 @@ ssize_t tcp_readv(tcpconn_t *c, const struct iovec *iov, int iovcnt)
 		do {
 			const struct iovec *vp = &iov[i];
 			size_t cpylen = min(vp->iov_len - offset,
-					    mbuf_length(m));
+					    mbuf_length(cur));
 
 			memcpy((char *)vp->iov_base + offset,
-			       mbuf_pull(m, cpylen), cpylen);
+			       mbuf_pull(cur, cpylen), cpylen);
 
 			offset += cpylen;
 			if (offset == vp->iov_len) {
@@ -763,7 +763,7 @@ ssize_t tcp_readv(tcpconn_t *c, const struct iovec *iov, int iovcnt)
 			}
 
 			assert(i <= iovcnt);
-		} while (mbuf_length(m) > 0);
+		} while (mbuf_length(cur) > 0);
 		mbuf_free(cur);
 	}
 

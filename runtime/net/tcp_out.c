@@ -220,7 +220,7 @@ ssize_t tcp_tx_send(tcpconn_t *c, const void *buf, size_t len, bool push)
 	end = pos + len;
 
 	/* the main TCP segmenter loop */
-	while (pos < end) {
+	do {
 		/* allocate a buffer and copy payload data */
 		if (c->tx_pending) {
 			m = c->tx_pending;
@@ -267,7 +267,7 @@ ssize_t tcp_tx_send(tcpconn_t *c, const void *buf, size_t len, bool push)
 			/* pretend the packet was sent */
 			atomic_write(&m->ref, 1);
 		}
-	}
+	} while (pos < end);
 
 	/* if we sent anything return the length we sent instead of an error */
 	if (pos - (const char *)buf > 0)
