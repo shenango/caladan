@@ -60,7 +60,7 @@ static int ksched_wakeup_pid(int cpu, pid_t pid)
 
 	rcu_read_lock();
 	p = ksched_lookup_task(pid);
-	if (unlikely(!p || p->on_cpu || p->state)) {
+	if (unlikely(!p || p->on_cpu || p->state == TASK_WAKING)) {
 		rcu_read_unlock();
 		return -EINVAL;
 	}
