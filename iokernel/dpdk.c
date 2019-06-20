@@ -46,8 +46,11 @@
 #include "defs.h"
 #include "sched.h"
 
-#define RX_RING_SIZE 2048
-#define TX_RING_SIZE 2048
+#define RX_RING_SIZE 256
+#define TX_RING_SIZE 256
+
+#define MLX5_RX_RING_SIZE 2048
+#define MLX5_TX_RING_SIZE 2048
 
 static const struct rte_eth_conf port_conf_default = {
 	.rxmode = {
@@ -85,6 +88,17 @@ static inline int dpdk_port_init(uint8_t port, struct rte_mempool *mbuf_pool)
 	if (!rte_eth_dev_is_valid_port(port))
 		return -1;
 
+	/* Get default device configuration */
+	rte_eth_dev_info_get(0, &dev_info);
+	rxconf = &dev_info.default_rxconf;
+	rxconf->rx_free_thresh = 64;
+	dp.is_mlx = !strncmp(dev_info.driver_name, "net_mlx", 7);
+
+	if (!strncmp(dev_info.driver_name, "net_mlx5", 8)) {
+		nb_rxd = MLX5_RX_RING_SIZE;
+		nb_txd = MLX5_TX_RING_SIZE;
+	}
+
 	/* Configure the Ethernet device. */
 	retval = rte_eth_dev_configure(port, rx_rings, tx_rings, &port_conf);
 	if (retval != 0)
@@ -93,12 +107,6 @@ static inline int dpdk_port_init(uint8_t port, struct rte_mempool *mbuf_pool)
 	retval = rte_eth_dev_adjust_nb_rx_tx_desc(port, &nb_rxd, &nb_txd);
 	if (retval != 0)
 		return retval;
-
-	rte_eth_dev_info_get(0, &dev_info);
-	rxconf = &dev_info.default_rxconf;
-	rxconf->rx_free_thresh = 64;
-
-	dp.is_mlx = !strncmp(dev_info.driver_name, "net_mlx", 7);
 
 	/* Allocate and set up 1 RX queue per Ethernet port. */
 	for (q = 0; q < rx_rings; q++) {
