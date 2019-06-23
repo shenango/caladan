@@ -180,7 +180,11 @@ static unsigned int simple_choose_core(struct proc *p)
 
 static int simple_add_kthread(struct proc *p)
 {
+	struct simple_data *sd = (struct simple_data *)p->policy_data;
 	unsigned int core;
+
+	if (sd->threads_active >= sd->threads_max)
+		return -ENOENT;
 
 	core = simple_choose_core(p);
 	if (core == NCPU)

@@ -60,7 +60,13 @@ static int ksched_wakeup_pid(int cpu, pid_t pid)
 
 	rcu_read_lock();
 	p = ksched_lookup_task(pid);
-	if (unlikely(!p || p->on_cpu || p->state == TASK_WAKING)) {
+	if (unlikely(!p)) {
+		rcu_read_unlock();
+		return -EINVAL;
+	}
+
+	if (WARN_ON_ONCE(p->on_cpu || p->state == TASK_WAKING ||
+			 p->state == TASK_RUNNING)) {
 		rcu_read_unlock();
 		return -EINVAL;
 	}
@@ -97,21 +103,6 @@ static int ksched_mwait_on_addr(const unsigned int *addr, unsigned int val)
 	/* finally, execute mwait, and recheck after waking up */
 	__mwait(0, MWAIT_ECX_INTERRUPT_BREAK);
 	return smp_load_acquire(addr);
-}
-
-static int ksched_spin_on_addr(const unsigned int *addr, unsigned int val)
-{
-	unsigned int cur;
-
-	while (true) {
-		cur = smp_load_acquire(addr);
-		if (cur != val || signal_pending(current) || need_resched())
-			break;
-
-		cpu_relax();
-	}
-
-	return cur;
 }
 
 static int __cpuidle ksched_idle(struct cpuidle_device *dev,
@@ -176,31 +167,14 @@ static long ksched_park(void)
 	s = &shm[cpu];
 
 	local_set(&p->busy, false);
-	if (smp_load_acquire(&s->gen) == p->last_gen)
+
+	/* check if a new request is available yet */
+	gen = smp_load_acquire(&s->gen);
+	if (gen == p->last_gen) {
 		WRITE_ONCE(s->busy, false);
-
-	while (true) {
-		/* poll memory waiting for a request or rescheduling */
-		gen = ksched_spin_on_addr(&s->gen, p->last_gen);
-		if (gen != p->last_gen)
-			break;
+		p->tid = 0;
 		put_cpu();
-
-		/* is a signal pending? */
-		if (unlikely(signal_pending(current))) {
-			smp_store_release(&s->busy, true);
-			local_set(&p->busy, true);
-			put_cpu();
-			return -ERESTARTSYS;
-		}
-
-		/* do we need to run another task? */
-		if (need_resched())
-			schedule();
-
-		cpu = get_cpu();
-		p = this_cpu_ptr(&kp);
-		s = &shm[cpu];
+		goto park;
 	}
 
 	/* determine the next task to run */
@@ -227,6 +201,7 @@ static long ksched_park(void)
 	smp_store_release(&s->last_gen, gen);
 	put_cpu();
 
+park:
 	/* put this task to sleep and reschedule so the next task can run */
 	__set_current_state(TASK_INTERRUPTIBLE);
 	schedule();
