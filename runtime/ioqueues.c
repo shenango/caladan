@@ -182,7 +182,8 @@ int ioqueues_init(void)
 	/* set up queues in shared memory */
 	iok.hdr = iok_shm_alloc(sizeof(*iok.hdr), 0, NULL);
 	iok.threads = iok_shm_alloc(sizeof(*ts) * maxks, 0, NULL);
-	congestion_signal = iok_shm_alloc(sizeof(int), 0, NULL);
+	runtime_congestion = iok_shm_alloc(sizeof(struct congestion_info),
+					   0, NULL);
 
 	for (i = 0; i < maxks; i++) {
 		ts = &iok.threads[i];
@@ -260,8 +261,8 @@ int ioqueues_register_iokernel(void)
 	hdr->timer_count = 0;
 	hdr->hwq_count = 0;
 	hdr->mac = netcfg.mac;
-	hdr->congestion_signal = ptr_to_shmptr(r, congestion_signal,
-					       sizeof(int));
+	hdr->congestion_info = ptr_to_shmptr(r, runtime_congestion,
+					     sizeof(struct congestion_info));
 
 	hdr->sched_cfg.priority = SCHED_PRIORITY_NORMAL;
 	hdr->sched_cfg.max_cores = maxks;

@@ -20,6 +20,11 @@ struct q_ptrs {
 	uint32_t		rq_tail;
 };
 
+struct congestion_info {
+	float			load;
+	bool			congested;
+};
+
 enum {
 	HWQ_MLX5 = 0,
 	HWQ_MLX4,
@@ -81,11 +86,11 @@ struct control_hdr {
 	unsigned int		timer_count;
 	unsigned int		hwq_count;
 	unsigned long		egress_buf_count;
-	shmptr_t		congestion_signal;
+	shmptr_t		congestion_info;
 	int			spdk_shm_id;
 	struct eth_addr		mac;
 	struct sched_spec	sched_cfg;
-	shmptr_t			thread_specs;
-	shmptr_t			timer_specs;
-	shmptr_t			hwq_specs;
+	shmptr_t		thread_specs;
+	shmptr_t		timer_specs;
+	shmptr_t		hwq_specs;
 };

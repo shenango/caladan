@@ -41,8 +41,10 @@ int ksched_init(void)
 
 	/* then initialize the generation numbers */
 	ksched_shm = (struct ksched_shm_cpu *)addr;
-	for (i = 0; i < NCPU; i++)
+	for (i = 0; i < NCPU; i++) {
 		ksched_gens[i] = load_acquire(&ksched_shm[i].last_gen);
+		ksched_idle_hint(i, 0);
+	}
 
 	return 0;
 }

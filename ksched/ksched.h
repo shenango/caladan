@@ -23,15 +23,17 @@ struct ksched_shm_cpu {
 	/* written by userspace */
 	unsigned int		gen;
 	pid_t			tid;
-	unsigned int		cede;
-	unsigned int		yield;
+	unsigned int		sig;
+	unsigned int		signum;
+	unsigned int		mwait_hint;
+	unsigned int		pad;
 
 	/* written by kernelspace */
 	unsigned int		busy;
 	unsigned int		last_gen;
 
 	/* extra space for future features (and cache alignment) */
-	unsigned long		rsv[5];
+	unsigned long		rsv[4];
 };
 
 #define KSCHED_MAGIC		0xF0

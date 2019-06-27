@@ -83,7 +83,8 @@ static int ksched_wakeup_pid(int cpu, pid_t pid)
 	return 0;
 }
 
-static int ksched_mwait_on_addr(const unsigned int *addr, unsigned int val)
+static int ksched_mwait_on_addr(const unsigned int *addr, unsigned int hint,
+				unsigned int val)
 {
 	unsigned int cur;
 
@@ -101,7 +102,7 @@ static int ksched_mwait_on_addr(const unsigned int *addr, unsigned int val)
 		return cur;
 
 	/* finally, execute mwait, and recheck after waking up */
-	__mwait(0, MWAIT_ECX_INTERRUPT_BREAK);
+	__mwait(hint, MWAIT_ECX_INTERRUPT_BREAK);
 	return smp_load_acquire(addr);
 }
 
@@ -111,6 +112,7 @@ static int __cpuidle ksched_idle(struct cpuidle_device *dev,
 	struct ksched_percpu *p;
 	struct ksched_shm_cpu *s;
 	unsigned long gen;
+	unsigned int hint;
 	pid_t tid;
 	int cpu;
 
@@ -122,7 +124,7 @@ static int __cpuidle ksched_idle(struct cpuidle_device *dev,
 
 	/* check if we entered the idle loop with a process still active */
 	if (p->tid != 0 && ksched_lookup_task(p->tid) != NULL) {
-		ksched_mwait_on_addr(&s->gen, s->gen);
+		ksched_mwait_on_addr(&s->gen, 0, s->gen);
 		put_cpu();
 
 		return index;
@@ -134,7 +136,8 @@ static int __cpuidle ksched_idle(struct cpuidle_device *dev,
 		WRITE_ONCE(s->busy, false);
 
 	/* use the mwait instruction to efficiently wait for the next request */
-	gen = ksched_mwait_on_addr(&s->gen, p->last_gen);
+	hint = READ_ONCE(s->mwait_hint);
+	gen = ksched_mwait_on_addr(&s->gen, hint, p->last_gen);
 	if (gen != p->last_gen) {
 		tid = READ_ONCE(s->tid);
 		p->last_gen = gen;
@@ -182,7 +185,7 @@ static long ksched_park(void)
 	p->last_gen = gen;
 
 	/* are we waking the current pid? */
-	if (tid == current->pid) {
+	if (tid == task_pid_vnr(current)) {
 		WRITE_ONCE(s->busy, true);
 		local_set(&p->busy, true);
 		smp_store_release(&s->last_gen, gen);
@@ -243,14 +246,9 @@ static void ksched_ipi(void *unused)
 	}
 
 	/* check if yield has been requested (detecting race conditions) */
-	gen = smp_load_acquire(&s->yield);
+	gen = smp_load_acquire(&s->sig);
 	if (gen == p->last_gen)
-		send_sig(SIGUSR2, t, 0);
-
-	/* check if cede has been requested (detecting race conditions) */
-	gen = smp_load_acquire(&s->cede);
-	if (gen == p->last_gen)
-		send_sig(SIGUSR1, t, 0);
+		send_sig(READ_ONCE(s->signum), t, 0);
 
 	put_cpu();
 }

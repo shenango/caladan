@@ -288,8 +288,7 @@ struct kthread {
 	struct mbufq		txcmdq_overflow;
 	unsigned int		rcu_gen;
 	unsigned int		curr_cpu;
-	bool			detached;
-	unsigned long		pad1[1];
+	unsigned long		pad1[2];
 
 	/* 3rd cache-line */
 	struct lrpc_chan_out	txpktq;

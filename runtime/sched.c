@@ -27,8 +27,8 @@ static __thread void *runtime_stack_base;
 /* Flag to prevent watchdog from running */
 bool disable_watchdog;
 
-/* the compute congestion signal (shared with the iokernel) */
-int *congestion_signal;
+/* real-time compute congestion signals (shared with the iokernel) */
+struct congestion_info *runtime_congestion;
 
 /* fast allocation of struct thread */
 static struct slab thread_slab;
@@ -147,9 +147,11 @@ static void drain_overflow(struct kthread *l)
 	}
 }
 
-static bool inline kthread_detachable(struct kthread *k)
+static bool work_available(struct kthread *k)
 {
-	return k->timern == 0 && k->outstanding_reqs == 0;
+	return !lrpc_empty(&k->rxq) ||
+	       ACCESS_ONCE(k->rq_tail) != ACCESS_ONCE(k->rq_head) ||
+	       timer_needed(k) || !list_empty(&k->rq_overflow);
 }
 
 static bool steal_work(struct kthread *l, struct kthread *r)
@@ -160,7 +162,7 @@ static bool steal_work(struct kthread *l, struct kthread *r)
 	assert_spin_lock_held(&l->lock);
 	assert(l->rq_head == 0 && l->rq_tail == 0);
 
-	if (ACCESS_ONCE(r->detached) && lrpc_empty(&r->rxq))
+	if (!work_available(r))
 		return false;
 	if (!spin_try_lock(&r->lock))
 		return false;
@@ -203,8 +205,6 @@ done:
 		l->rq[l->rq_head++] = th;
 		ACCESS_ONCE(l->q_ptrs->rq_head)++;
 		STAT(THREADS_STOLEN)++;
-	} else if (r->parked && kthread_detachable(r)) {
-		r->detached = true;
 	}
 
 	spin_unlock(&r->lock);
@@ -239,7 +239,6 @@ static __noreturn __noinline void schedule(void)
 
 	assert_spin_lock_held(&l->lock);
 	assert(l->parked == false);
-	assert(l->detached == false);
 
 	/* unmark busy for the stack of the last uthread */
 	if (__self != NULL) {
@@ -313,7 +312,6 @@ again:
 		goto again;
 
 	l->parked = true;
-	l->detached = kthread_detachable(l);
 	spin_unlock(&l->lock);
 
 	/* did not find anything to run, park this kthread */
@@ -324,7 +322,6 @@ again:
 
 	spin_lock(&l->lock);
 	l->parked = false;
-	l->detached = false;
 	goto again;
 
 done:
@@ -513,7 +510,6 @@ static void thread_finish_cede(void)
 	/* re-enter the scheduler */
 	spin_lock(&k->lock);
 	k->parked = false;
-	k->detached = false;
 	schedule();
 }
 
@@ -680,19 +676,12 @@ static __noreturn void schedule_start(void)
 	/*
 	 * force kthread parking (iokernel assumes all kthreads are parked
 	 * initially). Update RCU generation so it stays even after entering
-	 * schedule(). If threads were scheduled on this kthread, then start off
-	 * attached so they can be stolen by whichever kthread wakes up first.
+	 * schedule().
 	 */
-	spin_lock(&k->lock);
-	if (k->rq_head != k->rq_tail)
-		k->detached = false;
-	spin_unlock(&k->lock);
-
 	kthread_wait_to_attach();
 	store_release(&k->rcu_gen, 1);
 
 	spin_lock(&k->lock);
-	k->detached = false;
 	schedule();
 }
 

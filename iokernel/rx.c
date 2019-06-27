@@ -61,9 +61,14 @@ bool rx_send_to_runtime(struct proc *p, uint32_t hash, uint64_t cmd,
 {
 	struct thread *th;
 
-	if (unlikely(sched_threads_active(p) == 0))
-		sched_add_core(p);
+	if (likely(sched_threads_active(p) > 0)) {
+		/* use the flow table to route to an active thread */
+		th = &p->threads[p->flow_tbl[hash % p->thread_count]];
+		return lrpc_send(&th->rxq, cmd, payload);
+	}
 
+
+	sched_add_core(p);
 	if (unlikely(sched_threads_active(p) == 0)) {
 		/* enqueue to an idle thread (to be woken later) */
 		th = list_top(&p->idle_threads, struct thread, idle_link);
@@ -71,7 +76,6 @@ bool rx_send_to_runtime(struct proc *p, uint32_t hash, uint64_t cmd,
 		/* use the flow table to route to an active thread */
 		th = &p->threads[p->flow_tbl[hash % p->thread_count]];
 	}
-
 	return lrpc_send(&th->rxq, cmd, payload);
 }
 

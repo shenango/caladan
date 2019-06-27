@@ -127,11 +127,11 @@ static struct proc *control_create_proc(mem_key_t key, size_t len, pid_t pid,
 	if (eth_addr_is_multicast(&hdr.mac) || eth_addr_is_zero(&hdr.mac))
 		goto fail;
 	p->mac = hdr.mac;
-	p->congestion_signal =
-		(int *)shmptr_to_ptr(&reg, hdr.congestion_signal, sizeof(int));
-	if (!p->congestion_signal)
+	p->congestion_info = shmptr_to_ptr(&reg, hdr.congestion_info,
+					   sizeof(*p->congestion_info));
+	if (!p->congestion_info)
 		goto fail;
-	*p->congestion_signal = false;
+	memset(p->congestion_info, 0, sizeof(*p->congestion_info));
 
 	/* initialize the threads */
 	for (i = 0; i < hdr.thread_count; i++) {

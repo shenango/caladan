@@ -7,6 +7,7 @@
 #include <base/types.h>
 #include <base/compiler.h>
 #include <runtime/preempt.h>
+#include <iokernel/control.h>
 
 struct thread;
 typedef void (*thread_fn_t)(void *arg);
@@ -51,12 +52,20 @@ extern int runtime_set_initializers(initializer_fn_t global_fn,
 extern int runtime_init(const char *cfgpath, thread_fn_t main_fn, void *arg);
 
 
-extern int *congestion_signal;
+extern struct congestion_info *runtime_congestion;
 
 /**
  * runtime_is_congested - returns true if experiencing compute congestion
  */
 static inline bool runtime_is_congested(void)
 {
-	return ACCESS_ONCE(congestion_signal) > 0;
+	return ACCESS_ONCE(runtime_congestion->congested);
+}
+
+/**
+ * runtime_load - returns the current CPU usage load
+ */
+static inline float runtime_load(void)
+{
+	return ACCESS_ONCE(runtime_congestion->load);
 }

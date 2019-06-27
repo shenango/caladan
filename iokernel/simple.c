@@ -24,6 +24,9 @@ struct simple_data {
 	int			threads_guaranteed;
 	int			threads_max;
 	int			threads_active;
+
+	/* congestion info */
+	float			load;
 };
 
 static bool simple_proc_is_preemptible(struct simple_data *cursd,
@@ -198,29 +201,54 @@ static int simple_notify_core_needed(struct proc *p)
 	return simple_add_kthread(p); 
 }
 
+#define EWMA_WEIGHT	0.1f
+
+static void simple_update_congestion_info(struct simple_data *sd,
+					  bool congested)
+{
+	struct proc *p = sd->p;
+	float instant_load;
+
+	/* update the congestion status bit */
+	ACCESS_ONCE(p->congestion_info->congested) = congested;
+
+	/* update the CPU load */
+	/* TODO: handle using more than guarunteed cores */
+	instant_load = (float)sd->threads_active / (float)sd->threads_max;
+	sd->load = sd->load * (1 - EWMA_WEIGHT) + instant_load * EWMA_WEIGHT;
+	ACCESS_ONCE(p->congestion_info->load) = sd->load;
+}
+
 static void simple_notify_congested(struct proc *p, bitmap_ptr_t threads,
 				    bitmap_ptr_t io)
 {
 	struct simple_data *sd = (struct simple_data *)p->policy_data;
 	int ret;
+	bool congested = false;
 
 	/* check if congested */
-	if (bitmap_popcount(threads, NCPU) + bitmap_popcount(io, NCPU) == 0) {
+	if (bitmap_popcount(threads, NCPU) +
+            bitmap_popcount(io, NCPU) == 0) {
 		simple_unmark_congested(sd);
-		return;
+		goto done;
 	}
 
 	/* do nothing if already marked as congested */
-	if (sd->is_congested)
-		return;
+	if (sd->is_congested) {
+		congested = true;
+		goto done;
+	}
 
 	/* try to add an additional core right away */
 	ret = simple_add_kthread(p);
 	if (ret == 0)
-		return;
+		goto done;
 
 	/* otherwise mark the process as congested, cores can be added later */
 	simple_mark_congested(sd);
+
+done:
+	simple_update_congestion_info(sd, congested);
 }
 
 static struct simple_data *simple_choose_kthread(unsigned int core)

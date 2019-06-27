@@ -26,6 +26,10 @@ unsigned int sched_dp_core;	/* used for the iokernel's dataplane */
 unsigned int sched_ctrl_core;	/* used for the iokernel's controlplane */
 unsigned int sched_linux_core;	/* used by normal linux scheduler */
 
+/* an array of core numbers that need to be polled */
+static unsigned int poll_cores[NCPU];
+static int poll_cores_nr;
+
 struct core_state {
 	struct thread	*pending_th;  /* a thread waiting run */
 	struct thread	*cur_th;      /* the currently running thread */
@@ -253,18 +257,16 @@ void sched_poll(void)
 	DEFINE_BITMAP(idle, NCPU);
 	struct core_state *s;
 	uint64_t now;
-	int core;
+	int i, core;
 
 	/*
 	 * fast pass --- runs every poll loop
 	 */
 
 	bitmap_init(idle, NCPU, false);
-	for (core = 0; core < NCPU; core++) {
+	for (i = 0; i < poll_cores_nr; i++) {
+		core = poll_cores[i];
 		s = &state[core];
-
-		if (!bitmap_test(sched_allowed_cores, core))
-			continue;
 
 		/* check if a pending context switch finished */
 		if (s->wait && ksched_poll_run_done(core)) {
@@ -445,6 +447,8 @@ int sched_init(void)
 	sched_dp_core = i;
 	sched_ctrl_core = sib;
 	sched_linux_core = sib;
+	bitmap_for_each_set(sched_allowed_cores, NCPU, i)
+		poll_cores[poll_cores_nr++] = i;
 	log_info("sched: dataplane on %d, control on %d, linux on %d",
 		 sched_dp_core, sched_ctrl_core, sched_linux_core);
 

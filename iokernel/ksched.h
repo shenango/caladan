@@ -6,6 +6,7 @@
 
 #include <sched.h>
 #include <sys/ioctl.h>
+#include <signal.h>
 
 #include <base/stddef.h>
 #include <base/atomic.h>
@@ -54,6 +55,11 @@ static inline bool ksched_poll_idle(unsigned int core)
 	return !load_acquire(&ksched_shm[core].busy);
 }
 
+static inline void ksched_idle_hint(unsigned int core, unsigned int hint)
+{
+	ksched_shm[core].mwait_hint = hint;
+}
+
 enum {
 	KSCHED_INTR_CEDE = 0,
 	KSCHED_INTR_YIELD,
@@ -71,19 +77,24 @@ enum {
  */
 static inline void ksched_enqueue_intr(unsigned int core, int type)
 {
+	unsigned int signum;
+
 	switch (type) {
 	case KSCHED_INTR_CEDE:
-		store_release(&ksched_shm[core].cede, ksched_gens[core]);
+		signum = SIGUSR1;
 		break;
 
 	case KSCHED_INTR_YIELD:
-		store_release(&ksched_shm[core].yield, ksched_gens[core]);
+		signum = SIGUSR2;
 		break;
 
 	default:
 		WARN();
+		return;
 	}
 
+	ksched_shm[core].signum = signum;
+	store_release(&ksched_shm[core].sig, ksched_gens[core]);
 	CPU_SET(core, &ksched_set);
 }
 
