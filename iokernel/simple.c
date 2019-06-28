@@ -27,6 +27,7 @@ struct simple_data {
 
 	/* congestion info */
 	float			load;
+	uint64_t		standing_queue_us;
 };
 
 static bool simple_proc_is_preemptible(struct simple_data *cursd,
@@ -203,20 +204,23 @@ static int simple_notify_core_needed(struct proc *p)
 
 #define EWMA_WEIGHT	0.1f
 
-static void simple_update_congestion_info(struct simple_data *sd,
-					  bool congested)
+static void simple_update_congestion_info(struct simple_data *sd)
 {
-	struct proc *p = sd->p;
+	struct congestion_info *info = sd->p->congestion_info;
 	float instant_load;
 
-	/* update the congestion status bit */
-	ACCESS_ONCE(p->congestion_info->congested) = congested;
+	/* update the standing queue congestion microseconds */
+	if (sd->is_congested)
+		sd->standing_queue_us += IOKERNEL_POLL_INTERVAL;
+	else
+		sd->standing_queue_us = 0;
+	ACCESS_ONCE(info->standing_queue_us) = sd->standing_queue_us;
 
 	/* update the CPU load */
-	/* TODO: handle using more than guarunteed cores */
+	/* TODO: handle using more than guaranteed cores */
 	instant_load = (float)sd->threads_active / (float)sd->threads_max;
 	sd->load = sd->load * (1 - EWMA_WEIGHT) + instant_load * EWMA_WEIGHT;
-	ACCESS_ONCE(p->congestion_info->load) = sd->load;
+	ACCESS_ONCE(info->load) = sd->load;
 }
 
 static void simple_notify_congested(struct proc *p, bitmap_ptr_t threads,
@@ -224,7 +228,6 @@ static void simple_notify_congested(struct proc *p, bitmap_ptr_t threads,
 {
 	struct simple_data *sd = (struct simple_data *)p->policy_data;
 	int ret;
-	bool congested = false;
 
 	/* check if congested */
 	if (bitmap_popcount(threads, NCPU) +
@@ -234,10 +237,8 @@ static void simple_notify_congested(struct proc *p, bitmap_ptr_t threads,
 	}
 
 	/* do nothing if already marked as congested */
-	if (sd->is_congested) {
-		congested = true;
+	if (sd->is_congested)
 		goto done;
-	}
 
 	/* try to add an additional core right away */
 	ret = simple_add_kthread(p);
@@ -248,7 +249,7 @@ static void simple_notify_congested(struct proc *p, bitmap_ptr_t threads,
 	simple_mark_congested(sd);
 
 done:
-	simple_update_congestion_info(sd, congested);
+	simple_update_congestion_info(sd);
 }
 
 static struct simple_data *simple_choose_kthread(unsigned int core)

@@ -55,11 +55,11 @@ extern int runtime_init(const char *cfgpath, thread_fn_t main_fn, void *arg);
 extern struct congestion_info *runtime_congestion;
 
 /**
- * runtime_is_congested - returns true if experiencing compute congestion
+ * runtime_standing_queue_us - returns the us a queue has been left standing
  */
-static inline bool runtime_is_congested(void)
+static inline bool runtime_standing_queue_us(void)
 {
-	return ACCESS_ONCE(runtime_congestion->congested);
+	return ACCESS_ONCE(runtime_congestion->standing_queue_us);
 }
 
 /**
