@@ -15,7 +15,7 @@
 #define __user
 #include "../ksched/ksched.h"
 
-extern int ksched_fd;
+extern int ksched_fd, ksched_count;
 extern struct ksched_shm_cpu *ksched_shm;
 extern cpu_set_t ksched_set;
 extern unsigned int ksched_gens[NCPU];
@@ -96,6 +96,7 @@ static inline void ksched_enqueue_intr(unsigned int core, int type)
 	ksched_shm[core].signum = signum;
 	store_release(&ksched_shm[core].sig, ksched_gens[core]);
 	CPU_SET(core, &ksched_set);
+	ksched_count++;
 }
 
 /**
@@ -106,9 +107,10 @@ static inline void ksched_send_intrs(void)
 	struct ksched_intr_req req;
 	int ret;
 
-	if (CPU_COUNT(&ksched_set) == 0)
+	if (ksched_count == 0)
 		return;
 
+	ksched_count = 0;
 	req.len = sizeof(ksched_set); 
 	req.mask = &ksched_set;
 	ret = ioctl(ksched_fd, KSCHED_IOC_INTR, &req);

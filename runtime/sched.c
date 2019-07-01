@@ -233,7 +233,7 @@ static __noreturn __noinline void schedule(void)
 	struct kthread *r = NULL, *l = myk();
 	uint64_t start_tsc, end_tsc;
 	thread_t *th = NULL;
-	unsigned int last_nrks;
+	unsigned int start_idx;
 	unsigned int iters = 0;
 	int i, sibling;
 
@@ -272,7 +272,6 @@ static __noreturn __noinline void schedule(void)
 	if (unlikely(!list_empty(&l->rq_overflow)))
 		drain_overflow(l);
 
-again:
 	/* first try the local runqueue */
 	if (l->rq_head != l->rq_tail)
 		goto done;
@@ -280,6 +279,7 @@ again:
 	/* reset the local runqueue since it's empty */
 	l->rq_head = l->rq_tail = 0;
 
+again:
 	/* then check for local softirqs */
 	th = softirq_run_thread(l, RUNTIME_SOFTIRQ_BUDGET);
 	if (th) {
@@ -287,23 +287,26 @@ again:
 		goto done;
 	}
 
-	last_nrks = load_acquire(&nrks);
-
 	/* then try to steal from a sibling kthread */
 	sibling = cpu_map[l->curr_cpu].sibling_core;
 	r = cpu_map[sibling].recent_kthread;
 	if (r && r != l && steal_work(l, r))
 		goto done;
 
-	/* then try to steal from a random kthread */
-	r = ks[rand_crc32c((uintptr_t)l) % last_nrks];
-	if (r != l && steal_work(l, r))
-		goto done;
-
-	/* finally try to steal from every kthread */
-	for (i = 0; i < last_nrks; i++)
-		if (ks[i] != l && steal_work(l, ks[i]))
+	/* try to steal from every kthread */
+	start_idx = rand_crc32c((uintptr_t)l);
+	for (i = 0; i < nrks; i++) {
+		int idx = (start_idx + i) % nrks;
+		if (ks[idx] != l && steal_work(l, ks[idx]))
 			goto done;
+	}
+
+	/* recheck for local softirqs one last time */
+	th = softirq_run_thread(l, RUNTIME_SOFTIRQ_BUDGET);
+	if (th) {
+		STAT(SOFTIRQS_LOCAL)++;
+		goto done;
+	}
 
 	/* keep trying to find work until the polling timeout expires */
 	if (!preempt_needed() &&

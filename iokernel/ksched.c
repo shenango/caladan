@@ -11,6 +11,8 @@
 
 /* a file descriptor handle to the ksched kernel module */
 int ksched_fd;
+/* the number of pending interrupts */
+int ksched_count;
 /* the shared memory region with the kernel module */
 struct ksched_shm_cpu *ksched_shm;
 /* the set of pending cores to send interrupts to */

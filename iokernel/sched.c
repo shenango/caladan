@@ -258,6 +258,7 @@ void sched_poll(void)
 	struct core_state *s;
 	uint64_t now;
 	int i, core;
+	bool idled = false;
 
 	/*
 	 * fast pass --- runs every poll loop
@@ -298,6 +299,7 @@ void sched_poll(void)
 			}
 			s->idle = true;
 			bitmap_set(idle, core);
+			idled = true;
 		}
 	}
 
@@ -318,7 +320,8 @@ void sched_poll(void)
 	 * final pass --- let the scheduler policy decide how to respond
 	 */
 
-	ops->sched_poll(idle);
+	if (idled)
+		ops->sched_poll(idle);
 	ksched_send_intrs();
 }
 

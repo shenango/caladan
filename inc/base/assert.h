@@ -71,12 +71,14 @@ extern void logk_bug(bool fatal, const char *expr,
  * @condition: the condition to check (fails on true)
  */
 #define WARN_ON(cond)						\
-	do {							\
-		__build_assert_if_constant(!(cond));		\
-		if (unlikely(cond))				\
-			logk_bug(false, __cstr(cond),		\
-			         __FILE__, __LINE__, __func__);	\
-	} while (0)
+({								\
+	__build_assert_if_constant(!(cond));			\
+	bool __result = !!(cond);				\
+	if (unlikely(__result))					\
+		logk_bug(false, __cstr(cond),			\
+		         __FILE__, __LINE__, __func__);		\
+	__result;						\
+})
 
 /**
  * WARN_ON_ONCE - a non-fatal check that doesn't compile out in release builds
@@ -85,12 +87,14 @@ extern void logk_bug(bool fatal, const char *expr,
 #define WARN_ON_ONCE(cond)					\
 ({								\
 	static bool __once;					\
+	bool __result = !!(cond);				\
 	__build_assert_if_constant(!(cond));			\
-        if (unlikely(!__once && cond)) {			\
+        if (unlikely(!__once && __result)) {			\
 		__once = true;					\
                 logk_bug(false, __cstr(cond),			\
 			 __FILE__, __LINE__, __func__);		\
 	}							\
+	__result;						\
 })
 
 /**
