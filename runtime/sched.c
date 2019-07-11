@@ -194,7 +194,7 @@ static bool steal_work(struct kthread *l, struct kthread *r)
 	}
 
 	/* check for softirqs */
-	th = softirq_run_thread(r, RUNTIME_SOFTIRQ_BUDGET);
+	th = softirq_run_thread(r, RUNTIME_SOFTIRQ_REMOTE_BUDGET);
 	if (th) {
 		STAT(SOFTIRQS_STOLEN)++;
 		goto done;
@@ -218,7 +218,7 @@ static __noinline struct thread *do_watchdog(struct kthread *l)
 	assert_spin_lock_held(&l->lock);
 
 	/* then check the network queues */
-	th = softirq_run_thread(l, RUNTIME_SOFTIRQ_BUDGET);
+	th = softirq_run_thread(l, RUNTIME_SOFTIRQ_LOCAL_BUDGET);
 	if (th) {
 		STAT(SOFTIRQS_LOCAL)++;
 		return th;
@@ -281,7 +281,7 @@ static __noreturn __noinline void schedule(void)
 
 again:
 	/* then check for local softirqs */
-	th = softirq_run_thread(l, RUNTIME_SOFTIRQ_BUDGET);
+	th = softirq_run_thread(l, RUNTIME_SOFTIRQ_LOCAL_BUDGET);
 	if (th) {
 		STAT(SOFTIRQS_LOCAL)++;
 		goto done;
@@ -302,7 +302,7 @@ again:
 	}
 
 	/* recheck for local softirqs one last time */
-	th = softirq_run_thread(l, RUNTIME_SOFTIRQ_BUDGET);
+	th = softirq_run_thread(l, RUNTIME_SOFTIRQ_LOCAL_BUDGET);
 	if (th) {
 		STAT(SOFTIRQS_LOCAL)++;
 		goto done;
@@ -438,7 +438,7 @@ void thread_yield(void)
 	thread_t *myth = thread_self();
 
 	/* check for softirqs */
-	softirq_run(RUNTIME_SOFTIRQ_BUDGET);
+	softirq_run(RUNTIME_SOFTIRQ_LOCAL_BUDGET);
 
 	preempt_disable();
 	assert(myth->state == THREAD_STATE_RUNNING);

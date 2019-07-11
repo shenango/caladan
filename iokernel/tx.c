@@ -227,15 +227,14 @@ bool tx_burst(void)
 	for (i = 0; i < nrts; i++) {
 		unsigned int idx = (pos + i) % nrts;
 		t = ts[idx];
-
-		if (n_pkts >= IOKERNEL_TX_BURST_SIZE)
-			goto full;
 		ret = tx_drain_queue(t, IOKERNEL_TX_BURST_SIZE - n_pkts,
 				     &hdrs[n_pkts]);
 		for (j = n_pkts; j < n_pkts + ret; j++)
 			threads[j] = t;
 		n_pkts += ret;
 		pulltotal += ret;
+		if (n_pkts >= IOKERNEL_TX_BURST_SIZE)
+			goto full;
 	}
 
 	if (n_pkts == 0)

@@ -109,11 +109,11 @@ static bool tcp_rx_text(tcpconn_t *c, struct mbuf *m, bool *wake)
 		/* we got an out-of-order segment */
 		STAT(RX_TCP_OUT_OF_ORDER)++;
 		int size = 0;
-		list_for_each(&c->rxq_ooo, pos, link) {
-			if (wraps_lt(m->seg_seq, pos->seg_seq)) {
-				list_add_before(&pos->link, &m->link);
+		list_for_each_rev(&c->rxq_ooo, pos, link) {
+			if (wraps_gt(m->seg_seq, pos->seg_seq)) {
+				list_add_after(&pos->link, &m->link);
 				goto drain;
-			} else if (wraps_lte(m->seg_end, pos->seg_end)) {
+			} else if (wraps_gte(m->seg_end, pos->seg_end)) {
 				return false;
 			}
 			size++;
@@ -122,7 +122,7 @@ static bool tcp_rx_text(tcpconn_t *c, struct mbuf *m, bool *wake)
 		if (size >= TCP_OOO_MAX_SIZE)
 			 return false;
 
- 		list_add_tail(&c->rxq_ooo, &m->link);
+		list_add(&c->rxq_ooo, &m->link);
 	}
 
 drain:
