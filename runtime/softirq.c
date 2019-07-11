@@ -42,11 +42,13 @@ static void softirq_fn(void *arg)
 static void softirq_gather_work(struct softirq_work *w, struct kthread *k,
 				unsigned int budget)
 {
-	unsigned int recv_cnt = 0, compl_cnt = 0;
-	int budget_left;
+	unsigned int recv_cnt = 0, compl_cnt = 0, real_budget;
 
-	budget_left = min(budget, SOFTIRQ_MAX_BUDGET);
-	while (budget_left--) {
+	assert_spin_lock_held(&k->lock);
+
+	real_budget = min(budget, SOFTIRQ_MAX_BUDGET);
+
+	while (!preempt_needed()) {
 		uint64_t cmd;
 		unsigned long payload;
 
@@ -69,19 +71,33 @@ static void softirq_gather_work(struct softirq_work *w, struct kthread *k,
 		default:
 			log_err_ratelimited("net: invalid RXQ cmd '%ld'", cmd);
 		}
+
+
+		if (recv_cnt >= real_budget || compl_cnt >= SOFTIRQ_MAX_BUDGET)
+			break;
 	}
+
 #if __has_include("spdk/nvme.h")
-	if (budget_left > 0)
-		w->storage_cnt = storage_proc_completions(k, budget_left,
-				w->storage_threads);
-	else
-		w->storage_cnt = 0;
+	w->storage_cnt = storage_proc_completions(k, budget,
+						  w->storage_threads);
 #endif
 
 	w->k = k;
 	w->recv_cnt = recv_cnt;
 	w->compl_cnt = compl_cnt;
-	w->timer_budget = budget_left;
+	w->timer_budget = budget;
+}
+
+static bool softirq_work_available(struct kthread *k)
+{
+	bool work_available;
+
+	work_available = !lrpc_empty(&k->rxq) || timer_needed(k);
+#if __has_include("spdk/nvme.h")
+	work_available |= storage_available_completions(k);
+#endif
+
+	return work_available;
 }
 
 /**
@@ -96,16 +112,9 @@ thread_t *softirq_run_thread(struct kthread *k, unsigned int budget)
 {
 	thread_t *th;
 	struct softirq_work *w;
-	bool work_available;
-
-	assert_spin_lock_held(&k->lock);
 
 	/* check if there's any work available */
-	work_available = lrpc_empty(&k->rxq) && !timer_needed(k);
-#if __has_include("spdk/nvme.h")
-	work_available = work_available && !storage_available_completions(k);
-#endif
-	if (work_available)
+	if (!softirq_work_available(k))
 		return NULL;
 
 	th = thread_create_with_buf(softirq_fn, (void **)&w, sizeof(*w));
@@ -125,15 +134,9 @@ void softirq_run(unsigned int budget)
 {
 	struct kthread *k;
 	struct softirq_work w;
-	bool work_available;
 
 	k = getk();
-	/* check if there's any work available */
-	work_available = lrpc_empty(&k->rxq) && !timer_needed(k);
-#if __has_include("spdk/nvme.h")
-	work_available = work_available && !storage_available_completions(k);
-#endif
-	if (work_available) {
+	if (!softirq_work_available(k)) {
 		putk();
 		return;
 	}
