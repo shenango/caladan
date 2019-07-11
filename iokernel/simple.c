@@ -160,7 +160,8 @@ static unsigned int simple_choose_core(struct proc *p)
 		core = sched_siblings[th->core];
 		if (cores[core] != sd && (cores[core] == NULL ||
 		    simple_proc_is_preemptible(cores[core], sd))) {
-			return core;
+			if (bitmap_test(sched_allowed_cores, core))
+				return core;
 		}
 	}
 

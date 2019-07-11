@@ -13,6 +13,7 @@
 #include "sched.h"
 
 #define LOG_INTERVAL_US		(1000 * 1000)
+struct iokernel_cfg cfg;
 struct dataplane dp;
 
 struct init_entry {
@@ -65,7 +66,7 @@ static int run_init_handlers(const char *phase, const struct init_entry *h,
 /*
  * The main dataplane thread.
  */
-void dataplane_loop()
+void dataplane_loop(void)
 {
 	bool work_done;
 #ifdef STATS
@@ -122,6 +123,11 @@ void dataplane_loop()
 int main(int argc, char *argv[])
 {
 	int ret;
+
+	if (argc >= 2) {
+		if (!strcmp(argv[2], "noht"))
+			cfg.noht = true;
+	}
 
 	ret = run_init_handlers("iokernel", iok_init_handlers,
 			ARRAY_SIZE(iok_init_handlers));

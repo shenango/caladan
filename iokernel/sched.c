@@ -450,10 +450,21 @@ int sched_init(void)
 	sched_dp_core = i;
 	sched_ctrl_core = sib;
 	sched_linux_core = sib;
-	bitmap_for_each_set(sched_allowed_cores, NCPU, i)
-		poll_cores[poll_cores_nr++] = i;
 	log_info("sched: dataplane on %d, control on %d, linux on %d",
 		 sched_dp_core, sched_ctrl_core, sched_linux_core);
+
+	/* check if configuration disables hyperthreads */
+	if (cfg.noht) {
+		for (i = 0; i < NCPU; i++) {
+			if (!bitmap_test(sched_allowed_cores, i))
+				continue;
+
+			bitmap_clear(sched_allowed_cores, sched_siblings[i]);
+		}
+	}
+
+	bitmap_for_each_set(sched_allowed_cores, NCPU, i)
+		poll_cores[poll_cores_nr++] = i;
 
 	return 0;
 }

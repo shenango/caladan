@@ -21,6 +21,17 @@
 /* #define STATS 1 */
 
 /*
+ * configuration parameters
+ */
+
+struct iokernel_cfg {
+	bool	noht; /* disable hyperthreads */
+};
+
+extern struct iokernel_cfg cfg;
+
+
+/*
  * Constant limits
  */
 
