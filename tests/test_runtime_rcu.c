@@ -8,7 +8,7 @@
 #include <base/stddef.h>
 #include <base/log.h>
 #include <base/time.h>
-#include <runtime/thread.h>
+#include <runtime/runtime.h>
 #include <runtime/sync.h>
 #include <runtime/rcu.h>
 

@@ -1,3 +1,4 @@
+#include "runtime.h"
 #include "thread.h"
 #include "sync.h"
 

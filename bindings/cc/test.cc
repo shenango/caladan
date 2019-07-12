@@ -4,6 +4,8 @@ extern "C" {
 }
 
 #include <string>
+
+#include "runtime.h"
 #include "thread.h"
 #include "timer.h"
 
@@ -15,7 +17,7 @@ void foo(int arg) {
   if (arg != kTestValue) BUG();
 }
 
-void MainHandler(void *arg) {
+void MainHandler() {
   std::string str = "captured!";
   int i = kTestValue;
   int j = kTestValue;
@@ -53,7 +55,7 @@ int main(int argc, char *argv[]) {
     return -EINVAL;
   }
 
-  ret = runtime_init(argv[1], MainHandler, NULL);
+  ret = rt::RuntimeInit(argv[1], MainHandler);
   if (ret) {
     log_err("failed to start runtime");
     return ret;

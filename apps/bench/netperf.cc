@@ -5,6 +5,7 @@ extern "C" {
 #undef min
 #undef max
 
+#include "runtime.h"
 #include "thread.h"
 #include "sync.h"
 #include "timer.h"

@@ -9,6 +9,7 @@ extern "C" {
 #include "synthetic_worker.h"
 #include "net.h"
 #include "sync.h"
+#include "runtime.h"
 #include "thread.h"
 #include "timer.h"
 

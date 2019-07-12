@@ -6,8 +6,8 @@
 #include <time.h>
 
 #include <base/log.h>
+#include <runtime/runtime.h>
 #include <runtime/storage.h>
-#include <runtime/thread.h>
 #include <runtime/timer.h>
 #include <runtime/sync.h>
 

@@ -16,6 +16,7 @@
 #include <net/ip.h>
 #include <iokernel/control.h>
 #include <net/mbufq.h>
+#include <runtime/runtime.h>
 #include <runtime/thread.h>
 #include <runtime/rcu.h>
 #include <runtime/preempt.h>
@@ -208,10 +209,10 @@ stack_init_to_rsp_with_buf(struct stack *s, void **buf, size_t buf_len,
 	return rsp;
 }
 
+
 /*
  * ioqueues
  */
-
 
 struct iokernel_control {
 	int fd;
@@ -227,6 +228,7 @@ struct iokernel_control {
 
 extern struct iokernel_control iok;
 extern void *iok_shm_alloc(size_t size, size_t alignment, shmptr_t *shm_out);
+
 
 /*
  * Per-kernel-thread State
@@ -305,7 +307,7 @@ struct kthread {
 	unsigned long		pad2[6];
 
 	/* 9th cache-line, storage nvme queues */
-	void		*nvme_io_pair;
+	void			*nvme_io_pair;
 	spinlock_t		io_pair_lock;
 	unsigned long		outstanding_reqs;
 	unsigned long		pad3[5];
@@ -354,9 +356,7 @@ static inline void putk(void)
 }
 
 DECLARE_SPINLOCK(klock);
-extern unsigned int maxks;
 extern unsigned int spinks;
-extern unsigned int guaranteedks;
 extern unsigned int nrks;
 extern struct kthread *ks[NCPU];
 
@@ -381,7 +381,6 @@ extern struct cpu_record cpu_map[NCPU];
  * Deliberately could race with preemption.
  */
 #define STAT(counter) (myk()->stats[STAT_ ## counter])
-
 
 
 /*

@@ -1,25 +1,6 @@
 # Makefile for benchmarks
-
-BASEPATH = ../..
-CXXPATH = ../../bindings/cc
-SPDK_PATH = $(BASEPATH)/spdk
-INC     = -I../../inc -I../../bindings/cc -I$(SPDK_PATH)/include
-CXXFLAGS  = -g -Wall -std=gnu++11 -D_GNU_SOURCE $(INC) -mssse3
-LDFLAGS = -T../../base/base.ld
-
-LD	= g++
-CC	= g++
-AR	= ar
-
-ifneq ($(DEBUG),)
-CXXFLAGS += -DDEBUG -DCCAN_LIST_DEBUG -rdynamic -O0 -ggdb
-LDFLAGS += -rdynamic
-else
-CXXFLAGS += -DNDEBUG -O3
-endif
-
-# handy for debugging
-print-%  : ; @echo $* = $($*)
+ROOT_PATH=../..
+include $(ROOT_PATH)/shared.mk
 
 fake_worker_src = fake_worker.cc
 fake_worker_obj = $(fake_worker_src:.cc=.o)
@@ -60,58 +41,57 @@ netperf_obj = $(netperf_src:.cc=.o)
 linux_mech_bench_src = linux_mech_bench.cc
 linux_mech_bench_obj = $(linux_mech_bench_src:.cc=.o)
 
-SPDK_LIBS= -L$(SPDK_PATH)/build/lib -L$(SPDK_PATH)/dpdk/build/lib
-SPDK_LIBS += -lspdk_nvme
-SPDK_LIBS += -lspdk_util
-SPDK_LIBS += -lspdk_env_dpdk
-SPDK_LIBS += -lspdk_log
-SPDK_LIBS += -lspdk_sock
-SPDK_LIBS += -ldpdk
-SPDK_LIBS += -lrt -luuid -lcrypto -lnuma -ldl
-librt_libs = $(CXXPATH)/librt++.a $(BASEPATH)/libruntime.a $(BASEPATH)/libnet.a $(BASEPATH)/libbase.a
+librt_libs = $(ROOT_PATH)/bindings/cc/librt++.a
+INC += -I$(ROOT_PATH)/bindings/cc
 
 # must be first
 all: tbench callibrate stress efficiency efficiency_linux \
      netbench netbench2 netbench_udp netbench_linux netperf linux_mech_bench \
      stress_linux
 
-tbench: $(tbench_obj) $(librt_libs)
-	$(LD) -o $@ $(LDFLAGS) $(tbench_obj) $(librt_libs) $(SPDK_LIBS) -lpthread
+tbench: $(tbench_obj) $(librt_libs) $(RUNTIME_DEPS)
+	$(LDXX) -o $@ $(LDFLAGS) $(tbench_obj) $(librt_libs) $(RUNTIME_LIBS)
 
 callibrate: $(fake_worker_obj) $(callibrate_obj)
-	$(LD) -o $@ $(LDFLAGS) $(fake_worker_obj) $(callibrate_obj) -lpthread
+	$(LDXX) -o $@ $(LDFLAGS) $(fake_worker_obj) $(callibrate_obj) -lpthread
 
-stress: $(fake_worker_obj) $(stress_obj) $(librt_libs)
-	$(LD) -o $@ $(LDFLAGS) $(fake_worker_obj) $(stress_obj) $(librt_libs) $(SPDK_LIBS) -lpthread
+stress: $(fake_worker_obj) $(stress_obj) $(librt_libs) $(RUNTIME_DEPS)
+	$(LDXX) -o $@ $(LDFLAGS) $(fake_worker_obj) $(stress_obj) $(librt_libs) \
+	 $(RUNTIME_LIBS)
 
 stress_linux: $(fake_worker_obj) $(stress_linux_obj)
-	$(LD) -o $@ $(LDFLAGS) $(fake_worker_obj) $(stress_linux_obj) \
+	$(LDXX) -o $@ $(LDFLAGS) $(fake_worker_obj) $(stress_linux_obj) \
 	-lpthread
 
-efficiency: $(fake_worker_obj) $(efficiency_obj) $(librt_libs)
-	$(LD) -o $@ $(LDFLAGS) $(fake_worker_obj) $(efficiency_obj) $(librt_libs) $(SPDK_LIBS) -lpthread
+efficiency: $(fake_worker_obj) $(efficiency_obj) $(librt_libs) $(RUNTIME_DEPS)
+	$(LDXX) -o $@ $(LDFLAGS) $(fake_worker_obj) $(efficiency_obj) \
+	$(librt_libs) $(RUNTIME_LIBS)
 
 efficiency_linux: $(fake_worker_obj) $(efficiency_linux_obj)
-	$(LD) -o $@ $(LDFLAGS) $(fake_worker_obj) $(efficiency_linux_obj) \
+	$(LDXX) -o $@ $(LDFLAGS) $(fake_worker_obj) $(efficiency_linux_obj) \
 	-lpthread
 
-netbench: $(netbench_obj) $(fake_worker_obj) $(librt_libs)
-	$(LD) -o $@ $(LDFLAGS) $(fake_worker_obj) $(netbench_obj) $(librt_libs) $(SPDK_LIBS) -lpthread
+netbench: $(netbench_obj) $(fake_worker_obj) $(librt_libs) $(RUNTIME_DEPS)
+	$(LDXX) -o $@ $(LDFLAGS) $(fake_worker_obj) $(netbench_obj) \
+	$(librt_libs) $(RUNTIME_LIBS)
 
-netbench2: $(netbench2_obj) $(fake_worker_obj) $(librt_libs)
-	$(LD) -o $@ $(LDFLAGS) $(fake_worker_obj) $(netbench2_obj) $(librt_libs) $(SPDK_LIBS) -lpthread
+netbench2: $(netbench2_obj) $(fake_worker_obj) $(librt_libs) $(RUNTIME_DEPS)
+	$(LDXX) -o $@ $(LDFLAGS) $(fake_worker_obj) $(netbench2_obj) \
+	$(librt_libs) $(RUNTIME_LIBS)
 
-netbench_udp: $(netbench_udp_obj) $(fake_worker_obj) $(librt_libs)
-	$(LD) -o $@ $(LDFLAGS) $(fake_worker_obj) $(netbench_udp_obj) $(librt_libs) $(SPDK_LIBS) -lpthread
+netbench_udp: $(netbench_udp_obj) $(fake_worker_obj) $(librt_libs) $(RUNTIME_DEPS)
+	$(LDXX) -o $@ $(LDFLAGS) $(fake_worker_obj) $(netbench_udp_obj) \
+	$(librt_libs) $(RUNTIME_LIBS)
 
 netbench_linux: $(netbench_linux_obj) $(fake_worker_obj)
-	$(LD) -o $@ $(LDFLAGS) $(fake_worker_obj) $(netbench_linux_obj) -lpthread
+	$(LDXX) -o $@ $(LDFLAGS) $(fake_worker_obj) $(netbench_linux_obj) -lpthread
 
-netperf: $(netperf_obj) $(librt_libs)
-	$(LD) -o $@ $(LDFLAGS) $(netperf_obj) $(librt_libs) $(SPDK_LIBS) -lpthread
+netperf: $(netperf_obj) $(librt_libs) $(RUNTIME_DEPS)
+	$(LDXX) -o $@ $(LDFLAGS) $(netperf_obj) $(librt_libs) $(RUNTIME_LIBS)
 
 linux_mech_bench: $(linux_mech_bench_obj) $(librt_libs)
-	$(LD) -o $@ $(LDFLAGS) $(linux_mech_bench_obj) $(librt_libs) $(SPDK_LIBS) -lpthread
+	$(LDXX) -o $@ $(LDFLAGS) $(linux_mech_bench_obj) $(librt_libs) \
+	$(RUNTIME_LIBS) -lpthread
 
 # general build rules for all targets
 src = $(fake_worker_src) $(tbench_src) $(callibrate_src)
@@ -128,9 +108,9 @@ endif
 # rule to generate a dep file by using the C preprocessor
 # (see man cpp for details on the -MM and -MT options)
 %.d: %.cc
-	@$(CC) $(CXXFLAGS) $< -MM -MT $(@:.d=.o) >$@
+	@$(CXX) $(CXXFLAGS) $< -MM -MT $(@:.d=.o) >$@
 %.o: %.cc
-	$(CC) $(CXXFLAGS) -c $< -o $@
+	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 .PHONY: clean
 clean:

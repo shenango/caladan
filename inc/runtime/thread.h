@@ -42,30 +42,3 @@ inline thread_t *thread_self(void)
 extern void thread_yield(void);
 extern int thread_spawn(thread_fn_t fn, void *arg);
 extern void thread_exit(void) __noreturn;
-
-/* main initialization */
-typedef int (*initializer_fn_t)(void);
-
-extern int runtime_set_initializers(initializer_fn_t global_fn,
-				    initializer_fn_t perthread_fn,
-				    initializer_fn_t late_fn);
-extern int runtime_init(const char *cfgpath, thread_fn_t main_fn, void *arg);
-
-
-extern struct congestion_info *runtime_congestion;
-
-/**
- * runtime_standing_queue_us - returns the us a queue has been left standing
- */
-static inline bool runtime_standing_queue_us(void)
-{
-	return ACCESS_ONCE(runtime_congestion->standing_queue_us);
-}
-
-/**
- * runtime_load - returns the current CPU usage load
- */
-static inline float runtime_load(void)
-{
-	return ACCESS_ONCE(runtime_congestion->load);
-}

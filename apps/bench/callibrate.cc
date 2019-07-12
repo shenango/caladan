@@ -1,8 +1,9 @@
+#include "runtime.h"
+#include "fake_worker.h"
+
 #include <memory>
 #include <iostream>
 #include <chrono>
-
-#include "fake_worker.h"
 
 namespace {
 

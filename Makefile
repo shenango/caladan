@@ -1,44 +1,13 @@
+ROOT_PATH=.
+include shared.mk
+
 DPDK_PATH = dpdk
-INC     = -I./inc -I$(DPDK_PATH)/build/include
-SPDK_PATH = spdk
-
-CFLAGS  = -g -Wall -std=gnu11 -D_GNU_SOURCE $(INC) -mssse3
-LDFLAGS = -T base/base.ld
-LD	= gcc
-CC	= gcc
-AR	= ar
-SPARSE	= sparse
-MLX5=$(shell lspci | grep 'ConnectX-5' || echo "")
-MLX4=$(shell lspci | grep 'ConnectX-3' || echo "")
-SPDK=$(shell lspci | grep 'Optane SSD 900P' || echo "")
-
+INC += -I$(DPDK_PATH)/build/include
 CHECKFLAGS = -D__CHECKER__ -Waddress-space
-
-ifneq ($(DEBUG),)
-CFLAGS += -DDEBUG -DCCAN_LIST_DEBUG -rdynamic -O0 -ggdb
-LDFLAGS += -rdynamic
-else
-CFLAGS += -DNDEBUG -O3
-endif
 
 ifneq ($(TCP_RX_STATS),)
 CFLAGS += -DTCP_RX_STATS
 endif
-
-ifneq ($(MLX5),)
-CFLAGS += -DMLX5
-else
-ifneq ($(MLX4),)
-CFLAGS += -DMLX4
-endif
-endif
-
-ifneq ($(SPDK),)
-INC += -I$(SPDK_PATH)/include
-endif
-
-# handy for debugging
-print-%  : ; @echo $* = $($*)
 
 # libbase.a - the base library
 base_src = $(wildcard base/*.c)
@@ -76,28 +45,12 @@ DPDK_LIBS += -lrte_mempool
 DPDK_LIBS += -lrte_mempool_stack
 DPDK_LIBS += -lrte_ring
 # additional libs for running with Mellanox NICs
-ifneq ($(MLX5),)
+ifeq ($(CONFIG_MLX5),y)
 DPDK_LIBS +=  -lrte_pmd_mlx5 -libverbs -lmlx5 -lmnl
 else
-ifneq ($(MLX4),)
+ifeq ($(CONFIG_MLX4),y)
 DPDK_LIBS += -lrte_pmd_mlx4 -libverbs -lmlx4
 endif
-endif
-
-ifneq ($(SPDK),)
-SPDK_LIBS= -L$(SPDK_PATH)/build/lib -L$(SPDK_PATH)/dpdk/build/lib
-SPDK_LIBS += -lspdk_nvme
-SPDK_LIBS += -lspdk_util
-SPDK_LIBS += -lspdk_env_dpdk
-SPDK_LIBS += -lspdk_log
-SPDK_LIBS += -lspdk_sock
-SPDK_LIBS += -ldpdk
-SPDK_LIBS += -lpthread
-SPDK_LIBS += -lrt
-SPDK_LIBS += -luuid
-SPDK_LIBS += -lcrypto
-SPDK_LIBS += -lnuma
-SPDK_LIBS += -ldl
 endif
 
 # must be first
@@ -117,11 +70,7 @@ iokerneld: $(iokernel_obj) libbase.a libnet.a base/base.ld
 	-lpthread -lnuma -ldl
 
 $(test_targets): $(test_obj) libbase.a libruntime.a libnet.a base/base.ld
-ifneq ($(SPDK),)
-	$(LD) $(LDFLAGS) -o $@ $@.o libruntime.a libnet.a libbase.a -lpthread $(SPDK_LIBS)
-else
-	$(LD) $(LDFLAGS) -o $@ $@.o libruntime.a libnet.a libbase.a -lpthread
-endif
+	$(LD) $(LDFLAGS) -o $@ $@.o $(RUNTIME_LIBS)
 
 # general build rules for all targets
 src = $(base_src) $(net_src) $(runtime_src) $(iokernel_src) $(test_src)
@@ -135,6 +84,8 @@ endif
 
 # rule to generate a dep file by using the C preprocessor
 # (see man cpp for details on the -MM and -MT options)
+%.d: %.c
+	@$(CC) $(CFLAGS) $< -MM -MT $(@:.d=.o) >$@
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
 %.d: %.S

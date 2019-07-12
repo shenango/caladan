@@ -10,7 +10,7 @@
 #include <base/time.h>
 #include <runtime/rcu.h>
 #include <runtime/sync.h>
-#include <runtime/thread.h>
+#include <runtime/runtime.h>
 #include <runtime/timer.h>
 
 #define N		1000

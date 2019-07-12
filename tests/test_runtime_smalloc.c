@@ -9,7 +9,7 @@
 #include <base/assert.h>
 #include <base/slab.h>
 #include <base/tcache.h>
-#include <runtime/thread.h>
+#include <runtime/runtime.h>
 #include <runtime/smalloc.h>
 #include <asm/ops.h>
 

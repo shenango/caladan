@@ -6,7 +6,7 @@
 
 #include <base/log.h>
 #include <net/ping.h>
-#include <runtime/thread.h>
+#include <runtime/runtime.h>
 #include <runtime/timer.h>
 
 #define N_PINGS 10

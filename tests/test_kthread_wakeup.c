@@ -8,7 +8,7 @@
 #include <base/log.h>
 #include <base/time.h>
 #include <base/atomic.h>
-#include <runtime/thread.h>
+#include <runtime/runtime.h>
 #include <runtime/sync.h>
 
 #define NTHREADS	6
