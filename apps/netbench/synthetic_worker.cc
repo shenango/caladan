@@ -8,6 +8,9 @@ extern "C" {
 #include <sys/mman.h>
 }
 
+#include "util.h"
+#include "synthetic_worker.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
@@ -16,24 +19,11 @@ extern "C" {
 #include <random>
 #include <tuple>
 
-#include "synthetic_worker.h"
-
 namespace {
 
 void *memcpy_ermsb(void *dst, const void *src, size_t n) {
   asm volatile("rep movsb" : "+D"(dst), "+S"(src), "+c"(n)::"memory");
   return dst;
-}
-
-std::vector<std::string> split(const std::string &text, char sep) {
-  std::vector<std::string> tokens;
-  std::string::size_type start = 0, end = 0;
-  while ((end = text.find(sep, start)) != std::string::npos) {
-    tokens.push_back(text.substr(start, end - start));
-    start = end + 1;
-  }
-  tokens.push_back(text.substr(start));
-  return tokens;
 }
 
 inline void clflush(volatile void *p) { asm volatile("clflush (%0)" ::"r"(p)); }
