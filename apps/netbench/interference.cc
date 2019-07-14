@@ -149,7 +149,7 @@ std::vector<work_unit> RunExperiment(std::vector<work_unit> wq, int workers,
   // create a thread per worker
   for (int i = 0; i < workers; ++i) {
     Queue *q = dfcfs ? qs[i].get() : qs[0].get();
-    threads[i] = rt::Thread([&]() {
+    threads[i] = rt::Thread([&, i]() {
       samples[i] = rtc ? RtcWorker(q, &t, &wg, max_work)
                        : LiveLockWorker(q, &t, &wg, max_work);
     });
@@ -233,7 +233,7 @@ int MainHandler(int argc, char *argv[]) {
     return -EINVAL;
 
   bool rtc;
-  tmp = argv[4];
+  tmp = argv[3];
   if (tmp == "rtc")
     rtc = true;
   else if (tmp == "livelock")
