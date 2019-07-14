@@ -4,8 +4,13 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <vector>
+#include <emmintrin.h>
+#include <numa.h>
+#include <memory>
 #include <string>
+#include <vector>
+
+#define CACHELINE_SIZE (64)
 
 class SyntheticWorker {
  public:
@@ -94,6 +99,26 @@ class CacheAntagonistWorker : public SyntheticWorker {
   char *buf_;
   std::size_t size_;
 };
+
+class MemBWAntagonistWorker : public SyntheticWorker {
+ public:
+  ~MemBWAntagonistWorker() { numa_free(buf_, size_); }
+
+  // Creates a memory bandwidth antagonist worker. It allocates an array whose
+  // size is indicated by the parameter.
+  static MemBWAntagonistWorker *Create(std::size_t size);
+
+  // Perform n times array stores.
+  void Work(uint64_t n);
+
+ private:
+  MemBWAntagonistWorker(char *buf, std::size_t size)
+      : buf_(buf), size_(size) {}
+
+  char *buf_;
+  std::size_t size_;
+};
+
 
 // Parses a string to generate one of the above fake workers.
 SyntheticWorker *SyntheticWorkerFactory(std::string s);

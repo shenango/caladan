@@ -14,6 +14,8 @@ stress_obj = $(stress_src:.cc=.o)
 librt_libs = $(ROOT_PATH)/bindings/cc/librt++.a
 INC += -I$(ROOT_PATH)/bindings/cc
 
+RUNTIME_LIBS := $(RUNTIME_LIBS) -lnuma
+
 # must be first
 all: netbench stress
 

@@ -4,17 +4,19 @@ extern "C" {
 #include <string.h>
 #include <sys/mman.h>
 #include <base/mem.h>
+#include <base/log.h>
 #include <base/stddef.h>
 #undef min
 #undef max
 }
 
-#include <cmath>
 #include <algorithm>
-#include <numeric>
-#include <tuple>
+#include <cmath>
+#include <cstdlib>
 #include <limits>
+#include <numeric>
 #include <random>
+#include <tuple>
 
 #include "synthetic_worker.h"
 
@@ -34,6 +36,18 @@ std::vector<std::string> split(const std::string &text, char sep) {
   }
   tokens.push_back(text.substr(start));
   return tokens;
+}
+
+inline void clflush(volatile void *p) { asm volatile("clflush (%0)" ::"r"(p)); }
+
+// Store data (indicated by the param c) to the cache line using the
+// non-temporal store.
+inline void nt_cacheline_store(char *p, int c) {
+  __m128i i = _mm_set_epi8(c, c, c, c, c, c, c, c, c, c, c, c, c, c, c, c);
+  _mm_stream_si128((__m128i *)&p[0], i);
+  _mm_stream_si128((__m128i *)&p[16], i);
+  _mm_stream_si128((__m128i *)&p[32], i);
+  _mm_stream_si128((__m128i *)&p[48], i);
 }
 
 } // anonymous namespace
@@ -114,6 +128,31 @@ void CacheAntagonistWorker::Work(uint64_t n) {
     memcpy_ermsb(&buf_[0], &buf_[size_ / 2], size_ / 2);
 }
 
+MemBWAntagonistWorker *MemBWAntagonistWorker::Create(std::size_t size) {
+  // non-temporal store won't bypass cache when accessing the remote memory.
+  char *buf = reinterpret_cast<char *>(numa_alloc_local(size));
+  // numa_alloc_* will allocate memory in pages, therefore it must be cacheline aligned.
+  if (reinterpret_cast<uint64_t>(buf) % CACHELINE_SIZE != 0) {
+    // Should never be executed.
+    log_crit("The allocated memory should be cacheline size aligned.");
+    return nullptr;
+  }
+  // Flush the cache explicitly. Non-temporal store will still write into cache
+  // if the corresponding data is already at cache.
+  for (std::size_t i = 0; i < size; i += CACHELINE_SIZE) {
+    clflush(reinterpret_cast<volatile void *>(buf + i));
+  }
+  return new MemBWAntagonistWorker(buf, size);
+}
+
+void MemBWAntagonistWorker::Work(uint64_t n) {
+  for (uint64_t k = 0; k < n; k++) {
+    for (std::size_t i = 0; i < size_; i += CACHELINE_SIZE) {
+      nt_cacheline_store(buf_ + i, 0);
+    }
+  }
+}
+
 SyntheticWorker *SyntheticWorkerFactory(std::string s) {
   std::vector<std::string> tokens = split(s, ':');
 
@@ -142,6 +181,11 @@ SyntheticWorker *SyntheticWorkerFactory(std::string s) {
     if (tokens.size() != 2) return nullptr;
     unsigned long size = std::stoul(tokens[1], nullptr, 0);
     return CacheAntagonistWorker::Create(size);
+  } else if (tokens[0] == "membwantagonist") {
+    if (tokens.size() != 2)
+      return nullptr;
+    unsigned long size = std::stoul(tokens[1], nullptr, 0);
+    return MemBWAntagonistWorker::Create(size);
   }
 
   // invalid type of worker
