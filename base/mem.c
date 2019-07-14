@@ -93,7 +93,7 @@ __mem_map_anom(void *base, size_t len, size_t pgsize,
 
 	BUILD_ASSERT(sizeof(unsigned long) * 8 >= NNUMA);
 	if (mbind(addr, len, numa_policy, mask ? mask : NULL,
-		  mask ? NNUMA : 0, MPOL_MF_STRICT))
+		  mask ? NNUMA : 0, MPOL_MF_STRICT | MPOL_MF_MOVE))
 		goto fail;
 
 	touch_mapping(addr, len, pgsize);
