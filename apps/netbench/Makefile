@@ -2,8 +2,8 @@
 ROOT_PATH=../..
 include $(ROOT_PATH)/shared.mk
 
-synthetic_src = synthetic_worker.cc
-synthetic_obj = $(synthetic_src:.cc=.o)
+lib_src = synthetic_worker.cc distribution.cc util.cc
+lib_obj = $(lib_src:.cc=.o)
 
 netbench_src = netbench.cc
 netbench_obj = $(netbench_src:.cc=.o)
@@ -11,24 +11,31 @@ netbench_obj = $(netbench_src:.cc=.o)
 stress_src = stress.cc
 stress_obj = $(stress_src:.cc=.o)
 
+interference_src = interference.cc
+interference_obj = $(interference_src:.cc=.o)
+
 librt_libs = $(ROOT_PATH)/bindings/cc/librt++.a
 INC += -I$(ROOT_PATH)/bindings/cc
 
 RUNTIME_LIBS := $(RUNTIME_LIBS) -lnuma
 
 # must be first
-all: netbench stress
+all: netbench stress interference
 
-netbench: $(synthetic_obj) $(netbench_obj) $(librt_libs) $(RUNTIME_DEPS)
-	$(LDXX) -o $@ $(LDFLAGS) $(synthetic_obj) $(netbench_obj) \
+netbench: $(lib_obj) $(netbench_obj) $(librt_libs) $(RUNTIME_DEPS)
+	$(LDXX) -o $@ $(LDFLAGS) $(lib_obj) $(netbench_obj) \
 	$(librt_libs) $(RUNTIME_LIBS)
 
-stress: $(synthetic_obj) $(stress_obj) $(librt_libs) $(RUNTIME_DEPS)
-	$(LDXX) -o $@ $(LDFLAGS) $(synthetic_obj) $(stress_obj) \
+stress: $(lib_obj) $(stress_obj) $(librt_libs) $(RUNTIME_DEPS)
+	$(LDXX) -o $@ $(LDFLAGS) $(lib_obj) $(stress_obj) \
+	$(librt_libs) $(RUNTIME_LIBS)
+
+interference: $(lib_obj) $(interference_obj) $(librt_libs) $(RUNTIME_DEPS)
+	$(LDXX) -o $@ $(LDFLAGS) $(lib_obj) $(interference_obj) \
 	$(librt_libs) $(RUNTIME_LIBS)
 
 # general build rules for all targets
-src = $(netbench_src) $(stress_src) $(synthetic_src)
+src = $(lib_src) $(netbench_src) $(stress_src) $(interference_src)
 obj = $(src:.cc=.o)
 dep = $(obj:.o=.d)
 
@@ -45,4 +52,4 @@ endif
 
 .PHONY: clean
 clean:
-	rm -f $(obj) $(dep) netbench stress
+	rm -f $(obj) $(dep) netbench stress interference

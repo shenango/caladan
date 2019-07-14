@@ -1,13 +1,11 @@
 // synthetic_worker.cc - support for generation of synthetic work
 
 extern "C" {
+#include <base/log.h>
+#include <base/mem.h>
+#include <base/stddef.h>
 #include <string.h>
 #include <sys/mman.h>
-#include <base/mem.h>
-#include <base/log.h>
-#include <base/stddef.h>
-#undef min
-#undef max
 }
 
 #include <algorithm>
@@ -23,7 +21,7 @@ extern "C" {
 namespace {
 
 void *memcpy_ermsb(void *dst, const void *src, size_t n) {
-  asm volatile("rep movsb" : "+D"(dst), "+S"(src), "+c"(n) :: "memory");
+  asm volatile("rep movsb" : "+D"(dst), "+S"(src), "+c"(n)::"memory");
   return dst;
 }
 
@@ -50,18 +48,18 @@ inline void nt_cacheline_store(char *p, int c) {
   _mm_stream_si128((__m128i *)&p[48], i);
 }
 
-} // anonymous namespace
+}  // anonymous namespace
 
 void SqrtWorker::Work(uint64_t n) {
   constexpr double kNumber = 2350845.545;
   for (uint64_t i = 0; i < n; ++i) {
     volatile double v = sqrt(i * kNumber);
-    std::ignore = v; // silences compiler warning
+    std::ignore = v;  // silences compiler warning
   }
 }
 
-StridedMemtouchWorker *
-StridedMemtouchWorker::Create(std::size_t size, std::size_t stride) {
+StridedMemtouchWorker *StridedMemtouchWorker::Create(std::size_t size,
+                                                     std::size_t stride) {
   char *buf = new char[size]();
   return new StridedMemtouchWorker(buf, size, stride);
 }
@@ -69,41 +67,39 @@ StridedMemtouchWorker::Create(std::size_t size, std::size_t stride) {
 void StridedMemtouchWorker::Work(uint64_t n) {
   for (uint64_t i = 0; i < n; ++i) {
     volatile char c = buf_[(stride_ * i) % size_];
-    std::ignore = c; // silences compiler warning
+    std::ignore = c;  // silences compiler warning
   }
 }
 
-MemStreamWorker *
-MemStreamWorker::Create(std::size_t size) {
+MemStreamWorker *MemStreamWorker::Create(std::size_t size) {
   void *addr;
   int prot, flags;
 
   prot = PROT_READ | PROT_WRITE;
   flags = MAP_PRIVATE | MAP_ANONYMOUS | MAP_POPULATE | MAP_HUGETLB |
-     (PGSHIFT_2MB << MAP_HUGE_SHIFT);
+          (PGSHIFT_2MB << MAP_HUGE_SHIFT);
 
   addr = mmap(NULL, align_up(size, PGSIZE_2MB), prot, flags, -1, 0);
-  if (addr == MAP_FAILED)
-    return nullptr;
+  if (addr == MAP_FAILED) return nullptr;
 
   memset(addr, 0xAB, size);
-  return new MemStreamWorker(static_cast<char*>(addr), size);
+  return new MemStreamWorker(static_cast<char *>(addr), size);
 }
 
 MemStreamWorker::~MemStreamWorker() {
-  munmap((void*)buf_, align_up(size_, PGSIZE_2MB));
+  munmap((void *)buf_, align_up(size_, PGSIZE_2MB));
 }
 
 void MemStreamWorker::Work(uint64_t n) {
   if (n > size_) n = size_;
   for (uint64_t i = 0; i < n; ++i) {
     volatile char c = buf_[i];
-    std::ignore = c; // silences compiler warning
+    std::ignore = c;  // silences compiler warning
   }
 }
 
-RandomMemtouchWorker *
-RandomMemtouchWorker::Create(std::size_t size, unsigned int seed) {
+RandomMemtouchWorker *RandomMemtouchWorker::Create(std::size_t size,
+                                                   unsigned int seed) {
   char *buf = new char[size]();
   std::vector<unsigned int> v(size);
   std::iota(std::begin(v), std::end(v), 0);
@@ -113,12 +109,10 @@ RandomMemtouchWorker::Create(std::size_t size, unsigned int seed) {
 }
 
 void RandomMemtouchWorker::Work(uint64_t n) {
-  for (uint64_t i = 0; i < n; ++i)
-    buf_[schedule_[i % schedule_.size()]]++;
+  for (uint64_t i = 0; i < n; ++i) buf_[schedule_[i % schedule_.size()]]++;
 }
 
-CacheAntagonistWorker *
-CacheAntagonistWorker::Create(std::size_t size) {
+CacheAntagonistWorker *CacheAntagonistWorker::Create(std::size_t size) {
   char *buf = new char[size]();
   return new CacheAntagonistWorker(buf, size);
 }
@@ -131,7 +125,8 @@ void CacheAntagonistWorker::Work(uint64_t n) {
 MemBWAntagonistWorker *MemBWAntagonistWorker::Create(std::size_t size) {
   // non-temporal store won't bypass cache when accessing the remote memory.
   char *buf = reinterpret_cast<char *>(numa_alloc_local(size));
-  // numa_alloc_* will allocate memory in pages, therefore it must be cacheline aligned.
+  // numa_alloc_* will allocate memory in pages, therefore it must be cacheline
+  // aligned.
   if (reinterpret_cast<uint64_t>(buf) % CACHELINE_SIZE != 0) {
     // Should never be executed.
     log_crit("The allocated memory should be cacheline size aligned.");
@@ -182,8 +177,7 @@ SyntheticWorker *SyntheticWorkerFactory(std::string s) {
     unsigned long size = std::stoul(tokens[1], nullptr, 0);
     return CacheAntagonistWorker::Create(size);
   } else if (tokens[0] == "membwantagonist") {
-    if (tokens.size() != 2)
-      return nullptr;
+    if (tokens.size() != 2) return nullptr;
     unsigned long size = std::stoul(tokens[1], nullptr, 0);
     return MemBWAntagonistWorker::Create(size);
   }

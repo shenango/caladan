@@ -3,28 +3,26 @@ extern "C" {
 #include <net/ip.h>
 #include <unistd.h>
 }
-#undef min
-#undef max
 
-#include "synthetic_worker.h"
 #include "net.h"
-#include "sync.h"
 #include "runtime.h"
+#include "sync.h"
+#include "synthetic_worker.h"
 #include "thread.h"
 #include "timer.h"
 
 #include <algorithm>
 #include <chrono>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <memory>
 #include <numeric>
 #include <random>
+#include <sstream>
+#include <string>
 #include <utility>
 #include <vector>
-#include <fstream>
-#include <string>
-#include <sstream>
 
 namespace {
 
@@ -39,13 +37,11 @@ netaddr raddr;
 // the mean service time in us.
 double st;
 // number of iterations required for 1us on target server
-constexpr uint64_t kIterationsPerUS = 65; //83
+constexpr uint64_t kIterationsPerUS = 65;  // 83
 // Number of seconds to warmup at rate 0
 constexpr uint64_t kWarmupUpSeconds = 5;
 
 static std::vector<std::pair<double, uint64_t>> rates;
-
-
 
 constexpr uint64_t kUptimePort = 8002;
 constexpr uint64_t kUptimeMagic = 0xDEADBEEF;
@@ -75,9 +71,9 @@ void UptimeWorker(std::unique_ptr<rt::TcpConn> c) {
     std::istringstream ss(line);
     std::string tmp;
     uint64_t user, nice, system, idle, iowait, irq, softirq, steal, guest,
-             guest_nice;
-    ss >> tmp >> user >> nice >> system >> idle >> iowait >> irq >> softirq
-       >> steal >> guest >> guest_nice;
+        guest_nice;
+    ss >> tmp >> user >> nice >> system >> idle >> iowait >> irq >> softirq >>
+        steal >> guest >> guest_nice;
     uptime u = {hton64(idle + iowait),
                 hton64(user + nice + system + irq + softirq + steal)};
 
@@ -92,8 +88,7 @@ void UptimeWorker(std::unique_ptr<rt::TcpConn> c) {
 }
 
 void UptimeServer() {
-  std::unique_ptr<rt::TcpQueue> q(
-      rt::TcpQueue::Listen({0, kUptimePort}, 4096));
+  std::unique_ptr<rt::TcpQueue> q(rt::TcpQueue::Listen({0, kUptimePort}, 4096));
   if (q == nullptr) panic("couldn't listen for connections");
 
   while (true) {
@@ -104,8 +99,8 @@ void UptimeServer() {
 }
 
 uptime ReadUptime() {
-  std::unique_ptr<rt::TcpConn> c(rt::TcpConn::Dial({0, 0},
-                                                   {raddr.ip, kUptimePort}));
+  std::unique_ptr<rt::TcpConn> c(
+      rt::TcpConn::Dial({0, 0}, {raddr.ip, kUptimePort}));
   uint64_t magic = hton64(kUptimeMagic);
   ssize_t ret = c->WriteFull(&magic, sizeof(magic));
   if (ret != static_cast<ssize_t>(sizeof(magic)))
@@ -130,7 +125,8 @@ constexpr uint64_t kMaxCatchUpUS = 5;
 
 void ServerWorker(std::unique_ptr<rt::TcpConn> c) {
   payload p;
-  std::unique_ptr<SyntheticWorker> w(SyntheticWorkerFactory("stridedmem:3200:64"));
+  std::unique_ptr<SyntheticWorker> w(
+      SyntheticWorkerFactory("stridedmem:3200:64"));
   if (w == nullptr) panic("couldn't create worker");
 
   while (true) {
@@ -263,7 +259,7 @@ std::vector<work_unit> ClientWorker(
     }
   }
 
-  //rt::Sleep(1 * rt::kSeconds);
+  // rt::Sleep(1 * rt::kSeconds);
   c->Shutdown(SHUT_RDWR);
   th.Join();
 
@@ -333,24 +329,22 @@ std::vector<work_unit> RunExperiment(
   uint64_t idle = u2.idle - u1.idle;
   uint64_t busy = u2.busy - u1.busy;
   if (cpu_usage != nullptr)
-    *cpu_usage = static_cast<double>(busy) /
-                 static_cast<double>(idle + busy);
+    *cpu_usage = static_cast<double>(busy) / static_cast<double>(idle + busy);
   return w;
 }
 
 void PrintRawResults(std::vector<work_unit> w) {
-  std::sort(w.begin(), w.end(), [](const work_unit &s1, work_unit &s2) {
-    return s1.tsc < s2.tsc;
-  });
-  for (const work_unit& u : w) {
-    std::cout << std::setprecision(2) << std::fixed
-              << u.start_us << "," << u.duration_us << "," << u.work_us << ","
-              << u.tsc << "," << u.cpu << std::endl;
+  std::sort(w.begin(), w.end(),
+            [](const work_unit &s1, work_unit &s2) { return s1.tsc < s2.tsc; });
+  for (const work_unit &u : w) {
+    std::cout << std::setprecision(2) << std::fixed << u.start_us << ","
+              << u.duration_us << "," << u.work_us << "," << u.tsc << ","
+              << u.cpu << std::endl;
   }
 }
 
-void PrintStatResults(std::vector<work_unit> w,
-                      double offered_rps, double rps, double cpu_usage) {
+void PrintStatResults(std::vector<work_unit> w, double offered_rps, double rps,
+                      double cpu_usage) {
   std::sort(w.begin(), w.end(), [](const work_unit &s1, work_unit &s2) {
     return s1.duration_us < s2.duration_us;
   });
@@ -365,21 +359,13 @@ void PrintStatResults(std::vector<work_unit> w,
   double p9999 = w[count * 0.9999].duration_us;
   double min = w[0].duration_us;
   double max = w[w.size() - 1].duration_us;
-  std::cout //<< "#threads,offered_rps,rps,cpu_usage,samples,min,mean,p90,p99,p999,p9999,max"
-            //<< std::endl
-            << std::setprecision(4) << std::fixed
-            << threads << ","
-            << offered_rps << ","
-            << rps << ","
-            << cpu_usage << ","
-            << w.size() << ","
-            << min << ","
-            << mean << ","
-            << p90 << ","
-            << p99 << ","
-            << p999 << ","
-            << p9999 << ","
-            << max << std::endl;
+  std::cout  //<<
+             //"#threads,offered_rps,rps,cpu_usage,samples,min,mean,p90,p99,p999,p9999,max"
+             //<< std::endl
+      << std::setprecision(4) << std::fixed << threads << "," << offered_rps
+      << "," << rps << "," << cpu_usage << "," << w.size() << "," << min << ","
+      << mean << "," << p90 << "," << p99 << "," << p999 << "," << p9999 << ","
+      << max << std::endl;
 }
 
 void SteadyStateExperiment(int threads, double offered_rps,
@@ -421,7 +407,7 @@ void LoadShiftExperiment(int threads,
 }
 
 void ClientHandler(void *arg) {
-  //LoadShiftExperiment(threads, rates, st);
+  // LoadShiftExperiment(threads, rates, st);
 #if 1
   for (double i = 50000; i <= 8000000; i += 50000) {
     SteadyStateExperiment(threads, i, st);

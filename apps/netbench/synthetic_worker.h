@@ -2,10 +2,10 @@
 
 #pragma once
 
-#include <cstddef>
-#include <cstdint>
 #include <emmintrin.h>
 #include <numa.h>
+#include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
@@ -24,12 +24,12 @@ class SqrtWorker : public SyntheticWorker {
   ~SqrtWorker() {}
 
   // Performs n iterations of sqrt().
-  void Work(uint64_t n); 
+  void Work(uint64_t n);
 };
 
 class StridedMemtouchWorker : public SyntheticWorker {
  public:
-  ~StridedMemtouchWorker() {delete buf_;}
+  ~StridedMemtouchWorker() { delete buf_; }
 
   // Creates a strided memory touching worker.
   static StridedMemtouchWorker *Create(std::size_t size, size_t stride);
@@ -38,8 +38,8 @@ class StridedMemtouchWorker : public SyntheticWorker {
   void Work(uint64_t n);
 
  private:
-  StridedMemtouchWorker(char *buf, std::size_t size, size_t stride) :
-    buf_(buf), size_(size), stride_(stride) { }
+  StridedMemtouchWorker(char *buf, std::size_t size, size_t stride)
+      : buf_(buf), size_(size), stride_(stride) {}
 
   volatile char *buf_;
   std::size_t size_;
@@ -57,8 +57,7 @@ class MemStreamWorker : public SyntheticWorker {
   void Work(uint64_t n);
 
  private:
-  MemStreamWorker(char *buf, std::size_t size) :
-    buf_(buf), size_(size) { }
+  MemStreamWorker(char *buf, std::size_t size) : buf_(buf), size_(size) {}
 
   volatile char *buf_;
   std::size_t size_;
@@ -66,7 +65,7 @@ class MemStreamWorker : public SyntheticWorker {
 
 class RandomMemtouchWorker : public SyntheticWorker {
  public:
-  ~RandomMemtouchWorker() {delete buf_;}
+  ~RandomMemtouchWorker() { delete buf_; }
 
   // Creates a random memory touching worker.
   static RandomMemtouchWorker *Create(std::size_t size, unsigned int seed);
@@ -75,8 +74,8 @@ class RandomMemtouchWorker : public SyntheticWorker {
   void Work(uint64_t n);
 
  private:
-  RandomMemtouchWorker(char *buf, std::vector<unsigned int> schedule) :
-    buf_(buf), schedule_(std::move(schedule)) { }
+  RandomMemtouchWorker(char *buf, std::vector<unsigned int> schedule)
+      : buf_(buf), schedule_(std::move(schedule)) {}
 
   volatile char *buf_;
   std::vector<unsigned int> schedule_;
@@ -84,7 +83,7 @@ class RandomMemtouchWorker : public SyntheticWorker {
 
 class CacheAntagonistWorker : public SyntheticWorker {
  public:
-  ~CacheAntagonistWorker() {delete buf_;}
+  ~CacheAntagonistWorker() { delete buf_; }
 
   // Creates a cache antagonist worker.
   static CacheAntagonistWorker *Create(std::size_t size);
@@ -93,8 +92,7 @@ class CacheAntagonistWorker : public SyntheticWorker {
   void Work(uint64_t n);
 
  private:
-  CacheAntagonistWorker(char *buf, std::size_t size) :
-    buf_(buf), size_(size) { }
+  CacheAntagonistWorker(char *buf, std::size_t size) : buf_(buf), size_(size) {}
 
   char *buf_;
   std::size_t size_;
@@ -112,13 +110,11 @@ class MemBWAntagonistWorker : public SyntheticWorker {
   void Work(uint64_t n);
 
  private:
-  MemBWAntagonistWorker(char *buf, std::size_t size)
-      : buf_(buf), size_(size) {}
+  MemBWAntagonistWorker(char *buf, std::size_t size) : buf_(buf), size_(size) {}
 
   char *buf_;
   std::size_t size_;
 };
-
 
 // Parses a string to generate one of the above fake workers.
 SyntheticWorker *SyntheticWorkerFactory(std::string s);

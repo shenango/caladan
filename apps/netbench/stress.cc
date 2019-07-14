@@ -1,17 +1,15 @@
 extern "C" {
 #include <base/log.h>
-#undef min
-#undef max
 }
 
 #include "runtime.h"
-#include "thread.h"
 #include "sync.h"
-#include "timer.h"
 #include "synthetic_worker.h"
+#include "thread.h"
+#include "timer.h"
 
-#include <iostream>
 #include <chrono>
+#include <iostream>
 
 namespace {
 
@@ -24,7 +22,7 @@ void MainHandler(void *arg) {
   uint64_t cnt[threads] = {};
 
   for (int i = 0; i < threads; ++i) {
-    rt::Spawn([&,i](){
+    rt::Spawn([&, i]() {
       auto *w = SyntheticWorkerFactory(worker_spec);
       if (w == nullptr) {
         std::cerr << "Failed to create worker." << std::endl;
@@ -39,15 +37,16 @@ void MainHandler(void *arg) {
     });
   }
 
-  rt::Spawn([&](){
+  rt::Spawn([&]() {
     uint64_t last_total = 0;
     auto last = std::chrono::steady_clock::now();
     while (1) {
       rt::Sleep(rt::kSeconds);
       auto now = std::chrono::steady_clock::now();
       uint64_t total = 0;
-      double duration = std::chrono::duration_cast<
-        std::chrono::duration<double>>(now - last).count();
+      double duration =
+          std::chrono::duration_cast<std::chrono::duration<double>>(now - last)
+              .count();
       for (int i = 0; i < threads; i++) total += cnt[i];
       log_info("%f", static_cast<double>(total - last_total) / duration);
       last_total = total;
@@ -59,7 +58,7 @@ void MainHandler(void *arg) {
   wg.Wait();
 }
 
-} // anonymous namespace
+}  // anonymous namespace
 
 int main(int argc, char *argv[]) {
   int ret;
