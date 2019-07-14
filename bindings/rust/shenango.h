@@ -9,6 +9,7 @@
 #include <base/tcache.h>
 
 #include <runtime/preempt.h>
+#include <runtime/runtime.h>
 #include <runtime/smalloc.h>
 #include <runtime/sync.h>
 #include <runtime/tcp.h>

@@ -17,7 +17,7 @@ fn work_handler(wg_parent: Arc<WaitGroup>) {
     for _ in 0..N {
         let wg2 = wg.clone();
         shenango::thread::spawn_detached(move || leaf_handler(wg2));
-        shenango::thread_yield();
+        shenango::thread::thread_yield();
     }
 
     wg.wait();

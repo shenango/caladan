@@ -54,12 +54,12 @@ pub fn preempt_disable() {
 }
 
 #[allow(unused)]
-pub(crate) fn base_init() -> Result<(), i32> {
+pub fn base_init() -> Result<(), i32> {
     convert_error(unsafe { ffi::base_init() })
 }
 
 #[allow(unused)]
-pub(crate) fn base_init_thread() -> Result<(), i32> {
+pub fn base_init_thread() -> Result<(), i32> {
     convert_error(unsafe { ffi::base_init_thread() })
 }
 
