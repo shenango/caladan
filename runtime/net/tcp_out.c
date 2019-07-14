@@ -225,7 +225,7 @@ ssize_t tcp_tx_send(tcpconn_t *c, const void *buf, size_t len, bool push)
 		if (c->tx_pending) {
 			m = c->tx_pending;
 			c->tx_pending = NULL;
-			seglen = min(end - pos, TCP_MSS - mbuf_length(m));
+			seglen = MIN(end - pos, TCP_MSS - mbuf_length(m));
 			m->seg_end += seglen;
 		} else {
 			m = net_tx_alloc_mbuf();
@@ -233,7 +233,7 @@ ssize_t tcp_tx_send(tcpconn_t *c, const void *buf, size_t len, bool push)
 				ret = -ENOBUFS;
 				break;
 			}
-			seglen = min(end - pos, TCP_MSS);
+			seglen = MIN(end - pos, TCP_MSS);
 			m->seg_seq = c->pcb.snd_nxt;
 			m->seg_end = c->pcb.snd_nxt + seglen;
 			m->flags = TCP_ACK;

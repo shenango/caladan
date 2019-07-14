@@ -46,7 +46,7 @@ static void softirq_gather_work(struct softirq_work *w, struct kthread *k,
 
 	assert_spin_lock_held(&k->lock);
 
-	real_budget = min(budget, SOFTIRQ_MAX_BUDGET);
+	real_budget = MIN(budget, SOFTIRQ_MAX_BUDGET);
 
 	while (!preempt_needed()) {
 		uint64_t cmd;

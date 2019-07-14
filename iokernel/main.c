@@ -125,7 +125,7 @@ int main(int argc, char *argv[])
 	int ret;
 
 	if (argc >= 2) {
-		if (!strcmp(argv[2], "noht"))
+		if (!strcmp(argv[1], "noht"))
 			cfg.noht = true;
 	}
 

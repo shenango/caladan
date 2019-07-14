@@ -34,16 +34,16 @@ void tcp_timer_update(tcpconn_t *c)
 		next_timeout = c->attach_ts + TCP_CONNECT_TIMEOUT;
 
 	if (c->ack_delayed)
-		next_timeout = min(next_timeout, c->ack_ts + TCP_ACK_TIMEOUT);
+		next_timeout = MIN(next_timeout, c->ack_ts + TCP_ACK_TIMEOUT);
 
 	if (!c->tx_exclusive) {
 		m = list_top(&c->txq, struct mbuf, link);
 		if (m)
-			next_timeout = min(next_timeout, m->timestamp + TCP_RETRANSMIT_TIMEOUT);
+			next_timeout = MIN(next_timeout, m->timestamp + TCP_RETRANSMIT_TIMEOUT);
 	}
 
 	if (!list_empty(&c->rxq_ooo))
-		next_timeout = min(next_timeout, microtime() + TCP_OOQ_ACK_TIMEOUT);
+		next_timeout = MIN(next_timeout, microtime() + TCP_OOQ_ACK_TIMEOUT);
 
 	store_release(&c->next_timeout, next_timeout);
 }
@@ -750,7 +750,7 @@ ssize_t tcp_readv(tcpconn_t *c, const struct iovec *iov, int iovcnt)
 
 		do {
 			const struct iovec *vp = &iov[i];
-			size_t cpylen = min(vp->iov_len - offset,
+			size_t cpylen = MIN(vp->iov_len - offset,
 					    mbuf_length(cur));
 
 			memcpy((char *)vp->iov_base + offset,
@@ -771,7 +771,7 @@ ssize_t tcp_readv(tcpconn_t *c, const struct iovec *iov, int iovcnt)
 	if (m) {
 		do {
 			const struct iovec *vp = &iov[i];
-			size_t cpylen = min(vp->iov_len - offset,
+			size_t cpylen = MIN(vp->iov_len - offset,
 					    mbuf_length(m));
 
 			memcpy((char *)vp->iov_base + offset,
@@ -877,7 +877,7 @@ ssize_t tcp_write(tcpconn_t *c, const void *buf, size_t len)
 		return ret;
 
 	/* actually send the data */
-	ret = tcp_tx_send(c, buf, min(len, winlen), len <= winlen);
+	ret = tcp_tx_send(c, buf, MIN(len, winlen), len <= winlen);
 
 	/* catch up on any pending work */
 	tcp_write_finish(c);
@@ -909,7 +909,7 @@ ssize_t tcp_writev(tcpconn_t *c, const struct iovec *iov, int iovcnt)
 	for (i = 0; i < iovcnt; i++, iov++) {
 		if (winlen <= 0)
 			break;
-		ret = tcp_tx_send(c, iov->iov_base, min(iov->iov_len, winlen),
+		ret = tcp_tx_send(c, iov->iov_base, MIN(iov->iov_len, winlen),
 				  i == iovcnt - 1 && iov->iov_len <= winlen);
 		if (ret <= 0)
 			break;

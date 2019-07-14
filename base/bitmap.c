@@ -18,7 +18,7 @@ bitmap_find_next(unsigned long *bits, int nbits, int pos, bool invert)
 			val = ~val;
 		val &= mask;
 		if (val)
-			return min(idx + __builtin_ffsl(val) - 1, nbits);
+			return MIN(idx + __builtin_ffsl(val) - 1, nbits);
 		mask = ~0UL;
 	}
 

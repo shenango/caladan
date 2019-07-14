@@ -298,7 +298,7 @@ ssize_t udp_read_from(udpconn_t *c, void *buf, size_t len,
 	c->inq_len--;
 	spin_unlock_np(&c->inq_lock);
 
-	ret = min(len, mbuf_length(m));
+	ret = MIN(len, mbuf_length(m));
 	memcpy(buf, mbuf_data(m), ret);
 	if (raddr) {
 		struct ip_hdr *iphdr = mbuf_network_hdr(m, *iphdr);

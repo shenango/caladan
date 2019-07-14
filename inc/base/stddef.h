@@ -54,21 +54,21 @@
 #define ARRAY_SIZE(arr) (sizeof(arr) / sizeof((arr)[0]))
 
 /**
- * max - picks the maximum of two expressions
+ * MAX - picks the maximum of two expressions
  *
  * Arguments @a and @b are evaluated exactly once
  */
-#define max(a, b) \
+#define MAX(a, b) \
 	({typeof(a) _a = (a); \
 	  typeof(b) _b = (b); \
 	  _a > _b ? _a : _b;})
 
 /**
- * min - picks the minimum of two expressions
+ * MIN - picks the minimum of two expressions
  *
  * Arguments @a and @b are evaluated exactly once
  */
-#define min(a, b) \
+#define MIN(a, b) \
 	({typeof(a) _a = (a); \
 	  typeof(b) _b = (b); \
 	  _a < _b ? _a : _b;})
