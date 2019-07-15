@@ -258,8 +258,6 @@ int ioqueues_register_iokernel(void)
 	hdr->spdk_shm_id = iok.spdk_shm_id;
 	hdr->egress_buf_count = div_up(iok.tx_len, MBUF_DEFAULT_LEN);
 	hdr->thread_count = maxks;
-	hdr->timer_count = 0;
-	hdr->hwq_count = 0;
 	hdr->mac = netcfg.mac;
 	hdr->congestion_info = ptr_to_shmptr(r, runtime_congestion,
 					     sizeof(struct congestion_info));

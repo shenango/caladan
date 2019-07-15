@@ -192,6 +192,29 @@ int sched_run_on_core(struct proc *p, unsigned int core)
 	return 0;
 }
 
+static bool hardware_queue_congested(struct thread *th, struct hwq *h)
+{
+	bool last_pending, cur_pending;
+	uint32_t cur_tail, last_tail;
+
+	if (!h->enabled)
+		return false;
+
+	last_tail = h->last_tail;
+	last_pending = h->last_pending;
+
+	cur_tail = ACCESS_ONCE(*h->consumer_idx);
+	cur_pending = hwq_busy(h, cur_tail);
+
+	h->last_tail = cur_tail;
+	h->last_pending = cur_pending;
+	if (cur_pending)
+		if (!th->active || (last_tail == cur_tail && last_pending))
+			return true;
+
+	return false;
+}
+
 static void sched_detect_congestion(struct proc *p)
 {
 	DEFINE_BITMAP(threads, NCPU);
@@ -227,6 +250,9 @@ static void sched_detect_congestion(struct proc *p)
 				 cur_head != cur_tail) {
 			bitmap_set(ios, i);
 		}
+
+		if (hardware_queue_congested(th, &th->directpath_hwq))
+			bitmap_set(ios, i);
 	}
 
 	/* notify the scheduler policy of the current congestion */
@@ -235,12 +261,15 @@ static void sched_detect_congestion(struct proc *p)
 
 static int sched_try_fast_rewake(struct thread *th)
 {
+	struct hwq *h = &th->directpath_hwq;
+
 	/*
 	 * If the kthread has yielded voluntarily but still has pending I/O
 	 * requests in flight, we can just wake it back up directly without
 	 * wasting any extra time in the scheduler.
 	 */
-	if (ACCESS_ONCE(th->rxq.send_head) == lrpc_poll_send_tail(&th->rxq))
+	if (ACCESS_ONCE(th->rxq.send_head) == lrpc_poll_send_tail(&th->rxq)
+			 && (!h->enabled || !hwq_busy(h, ACCESS_ONCE(*h->consumer_idx))))
 		return -EINVAL;
 
 	ksched_run(th->core, th->tid);

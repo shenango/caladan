@@ -26,7 +26,7 @@ static struct tcache *net_rx_buf_tcache;
 static DEFINE_PERTHREAD(struct tcache_perthread, net_rx_buf_pt);
 
 /* TX buffer allocation */
-static struct mempool net_tx_buf_mp;
+struct mempool net_tx_buf_mp;
 static struct tcache *net_tx_buf_tcache;
 static DEFINE_PERTHREAD(struct tcache_perthread, net_tx_buf_pt);
 
@@ -44,6 +44,7 @@ static void net_rx_release_mbuf(struct mbuf *m)
 	preempt_enable();
 }
 
+#ifndef DIRECTPATH
 static void net_rx_send_completion(unsigned long completion_data)
 {
 	struct kthread *k;
@@ -55,6 +56,7 @@ static void net_rx_send_completion(unsigned long completion_data)
 	}
 	putk();
 }
+#endif
 
 static struct mbuf *net_rx_alloc_mbuf(struct rx_net_hdr *hdr)
 {
@@ -83,14 +85,22 @@ static struct mbuf *net_rx_alloc_mbuf(struct rx_net_hdr *hdr)
 	m->rss_hash = hdr->rss_hash;
 
 	barrier();
+#ifdef DIRECTPATH
+	net_ops.rx_completion(hdr->completion_data);
+#else
 	net_rx_send_completion(hdr->completion_data);
+#endif
 
 	m->release_data = 0;
 	m->release = net_rx_release_mbuf;
 	return m;
 
 fail_buf:
+#ifdef DIRECTPATH
+	net_ops.rx_completion(hdr->completion_data);
+#else
 	net_rx_send_completion(hdr->completion_data);
+#endif
 	return NULL;
 }
 
@@ -283,7 +293,6 @@ struct mbuf *net_tx_alloc_mbuf(void)
 /* drains overflow queues */
 void __noinline net_tx_drain_overflow(void)
 {
-	shmptr_t shm;
 	struct mbuf *m;
 	struct kthread *k = myk();
 
@@ -292,10 +301,15 @@ void __noinline net_tx_drain_overflow(void)
 	/* drain TX packets */
 	while (!mbufq_empty(&k->txpktq_overflow)) {
 		m = mbufq_peak_head(&k->txpktq_overflow);
-		shm = ptr_to_shmptr(&netcfg.tx_region,
+#ifndef DIRECTPATH
+		shmptr_t shm = ptr_to_shmptr(&netcfg.tx_region,
 				    mbuf_data(m), mbuf_length(m));
 		if (!lrpc_send(&k->txpktq, TXPKT_NET_XMIT, shm))
 			break;
+#else
+		if (net_ops.tx_single(k->directpath_txq, m))
+			break;
+#endif
 		mbufq_pop_head(&k->txpktq_overflow);
 		if (unlikely(preempt_needed()))
 			return;
@@ -305,8 +319,6 @@ void __noinline net_tx_drain_overflow(void)
 static void net_tx_raw(struct mbuf *m)
 {
 	struct kthread *k;
-	shmptr_t shm;
-	struct tx_net_hdr *hdr;
 	unsigned int len = mbuf_length(m);
 
 	k = getk();
@@ -317,14 +329,19 @@ static void net_tx_raw(struct mbuf *m)
 	STAT(TX_PACKETS)++;
 	STAT(TX_BYTES) += len;
 
-	hdr = mbuf_push_hdr(m, *hdr);
+#ifndef DIRECTPATH
+	struct tx_net_hdr *hdr = mbuf_push_hdr(m, *hdr);
 	hdr->completion_data = (unsigned long)m;
 	hdr->len = len;
 	hdr->olflags = m->txflags;
-	shm = ptr_to_shmptr(&netcfg.tx_region, hdr, len + sizeof(*hdr));
+	shmptr_t shm = ptr_to_shmptr(&netcfg.tx_region, hdr, len + sizeof(*hdr));
 
 	if (!lrpc_send(&k->txpktq, TXPKT_NET_XMIT, shm))
 		mbufq_push_tail(&k->txpktq_overflow, m);
+#else
+	if (unlikely(net_ops.tx_single(k->directpath_txq, m)))
+		mbufq_push_tail(&k->txpktq_overflow, m);
+#endif
 	putk();
 }
 

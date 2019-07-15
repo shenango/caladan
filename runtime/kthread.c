@@ -107,6 +107,86 @@ static __always_inline void kthread_yield_to_iokernel(void)
 	store_release(&cpu_map[s].recent_kthread, k);
 }
 
+
+#ifdef DIRECTPATH
+
+static atomic64_t kthread_gen;
+static uint64_t flow_assignment_gen;
+static DEFINE_SPINLOCK(flow_assignment_lock);
+static DEFINE_BITMAP(kthread_awake, NCPU);
+
+static void flows_update(void)
+{
+	int i, pos, nrawake;
+	uint64_t cur_gen;
+	unsigned int fg_map[maxks];
+	unsigned int awakeks[maxks];
+	DEFINE_BITMAP(kawake_local, NCPU);
+
+again:
+
+	if (!spin_try_lock_np(&flow_assignment_lock))
+		return;
+
+	cur_gen = atomic64_read(&kthread_gen);
+	if (cur_gen == flow_assignment_gen) {
+		spin_unlock_np(&flow_assignment_lock);
+		return;
+	}
+
+	ACCESS_ONCE(flow_assignment_gen) = cur_gen;
+
+	/* make a copy of kthread_awake */
+	for (i = 0; i < BITMAP_LONG_SIZE(NCPU); i++)
+		kawake_local[i] = ACCESS_ONCE(kthread_awake[i]);
+
+	nrawake = 0;
+	bitmap_for_each_set(kawake_local, maxks, i) {
+		fg_map[i] = i;
+		awakeks[nrawake++] = i;
+	}
+
+	if (!nrawake)
+		goto out;
+
+	pos = 0;
+	bitmap_for_each_cleared(kawake_local, maxks, i) {
+		/* steer packets away from this kthread */
+		fg_map[i] = awakeks[pos++];
+		if (pos == nrawake)
+			pos = 0;
+	}
+
+	net_ops.steer_flows(fg_map);
+
+out:
+	spin_unlock_np(&flow_assignment_lock);
+
+	if (unlikely(ACCESS_ONCE(flow_assignment_gen) != atomic64_read(&kthread_gen)))
+		goto again;
+}
+
+static void flows_notify_waking(void)
+{
+	bitmap_atomic_set(kthread_awake, myk()->kthread_idx);
+	atomic64_inc(&kthread_gen);
+	flows_update();
+}
+
+static void flows_notify_parking(bool voluntary)
+{
+	bitmap_atomic_clear(kthread_awake, myk()->kthread_idx);
+	atomic64_inc(&kthread_gen);
+	if (voluntary)
+		flows_update();
+}
+
+#else
+static inline void flows_notify_waking(void) {}
+static inline void flows_notify_parking(bool voluntary) {}
+#endif
+
+
 /*
  * kthread_park - block this kthread until the iokernel wakes it up.
  * @voluntary: true if this kthread parked because it had no work left
@@ -127,6 +207,8 @@ void kthread_park(bool voluntary)
 		return;
 	}
 
+	flows_notify_parking(voluntary);
+
 	STAT(PARKS)++;
 
 	/* perform the actual parking */
@@ -134,6 +216,8 @@ void kthread_park(bool voluntary)
 
 	/* iokernel has unparked us */
 	atomic_inc(&runningks);
+
+	flows_notify_waking();
 }
 
 /**
@@ -150,6 +234,8 @@ void kthread_wait_to_attach(void)
 
 	/* attach the kthread for the first time */
 	atomic_inc(&runningks);
+
+	flows_notify_waking();
 }
 
 /**
@@ -159,8 +245,8 @@ void kthread_wait_to_attach(void)
  */
 int kthread_init(void)
 {
-        ksched_fd = open("/dev/ksched", O_RDWR);
-        if (ksched_fd < 0)
-                return -errno;
-        return 0;
+	ksched_fd = open("/dev/ksched", O_RDWR);
+	if (ksched_fd < 0)
+		return -errno;
+	return 0;
 }

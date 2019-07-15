@@ -149,9 +149,8 @@ static void drain_overflow(struct kthread *l)
 
 static bool work_available(struct kthread *k)
 {
-	return !lrpc_empty(&k->rxq) ||
-	       ACCESS_ONCE(k->rq_tail) != ACCESS_ONCE(k->rq_head) ||
-	       timer_needed(k) || !list_empty(&k->rq_overflow);
+	return ACCESS_ONCE(k->rq_tail) != ACCESS_ONCE(k->rq_head) ||
+	        !list_empty(&k->rq_overflow) || softirq_work_available(k);
 }
 
 static bool steal_work(struct kthread *l, struct kthread *r)

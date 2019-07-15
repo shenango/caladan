@@ -16,6 +16,7 @@
 #include <net/ip.h>
 #include <iokernel/control.h>
 #include <net/mbufq.h>
+#include <runtime/net.h>
 #include <runtime/runtime.h>
 #include <runtime/thread.h>
 #include <runtime/rcu.h>
@@ -312,7 +313,12 @@ struct kthread {
 	unsigned long		outstanding_reqs;
 	unsigned long		pad3[5];
 
-	/* 10th cache-line, statistics counters */
+	/* 10th cache-line, direct path queues */
+	struct direct_rxq		*directpath_rxq;
+	struct direct_txq		*directpath_txq;
+	unsigned long		pad4[6];
+
+	/* 11th cache-line, statistics counters */
 	uint64_t		stats[STAT_NR];
 };
 
@@ -425,6 +431,56 @@ extern struct cfg_arp_static_entry static_entries[MAX_ARP_STATIC_ENTRIES];
 extern void __net_recurrent(void);
 extern void net_rx_softirq(struct rx_net_hdr **hdrs, unsigned int nr);
 
+#ifdef DIRECTPATH
+
+struct direct_rxq {
+	/* runtime provides this memory location */
+	uint32_t		*shadow_tail; /* shared with iokernel */
+	uint32_t		consumer_idx;
+
+	/* driver provides details for business monitoring */
+	void		*descriptor_table;
+	uint32_t		descriptor_log_size;
+	uint32_t		nr_descriptors;
+	uint32_t		parity_byte_offset;
+	uint32_t		parity_bit_mask;
+	uint32_t		hwq_type;
+};
+
+struct direct_txq {};
+
+struct net_driver_ops {
+	int (*rx_batch)(struct direct_rxq *rxq, struct rx_net_hdr **bufs, unsigned int budget);
+	int (*tx_single)(struct direct_txq *txq, struct mbuf *m);
+	void (*rx_completion)(unsigned long completion_data);
+	int (*steer_flows)(unsigned int *new_fg_assignment);
+	int (*register_flow)(unsigned int affininty, uint8_t proto, struct netaddr laddr, struct netaddr raddr, void **handle_out);
+	int (*deregister_flow)(void *handle);
+};
+
+extern struct net_driver_ops net_ops;
+
+static inline bool rx_pending(struct direct_rxq *rxq)
+{
+	uint32_t tail, idx, parity, hd_parity;
+	unsigned char *addr;
+
+	tail = ACCESS_ONCE(rxq->consumer_idx);
+	idx = tail & (rxq->nr_descriptors - 1);
+	parity = !!(tail & rxq->nr_descriptors);
+	addr = rxq->descriptor_table + (idx << rxq->descriptor_log_size) + rxq->parity_byte_offset;
+	hd_parity = !!(ACCESS_ONCE(*addr) & rxq->parity_bit_mask);
+
+	return parity == hd_parity;
+}
+#else
+static inline bool rx_pending(struct direct_rxq *rxq)
+{
+	return false;
+}
+#endif
+
+
 
 /*
  * Timer support
@@ -473,6 +529,18 @@ static inline int storage_proc_completions(struct kthread *k,
 
 #endif
 
+static inline bool softirq_work_available(struct kthread *k)
+{
+	bool work_available;
+
+	work_available = rx_pending(k->directpath_rxq) ||
+	  !lrpc_empty(&k->rxq) || timer_needed(k);
+
+	work_available |= storage_available_completions(k);
+
+	return work_available;
+}
+
 /*
  * Init
  */
@@ -487,6 +555,7 @@ extern int stat_init_thread(void);
 extern int net_init_thread(void);
 extern int smalloc_init_thread(void);
 extern int storage_init_thread(void);
+extern int directpath_init_thread(void);
 
 /* global initialization */
 extern int kthread_init(void);
@@ -499,6 +568,7 @@ extern int arp_init(void);
 extern int trans_init(void);
 extern int smalloc_init(void);
 extern int storage_init(void);
+extern int directpath_init(void);
 
 /* late initialization */
 extern int ioqueues_register_iokernel(void);

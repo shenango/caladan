@@ -52,6 +52,7 @@ extern struct iokernel_cfg cfg;
 struct proc;
 
 struct hwq {
+	bool			enabled;
 	void			*descriptor_table;
 	uint32_t		*consumer_idx;
 	uint32_t		descriptor_size;
@@ -60,8 +61,8 @@ struct hwq {
 	uint32_t		parity_bit_mask;
 	uint32_t		hwq_type;
 
-	uint32_t		cq_idx;
-	bool			cq_pending;
+	uint32_t		last_tail;
+	bool			last_pending;
 };
 
 struct timer {
@@ -83,13 +84,28 @@ struct thread {
 	unsigned int		core;
 	unsigned int		at_idx;
 	unsigned int		ts_idx;
+	struct hwq		directpath_hwq;
 	struct list_node	idle_link;
 };
+
+static inline bool hwq_busy(struct hwq *h, uint32_t cq_idx)
+{
+	uint32_t idx, parity, hd_parity;
+	unsigned char *addr;
+
+	idx = cq_idx & (h->nr_descriptors - 1);
+	parity = !!(cq_idx & h->nr_descriptors);
+	addr = h->descriptor_table + (h->descriptor_size * idx) + h->parity_byte_offset;
+	hd_parity = !!(ACCESS_ONCE(*addr) & h->parity_bit_mask);
+
+	return parity == hd_parity;
+}
 
 struct proc {
 	pid_t			pid;
 	struct shm_region	region;
 	bool			removed;
+	bool			has_directpath;
 	struct ref		ref;
 	unsigned int		kill:1;       /* the proc is being torn down */
 	struct congestion_info	*congestion_info;
@@ -111,14 +127,6 @@ struct proc {
 
 	/* network data */
 	struct eth_addr		mac;
-
-	/* timer heaps */
-	unsigned int		timer_count;
-	struct timer		timers[NCPU];
-
-	/* hardware queues */
-	unsigned int		hwq_count;
-	struct hwq		hwqs[NCPU];
 
 	/* Unique identifier -- never recycled across runtimes*/
 #ifdef MLX

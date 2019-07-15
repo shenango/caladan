@@ -2,7 +2,6 @@ ROOT_PATH=.
 include shared.mk
 
 DPDK_PATH = dpdk
-INC += -I$(DPDK_PATH)/build/include
 CHECKFLAGS = -D__CHECKER__ -Waddress-space
 
 ifneq ($(TCP_RX_STATS),)
@@ -14,15 +13,18 @@ base_src = $(wildcard base/*.c)
 base_obj = $(base_src:.c=.o)
 
 #libnet.a - a packet/networking utility library
-net_src = $(wildcard net/*.c) $(wildcard net/ixgbe/*.c)
+net_src = $(wildcard net/*.c)
 net_obj = $(net_src:.c=.o)
 
 # iokernel - a soft-NIC service
 iokernel_src = $(wildcard iokernel/*.c)
 iokernel_obj = $(iokernel_src:.c=.o)
+$(iokernel_obj): INC += -I$(DPDK_PATH)/build/include
 
 # runtime - a user-level threading and networking library
 runtime_src = $(wildcard runtime/*.c) $(wildcard runtime/net/*.c)
+runtime_src += $(wildcard runtime/net/directpath/*.c)
+runtime_src += $(wildcard runtime/net/directpath/mlx5/*.c)
 runtime_asm = $(wildcard runtime/*.S)
 runtime_obj = $(runtime_src:.c=.o) $(runtime_asm:.S=.o)
 

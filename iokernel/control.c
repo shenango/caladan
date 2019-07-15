@@ -53,6 +53,35 @@ static void *copy_shm_data(struct shm_region *r, shmptr_t ptr, size_t len)
 	return out;
 }
 
+static int control_init_hwq(struct shm_region *r,
+	  struct hardware_queue_spec *hs, struct hwq *h)
+{
+	if (hs->hwq_type == HWQ_INVALID) {
+		h->enabled = false;
+		return 0;
+	}
+
+	h->descriptor_table = shmptr_to_ptr(r, hs->descriptor_table, hs->descriptor_size * hs->nr_descriptors);
+	h->consumer_idx = shmptr_to_ptr(r, hs->consumer_idx, sizeof(*h->consumer_idx));
+	h->descriptor_size = hs->descriptor_size;
+	h->nr_descriptors = hs->nr_descriptors;
+	h->parity_byte_offset = hs->parity_byte_offset;
+	h->parity_bit_mask = hs->parity_bit_mask;
+	h->hwq_type = hs->hwq_type;
+	h->enabled = true;
+
+	if (!h->descriptor_table || !h->consumer_idx)
+		return -EINVAL;
+
+	if (!is_power_of_two(h->nr_descriptors))
+		return -EINVAL;
+
+	if (h->parity_byte_offset > h->descriptor_size)
+		return -EINVAL;
+
+	return 0;
+}
+
 static struct proc *control_create_proc(mem_key_t key, size_t len, pid_t pid,
 		int *fds, int n_fds)
 {
@@ -61,8 +90,6 @@ static struct proc *control_create_proc(mem_key_t key, size_t len, pid_t pid,
 	size_t nr_pages;
 	struct proc *p = NULL;
 	struct thread_spec *threads = NULL;
-	struct timer_spec *timers = NULL;
-	struct hardware_queue_spec *hwqs = NULL;
 	unsigned long *overflow_queue = NULL;
 	void *shbuf;
 	int i, ret;
@@ -91,25 +118,10 @@ static struct proc *control_create_proc(mem_key_t key, size_t len, pid_t pid,
 		goto fail;
 	}
 
-	if (hdr.timer_count > NCPU || hdr.hwq_count > NCPU)
-		goto fail;
-
 	/* copy arrays of threads, timers, and hwq specs */
 	threads = copy_shm_data(&reg, hdr.thread_specs, hdr.thread_count * sizeof(*threads));
 	if (!threads)
 		goto fail;
-
-	if (hdr.timer_count) {
-		timers = copy_shm_data(&reg, hdr.timer_specs, hdr.timer_count * sizeof(*timers));
-		if (!timers)
-			goto fail;
-	}
-
-	if (hdr.hwq_count) {
-		hwqs = copy_shm_data(&reg, hdr.hwq_specs, hdr.hwq_count * sizeof(*hwqs));
-		if (!hwqs)
-			goto fail;
-	}
 
 	/* create the process */
 	nr_pages = div_up(len, PGSIZE_2MB);
@@ -183,41 +195,12 @@ static struct proc *control_create_proc(mem_key_t key, size_t len, pid_t pid,
 				sizeof(struct q_ptrs));
 		if (!th->q_ptrs)
 			goto fail;
-	}
 
-	/* initialize timers */
-	p->timer_count = hdr.timer_count;
-	for (i = 0; i < hdr.timer_count; i++) {
-		struct timer_spec *ts = &timers[i];
-		struct timer *t = &p->timers[i];
-		t->timern = shmptr_to_ptr(&reg, ts->timern, sizeof(unsigned int));
-		t->next_tsc = shmptr_to_ptr(&reg, ts->next_tsc, sizeof(uint64_t));
-		if (!t->timern || !t->next_tsc)
-			goto fail;
-	}
-
-	/* initialize hardware queues */
-	p->hwq_count = hdr.hwq_count;
-	for (i = 0; i < hdr.timer_count; i++) {
-		struct hardware_queue_spec *hs = &hwqs[i];
-		struct hwq *h = &p->hwqs[i];
-
-		h->descriptor_table = shmptr_to_ptr(&reg, hs->descriptor_table, hs->descriptor_size * hs->nr_descriptors);
-		h->consumer_idx = shmptr_to_ptr(&reg, hs->consumer_idx, sizeof(*h->consumer_idx));
-		h->descriptor_size = hs->descriptor_size;
-		h->nr_descriptors = hs->nr_descriptors;
-		h->parity_byte_offset = hs->parity_byte_offset;
-		h->parity_bit_mask = hs->parity_bit_mask;
-		h->hwq_type = hs->hwq_type;
-
-		if (!h->descriptor_table || !h->consumer_idx)
+		ret = control_init_hwq(&reg, &s->direct_rxq, &th->directpath_hwq);
+		if (ret)
 			goto fail;
 
-		if (!is_power_of_two(h->nr_descriptors))
-			goto fail;
-
-		if (h->parity_byte_offset > h->descriptor_size)
-			goto fail;
+		p->has_directpath |= th->directpath_hwq.enabled;
 	}
 
 	/* initialize the table of physical page addresses */
@@ -236,16 +219,12 @@ static struct proc *control_create_proc(mem_key_t key, size_t len, pid_t pid,
 
 	/* free temporary allocations */
 	free(threads);
-	free(timers);
-	free(hwqs);
 
 	return p;
 
 fail:
 	free(overflow_queue);
 	free(threads);
-	free(timers);
-	free(hwqs);
 	free(p);
 	if (reg.base)
 		mem_unmap_shm(shbuf);

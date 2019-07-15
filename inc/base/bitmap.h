@@ -85,7 +85,7 @@ static inline void bitmap_and(unsigned long *dst, const unsigned long *src1,
 	int i;
 
 	for (i = 0; i < BITMAP_LONG_SIZE(nbits); i++)
-		dst[i] = src1[i] & src2[1];
+		dst[i] = src1[i] & src2[i];
 }
 
 /**
@@ -101,7 +101,7 @@ static inline void bitmap_or(unsigned long *dst, const unsigned long *src1,
 	int i;
 
 	for (i = 0; i < BITMAP_LONG_SIZE(nbits); i++)
-		dst[i] = src1[i] | src2[1];
+		dst[i] = src1[i] | src2[i];
 }
 
 /**
@@ -117,7 +117,7 @@ static inline void bitmap_xor(unsigned long *dst, const unsigned long *src1,
 	int i;
 
 	for (i = 0; i < BITMAP_LONG_SIZE(nbits); i++)
-		dst[i] = src1[i] ^ src2[1];
+		dst[i] = src1[i] ^ src2[i];
 }
 
 /**

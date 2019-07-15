@@ -39,6 +39,7 @@ static const struct init_entry global_init_handlers[] = {
 
 	/* network stack */
 	GLOBAL_INITIALIZER(net),
+	GLOBAL_INITIALIZER(directpath),
 	GLOBAL_INITIALIZER(arp),
 	GLOBAL_INITIALIZER(trans),
 
@@ -63,6 +64,7 @@ static const struct init_entry thread_init_handlers[] = {
 
 	/* network stack */
 	THREAD_INITIALIZER(net),
+	THREAD_INITIALIZER(directpath),
 
 #if __has_include("spdk/nvme.h")
 	/* storage */

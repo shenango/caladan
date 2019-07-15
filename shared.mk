@@ -10,6 +10,7 @@ CONFIG_MLX4=n
 CONFIG_SPDK=n
 CONFIG_DEBUG=n
 CONFIG_NATIVE=n
+CONFIG_DIRECTPATH=n
 
 # shared toolchain definitions
 INC = -I$(ROOT_PATH)/inc
@@ -51,7 +52,13 @@ ifeq ($(CONFIG_SPDK),y)
 RUNTIME_LIBS += -L$(ROOT_PATH)/spdk/build/lib -L$(ROOT_PATH)/spdk/dpdk/build/lib
 RUNTIME_LIBS += -lspdk_nvme -lspdk_util -lspdk_env_dpdk -lspdk_log -lspdk_sock \
 		-ldpdk -lpthread -lrt -luuid -lcrypto -lnuma -ldl
-INC += -I$(SPDK_PATH)/include
+INC += -I$(ROOT_PATH)/spdk/include
+endif
+ifeq ($(CONFIG_DIRECTPATH),y)
+RUNTIME_LIBS += -L$(ROOT_PATH)/rdma-core/build/lib/statics/
+RUNTIME_LIBS += -lmlx5 -libverbs -lnl-3 -lnl-route-3
+INC += -I$(ROOT_PATH)/rdma-core/build/include
+FLAGS += -DDIRECTPATH
 endif
 
 CFLAGS = -std=gnu11 $(FLAGS)

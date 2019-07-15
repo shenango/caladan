@@ -77,6 +77,11 @@ static void softirq_gather_work(struct softirq_work *w, struct kthread *k,
 			break;
 	}
 
+#ifdef DIRECTPATH
+	BUG_ON(recv_cnt || compl_cnt);
+	recv_cnt = net_ops.rx_batch(k->directpath_rxq, w->recv_reqs, real_budget);
+#endif
+
 #if __has_include("spdk/nvme.h")
 	w->storage_cnt = storage_proc_completions(k, budget,
 						  w->storage_threads);
@@ -88,17 +93,6 @@ static void softirq_gather_work(struct softirq_work *w, struct kthread *k,
 	w->timer_budget = budget;
 }
 
-static bool softirq_work_available(struct kthread *k)
-{
-	bool work_available;
-
-	work_available = !lrpc_empty(&k->rxq) || timer_needed(k);
-#if __has_include("spdk/nvme.h")
-	work_available |= storage_available_completions(k);
-#endif
-
-	return work_available;
-}
 
 /**
  * softirq_run_thread - creates a closure for softirq handling

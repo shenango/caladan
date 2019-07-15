@@ -18,6 +18,7 @@ struct q_ptrs {
 	uint32_t		rxq_wb; /* must be first */
 	uint32_t		rq_head;
 	uint32_t		rq_tail;
+	uint32_t		directpath_rx_tail;
 };
 
 struct congestion_info {
@@ -26,7 +27,8 @@ struct congestion_info {
 };
 
 enum {
-	HWQ_MLX5 = 0,
+	HWQ_INVALID = 0,
+	HWQ_MLX5,
 	HWQ_MLX4,
 	HWQ_SPDK_NVME,
 	NR_HWQ,
@@ -57,6 +59,9 @@ struct thread_spec {
 	shmptr_t		q_ptrs;
 	pid_t			tid;
 	int32_t			park_efd;
+
+	struct hardware_queue_spec		direct_rxq;
+
 	shmptr_t		nvme_qpair_cpl;
 	shmptr_t		nvme_qpair_cq_head;
 	shmptr_t		nvme_qpair_phase;
@@ -83,14 +88,10 @@ struct sched_spec {
 struct control_hdr {
 	unsigned int		magic;
 	unsigned int		thread_count;
-	unsigned int		timer_count;
-	unsigned int		hwq_count;
 	unsigned long		egress_buf_count;
 	shmptr_t		congestion_info;
 	int			spdk_shm_id;
 	struct eth_addr		mac;
 	struct sched_spec	sched_cfg;
 	shmptr_t		thread_specs;
-	shmptr_t		timer_specs;
-	shmptr_t		hwq_specs;
 };
