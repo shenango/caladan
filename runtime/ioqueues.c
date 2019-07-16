@@ -255,6 +255,7 @@ int ioqueues_register_iokernel(void)
 	hdr = iok.hdr;
 	BUG_ON((uintptr_t)iok.hdr != (uintptr_t)r->base);
 	hdr->magic = CONTROL_HDR_MAGIC;
+	hdr->version_no = CONTROL_HDR_VERSION;
 	hdr->spdk_shm_id = iok.spdk_shm_id;
 	hdr->egress_buf_count = div_up(iok.tx_len, MBUF_DEFAULT_LEN);
 	hdr->thread_count = maxks;

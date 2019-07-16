@@ -10,6 +10,13 @@
 #include <iokernel/shm.h>
 #include <net/ethernet.h>
 
+/*
+ * WARNING: If you make any changes that impact the layout of
+ * struct control_hdr, please increment the version number!
+ */
+
+#define CONTROL_HDR_VERSION 2
+
 /* The abstract namespace path for the control socket. */
 #define CONTROL_SOCK_PATH	"\0/control/iokernel.sock"
 
@@ -86,6 +93,7 @@ struct sched_spec {
 
 /* the main control header */
 struct control_hdr {
+	unsigned int		version_no;
 	unsigned int		magic;
 	unsigned int		thread_count;
 	unsigned long		egress_buf_count;

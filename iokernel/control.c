@@ -105,8 +105,11 @@ static struct proc *control_create_proc(mem_key_t key, size_t len, pid_t pid,
 
 	/* parse the control header */
 	memcpy(&hdr, (struct control_hdr *)shbuf, sizeof(hdr)); /* TOCTOU */
-	if (hdr.magic != CONTROL_HDR_MAGIC)
+	if (hdr.magic != CONTROL_HDR_MAGIC ||
+		  hdr.version_no != CONTROL_HDR_VERSION) {
+		log_err("bad control header: please make sure IOKernel and application are compiled from the same source");
 		goto fail;
+	}
 
 	if (hdr.thread_count > NCPU || hdr.thread_count == 0 ||
 			hdr.thread_count != n_fds)
