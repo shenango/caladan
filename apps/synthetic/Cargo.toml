@@ -7,6 +7,7 @@ authors = ["The Shenango Developers"]
 byteorder = "1"
 clap = "2.32.0"
 dns-parser = "0.7.1"
+itertools = "0.8.0"
 libc = "0.2"
 lockstep = { git = "https://github.com/fintelia/lockstep.git",  rev = "9be97f6ef9d75b1a28a79734df238c08b4de7013" }
 rand = "0.4"
