@@ -1,7 +1,7 @@
 
 #include <stdio.h>
 
-#include <runtime/thread.h>
+#include <runtime/runtime.h>
 
 int __real_main(int, char **);
 
