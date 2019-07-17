@@ -25,6 +25,8 @@ namespace {
 constexpr double kIterationsPerUS = 65.0;  // 83
 // number of fake microseconds it takes to process each packet.
 constexpr double kPacketHandleUS = 5.0;
+// interrupt coalescing time */
+constexpr double kIntrCoalesceUS = 20.0;
 // the size of each queue in entries
 constexpr uint64_t kQueueSize = 64;
 // number of measurement steps to take
@@ -88,11 +90,6 @@ std::vector<work_unit> LiveLockWorker(Queue *q, Timer *t, rt::WaitGroup *wg,
 
   work_unit w;
   while (true) {
-    while (q->Dequeue(&w, false)) {
-      worker->Work(static_cast<uint64_t>(kPacketHandleUS * kIterationsPerUS));
-      wl.push_front(w);
-    }
-
     if (wl.empty()) {
       if (!q->Dequeue(&w, true)) break;
       worker->Work(static_cast<uint64_t>(kPacketHandleUS * kIterationsPerUS));
@@ -101,7 +98,16 @@ std::vector<work_unit> LiveLockWorker(Queue *q, Timer *t, rt::WaitGroup *wg,
 
     w = wl.back();
     wl.pop_back();
-    worker->Work(static_cast<uint64_t>(w.work_us * kIterationsPerUS));
+    double work_us = w.work_us;
+    while (work_us > 0) {
+      worker->Work(static_cast<uint64_t>(std::min(kIntrCoalesceUS, work_us) *
+                                         kIterationsPerUS));
+      while (q->Dequeue(&w, false)) {
+        worker->Work(static_cast<uint64_t>(kPacketHandleUS * kIterationsPerUS));
+        wl.push_front(w);
+      }
+      work_us -= kIntrCoalesceUS;
+    }
     w.duration_us = t->Elapsed() - w.start_us;
     wv.emplace_back(w);
   }
@@ -149,7 +155,7 @@ std::vector<work_unit> RunExperiment(std::vector<work_unit> wq, int workers,
   // create a thread per worker
   for (int i = 0; i < workers; ++i) {
     Queue *q = dfcfs ? qs[i].get() : qs[0].get();
-    threads[i] = rt::Thread([&, i]() {
+    threads[i] = rt::Thread([&, q, i]() {
       samples[i] = rtc ? RtcWorker(q, &t, &wg, max_work)
                        : LiveLockWorker(q, &t, &wg, max_work);
     });
@@ -164,7 +170,7 @@ std::vector<work_unit> RunExperiment(std::vector<work_unit> wq, int workers,
   for (auto w : wq) {
     int i = 0;
     t.SpinUntil(w.start_us);
-    qs[i++ % workers]->Enqueue(w);
+    qs[i++ % qs.size()]->Enqueue(w);
   }
   for (auto &q : qs) q->Close();
 
