@@ -47,7 +47,9 @@ static DEFINE_PER_CPU(struct ksched_percpu, kp);
  */
 static struct task_struct *ksched_lookup_task(pid_t nr)
 {
-	struct pid *pid = find_vpid(nr);
+	struct pid *pid;
+
+	pid = find_vpid(nr);
 	if (unlikely(!pid))
 		return NULL;
 	return pid_task(pid, PIDTYPE_PID);
@@ -239,11 +241,14 @@ static void ksched_ipi(void *unused)
 	}
 
 	/* lookup the current task assigned to this core */
+	rcu_read_lock();
 	t = ksched_lookup_task(p->tid);
 	if (!t) {
+		rcu_read_unlock();
 		put_cpu();
 		return;
 	}
+	rcu_read_unlock();
 
 	/* check if yield has been requested (detecting race conditions) */
 	gen = smp_load_acquire(&s->sig);
