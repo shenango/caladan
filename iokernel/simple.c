@@ -285,6 +285,8 @@ static void simple_sched_poll(bitmap_ptr_t idle)
 	unsigned int core;
 
 	bitmap_for_each_set(idle, NCPU, core) {
+		if (cores[core] != NULL)
+			simple_unmark_congested(cores[core]);
 		simple_cleanup_core(core);
 		sd = simple_choose_kthread(core);
 		if (!sd) {
@@ -292,8 +294,10 @@ static void simple_sched_poll(bitmap_ptr_t idle)
 			continue;
 		}
 		simple_unmark_congested(sd);
-		if (unlikely(simple_run_kthread_on_core(sd->p, core)))
+		if (unlikely(simple_run_kthread_on_core(sd->p, core))) {
 			bitmap_set(simple_idle_cores, core);
+			simple_mark_congested(sd);
+		}
 	}
 }
 
