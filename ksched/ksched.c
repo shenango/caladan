@@ -364,7 +364,6 @@ static int ucmem_mmap(struct file *file, struct vm_area_struct *vma)
 			       vma->vm_page_prot))
 	  return -EAGAIN;
 	return 0;
-	/* return remap_vmalloc_range(vma, (void *)shm, vma->vm_pgoff); */
 }
 
 static struct file_operations ucmem_ops = {
