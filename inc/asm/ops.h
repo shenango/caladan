@@ -13,7 +13,8 @@ static inline void cpu_relax(void)
 
 static inline void cpu_serialize(void)
 {
-	asm volatile("cpuid" : : : "%rax", "%rbx", "%rcx", "%rdx");
+        asm volatile("xorl %%eax, %%eax\n\t"
+		     "cpuid" : : : "%rax", "%rbx", "%rcx", "%rdx");
 }
 
 static inline uint64_t rdtsc(void)
