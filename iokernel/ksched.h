@@ -15,10 +15,13 @@
 #define __user
 #include "../ksched/ksched.h"
 
+#define PROBE_MEM_LAT_SAMPLE_NUM (5)
+
 extern int ksched_fd, ksched_count;
 extern struct ksched_shm_cpu *ksched_shm;
 extern cpu_set_t ksched_set;
 extern unsigned int ksched_gens[NCPU];
+extern volatile char *ucmem;
 
 /**
  * ksched_run - runs a kthread on a specific core
@@ -117,4 +120,76 @@ static inline void ksched_send_intrs(void)
 	BUG_ON(ret);
 
 	CPU_ZERO(&ksched_set);
+}
+
+/* A high precision timer that gives the cycle-level result. */
+struct hp_timer {
+        unsigned        start_cycles_low;
+        unsigned        start_cycles_high;
+        unsigned        end_cycles_low;
+        unsigned        end_cycles_high;
+};
+
+static void start_hp_timer(struct hp_timer *hp_timer)
+{
+        asm volatile(
+		"xorl %%eax, %%eax\n\t"
+                "CPUID\n\t"
+                "RDTSC\n\t"
+                "mov %%edx, %0\n\t"
+                "mov %%eax, %1\n\t"
+                : "=r"(hp_timer->start_cycles_high),
+                 "=r"(hp_timer->start_cycles_low)::"%rax", "%rbx", "%rcx", "%rdx");
+}
+
+static void end_hp_timer(struct hp_timer *hp_timer)
+{
+        asm volatile(
+		"RDTSCP\n\t"
+                "mov %%edx, %0\n\t"
+                "mov %%eax, %1\n\t"
+                "xorl %%eax, %%eax\n\t"
+	        "CPUID\n\t"
+                : "=r"(hp_timer->end_cycles_high),
+                  "=r"(hp_timer->end_cycles_low)::"%rax", "%rbx", "%rcx", "%rdx");
+}
+
+static unsigned get_hp_timer_elapse(struct hp_timer *hp_timer) {
+        uint64_t start, end;
+	start =
+	  (((uint64_t)hp_timer->start_cycles_high << 32) |
+	   hp_timer->start_cycles_low);
+	end =
+	  (((uint64_t)hp_timer->end_cycles_high << 32) |
+	   hp_timer->end_cycles_low);
+	return (unsigned int)(end - start);
+}
+
+static inline void __sort(unsigned a[], int n)
+{
+        int i, j;
+
+	for (i = 0; i < n - 1; i++) {
+	  for (j = 0; j < n - i - 1; j++) {
+	    if (a[j] > a[j + 1]) {
+	      unsigned tmp = a[j];
+	      a[j] = a[j + 1];
+	      a[j + 1] = tmp;
+	    }
+	  }
+	}
+}
+
+static inline unsigned probe_mem_lat(void)
+{
+        struct hp_timer hp_timer;
+	unsigned lats[PROBE_MEM_LAT_SAMPLE_NUM];
+	for (int i = 0; i < PROBE_MEM_LAT_SAMPLE_NUM; i++) {
+		start_hp_timer(&hp_timer);
+		*((volatile char *)(ucmem));
+		end_hp_timer(&hp_timer);
+		lats[i] = get_hp_timer_elapse(&hp_timer);
+	}
+	__sort(lats, PROBE_MEM_LAT_SAMPLE_NUM);
+	return lats[PROBE_MEM_LAT_SAMPLE_NUM / 2];
 }
