@@ -41,8 +41,7 @@ struct core_state {
 /* a per-CPU state table to manage scheduling operations */
 static struct core_state state[NCPU];
 /* policy-specific operations (TODO: should be made configurable) */
-extern struct sched_ops simple_ops;
-static const struct sched_ops *ops = &simple_ops;
+const struct sched_ops *sched_ops;
 
 /**
  * sched_steer_flows - redirects flows to active kthreads
@@ -256,7 +255,7 @@ static void sched_detect_congestion(struct proc *p)
 	}
 
 	/* notify the scheduler policy of the current congestion */
-	ops->notify_congested(p, threads, ios);
+	sched_ops->notify_congested(p, threads, ios);
 }
 
 static int sched_try_fast_rewake(struct thread *th)
@@ -350,7 +349,7 @@ void sched_poll(void)
 	 */
 
 	if (idled)
-		ops->sched_poll(idle);
+		sched_ops->sched_poll(idle);
 	ksched_send_intrs();
 }
 
@@ -362,7 +361,7 @@ void sched_poll(void)
  */
 int sched_add_core(struct proc *p)
 {
-	return ops->notify_core_needed(p);
+	return sched_ops->notify_core_needed(p);
 }
 
 /**
@@ -383,7 +382,7 @@ int sched_attach_proc(struct proc *p)
 		list_add_tail(&p->idle_threads, &p->threads[i].idle_link);
 	}
 
-	return ops->proc_attach(p, &p->sched_cfg);
+	return sched_ops->proc_attach(p, &p->sched_cfg);
 }
 
 /**
@@ -392,7 +391,7 @@ int sched_attach_proc(struct proc *p)
  */
 void sched_detach_proc(struct proc *p)
 {
-	ops->proc_detach(p);
+	sched_ops->proc_detach(p);
 }
 
 static int sched_scan_node(int node)

@@ -99,3 +99,12 @@ extern void sched_poll(void);
 extern int sched_add_core(struct proc *p);
 extern int sched_attach_proc(struct proc *p);
 extern void sched_detach_proc(struct proc *p);
+
+
+/*
+ * Scheduler policies
+ */
+
+extern const struct sched_ops *sched_ops;
+extern struct sched_ops simple_ops;
+extern struct sched_ops mis_ops;

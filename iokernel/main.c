@@ -124,22 +124,42 @@ void dataplane_loop(void)
 	}
 }
 
+static void print_usage(void)
+{
+	printf("usage: POLICY [noht/core_list]\n");
+	printf("\tsimple: the standard, basic scheduler policy\n");
+	printf("\tmis: a policy aware of microarchitectural interference\n");
+}
+
 int main(int argc, char *argv[])
 {
 	int ret;
 
-	if (argc >= 2) {
-		if (!strcmp(argv[1], "noht"))
+	if (argc >= 3) {
+		if (!strcmp(argv[2], "noht"))
 			cfg.noht = true;
 		else {
 			allowed_cores_supplied = true;
-			ret = string_to_bitmap(argv[1], input_allowed_cores, NCPU);
+			ret = string_to_bitmap(argv[2], input_allowed_cores, NCPU);
 			if (ret) {
 				fprintf(stderr, "invalid cpu list: %s\n", argv[1]);
 				fprintf(stderr, "example list: 0-24,26-48:2,49-255\n");
 				return ret;
 			}
 		}
+	}
+
+	if (argc >= 2) {
+		if (!strcmp(argv[1], "simple")) {
+			sched_ops = &simple_ops;
+		} else if (!strcmp(argv[1], "mis")) {
+			sched_ops = &mis_ops;
+		} else {
+			print_usage();
+			return -EINVAL;
+		}
+	} else {
+		sched_ops = &simple_ops;
 	}
 
 	ret = run_init_handlers("iokernel", iok_init_handlers,
