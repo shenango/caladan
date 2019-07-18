@@ -13,6 +13,8 @@
  */
 #define KSCHED_MAJOR		280
 #define KSCHED_MINOR		0
+#define UCMEM_MAJOR		281
+#define UCMEM_MINOR		0
 
 struct ksched_intr_req {
 	size_t			len;

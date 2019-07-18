@@ -13,6 +13,7 @@ rmmod ksched
 rm /dev/ksched
 insmod ./ksched/build/ksched.ko
 mknod /dev/ksched c 280 0
+mknod /dev/ucmem c 281 0
 chmod uga+rwx /dev/ksched
 
 # reserve huge pages
