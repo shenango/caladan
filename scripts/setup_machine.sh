@@ -13,8 +13,10 @@ rmmod ksched
 rm /dev/ksched
 insmod ./ksched/build/ksched.ko
 mknod /dev/ksched c 280 0
-mknod /dev/ucmem c 281 0
 chmod uga+rwx /dev/ksched
+rm /dev/ucmem
+mknod /dev/ucmem c 281 0
+chmod uga+rwx /dev/ucmem
 
 # reserve huge pages
 echo 8192 > /sys/devices/system/node/node0/hugepages/hugepages-2048kB/nr_hugepages

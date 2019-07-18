@@ -52,6 +52,8 @@ int ksched_init(void)
 		return -errno;
 	ucmem_addr = mmap(NULL, getpagesize(), PROT_READ|PROT_WRITE,
 			  MAP_SHARED, ucmem_fd, 0);
+	if (ucmem_addr ==  MAP_FAILED)
+		return -errno;
 
 	/* then initialize the generation numbers */
 	ksched_shm = (struct ksched_shm_cpu *)ksched_addr;
