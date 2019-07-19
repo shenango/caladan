@@ -267,7 +267,6 @@ static u64 ksched_measure_pmc(u64 sel)
 	wrmsrl(MSR_P6_EVNTSEL0, sel);
 	rdmsrl(MSR_P6_PERFCTR0, start);
 	udelay(KSCHED_PMC_PROBE_DELAY);
-	wrmsrl(MSR_P6_EVNTSEL0, sel);
 	rdmsrl(MSR_P6_PERFCTR0, end);
 	return end - start;
 }

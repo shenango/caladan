@@ -144,7 +144,7 @@ static unsigned int simple_choose_core(struct proc *p)
 {
 	struct simple_data *sd = (struct simple_data *)p->policy_data;
 	struct thread *th;
-	unsigned int core;
+	unsigned int core, tmp;
 
 	/* first try to find a previously used core (to improve locality) */
 	list_for_each(&p->idle_threads, th, idle_link) {
@@ -171,7 +171,7 @@ static unsigned int simple_choose_core(struct proc *p)
 		return core;
 
 	/* finally look for any preemptible core */
-	for (core = 0; core < NCPU; core++) {
+	sched_for_each_allowed_core(core, tmp) {
 		if (cores[core] == sd)
 			continue;
 		if (cores[core] &&
@@ -279,10 +279,13 @@ static struct simple_data *simple_choose_kthread(unsigned int core)
 	return list_top(&congested_procs, struct simple_data, congested_link);
 }
 
-static void simple_sched_poll(bitmap_ptr_t idle)
+static void simple_sched_poll(uint64_t now, int idle_cnt, bitmap_ptr_t idle)
 {
 	struct simple_data *sd;
 	unsigned int core;
+
+	if (idle_cnt == 0)
+		return;
 
 	bitmap_for_each_set(idle, NCPU, core) {
 		if (cores[core] != NULL)
