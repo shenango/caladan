@@ -147,12 +147,6 @@ static void drain_overflow(struct kthread *l)
 	}
 }
 
-static bool work_available(struct kthread *k)
-{
-	return ACCESS_ONCE(k->rq_tail) != ACCESS_ONCE(k->rq_head) ||
-	        !list_empty(&k->rq_overflow) || softirq_work_available(k);
-}
-
 static bool steal_work(struct kthread *l, struct kthread *r)
 {
 	thread_t *th;
@@ -161,7 +155,8 @@ static bool steal_work(struct kthread *l, struct kthread *r)
 	assert_spin_lock_held(&l->lock);
 	assert(l->rq_head == 0 && l->rq_tail == 0);
 
-	if (!work_available(r))
+	if (ACCESS_ONCE(r->rq_tail) == ACCESS_ONCE(r->rq_head) &&
+	    list_empty(&r->rq_overflow))
 		return false;
 	if (!spin_try_lock(&r->lock))
 		return false;
@@ -192,18 +187,35 @@ static bool steal_work(struct kthread *l, struct kthread *r)
 		goto done;
 	}
 
-	/* check for softirqs */
-	th = softirq_run_thread(r, RUNTIME_SOFTIRQ_REMOTE_BUDGET);
-	if (th) {
-		STAT(SOFTIRQS_STOLEN)++;
-		goto done;
-	}
-
 done:
 	if (th) {
 		l->rq[l->rq_head++] = th;
 		ACCESS_ONCE(l->q_ptrs->rq_head)++;
 		STAT(THREADS_STOLEN)++;
+	}
+
+	spin_unlock(&r->lock);
+	return th != NULL;
+}
+
+static bool steal_softirq(struct kthread *l, struct kthread *r)
+{
+	thread_t *th;
+
+	assert_spin_lock_held(&l->lock);
+	assert(l->rq_head == 0 && l->rq_tail == 0);
+
+	if (!softirq_work_available(r))
+		return false;
+	if (!spin_try_lock(&r->lock))
+		return false;
+
+	/* check for softirqs */
+	th = softirq_run_thread(r, RUNTIME_SOFTIRQ_REMOTE_BUDGET);
+	if (th) {
+		STAT(SOFTIRQS_STOLEN)++;
+		l->rq[l->rq_head++] = th;
+		ACCESS_ONCE(l->q_ptrs->rq_head)++;
 	}
 
 	spin_unlock(&r->lock);
@@ -297,6 +309,19 @@ again:
 	for (i = 0; i < nrks; i++) {
 		int idx = (start_idx + i) % nrks;
 		if (ks[idx] != l && steal_work(l, ks[idx]))
+			goto done;
+	}
+
+	/* then try to steal from a sibling kthread */
+	r = cpu_map[sibling].recent_kthread;
+	if (r && r != l && steal_softirq(l, r))
+		goto done;
+
+	/* try to steal from every kthread */
+	start_idx = rand_crc32c((uintptr_t)l);
+	for (i = 0; i < nrks; i++) {
+		int idx = (start_idx + i) % nrks;
+		if (ks[idx] != l && steal_softirq(l, ks[idx]))
 			goto done;
 	}
 

@@ -133,37 +133,8 @@ static struct thread *sched_pick_kthread(struct proc *p, unsigned int core)
 	return list_tail(&p->idle_threads, struct thread, idle_link);
 }
 
-/**
- * sched_run_on_core - allocates a core to a process
- * @p: the process to run on the core (can be NULL to make the core idle)
- * @core: the core number to run the process on
- *
- * If another process is currently running on @core, it will be preempted.
- *
- * Returns 0 if successful, otherwise fail.
- */
-int sched_run_on_core(struct proc *p, unsigned int core)
+int __sched_run(struct core_state *s, struct thread *th, unsigned int core)
 {
-	struct core_state *s = &state[core];
-	struct thread *th = NULL;
-
-	/* validate inputs --- mostly to catch bugs */
-	if (unlikely((p && list_empty(&p->idle_threads)) || core >= NCPU ||
-		     !bitmap_test(sched_allowed_cores, core))) {
-		WARN();
-		return -EINVAL;
-	}
-
-	/* select the best kthread to run on this core (if requested) */
-	if (p) {
-		th = sched_pick_kthread(p, core);
-		if (unlikely(!th))
-			return -ENOENT;
-
-		proc_get(th->p);
-		sched_enable_kthread(th, core);
-	}
-
 	/* if we're still busy with the last run request than stop here */
 	if (s->wait) {
 		if (s->pending_th) {
@@ -189,6 +160,64 @@ int sched_run_on_core(struct proc *p, unsigned int core)
 	s->wait = true;
 	s->idle = false;
 	return 0;
+}
+
+/**
+ * sched_run_on_core - allocates a core to a process
+ * @p: the process to run on the core
+ * @core: the core number to run the process on
+ *
+ * If another process is currently running on @core, it will be preempted.
+ *
+ * Returns 0 if successful, otherwise fail.
+ */
+int sched_run_on_core(struct proc *p, unsigned int core)
+{
+	struct core_state *s = &state[core];
+	struct thread *th;
+
+	/* validate inputs --- mostly to catch bugs */
+	if (unlikely(list_empty(&p->idle_threads) || core >= NCPU ||
+		     !bitmap_test(sched_allowed_cores, core))) {
+		WARN();
+		return -EINVAL;
+	}
+
+	/* select the best kthread to run on this core (if requested) */
+	th = sched_pick_kthread(p, core);
+	if (unlikely(!th))
+		return -ENOENT;
+	proc_get(th->p);
+	sched_enable_kthread(th, core);
+
+	/* issue the command to run the thread */
+	return __sched_run(s, th, core);
+}
+
+/**
+ * sched_idle_on_core - makes a core go idle
+ * @mwait_hint: the model-specific MWAIT idle state hint
+ * @core: the core number to run the process on
+ *
+ * If another process is currently running on @core, it will be preempted.
+ *
+ * Returns 0 if successful, otherwise fail.
+ */
+int sched_idle_on_core(uint32_t mwait_hint, unsigned int core)
+{
+	struct core_state *s = &state[core];
+
+	/* validate inputs --- mostly to catch bugs */
+	if (unlikely(core >= NCPU || !bitmap_test(sched_allowed_cores, core))) {
+		WARN();
+		return -EINVAL;
+	}
+
+	/* setup the requested idle state */
+	ksched_idle_hint(mwait_hint, core);
+
+	/* issue the command to idle the core */
+	return __sched_run(s, NULL, core);
 }
 
 static bool hardware_queue_congested(struct thread *th, struct hwq *h)
@@ -267,8 +296,8 @@ static int sched_try_fast_rewake(struct thread *th)
 	 * requests in flight, we can just wake it back up directly without
 	 * wasting any extra time in the scheduler.
 	 */
-	if (ACCESS_ONCE(th->rxq.send_head) == lrpc_poll_send_tail(&th->rxq)
-			 && (!h->enabled || !hwq_busy(h, ACCESS_ONCE(*h->consumer_idx))))
+	if (ACCESS_ONCE(th->rxq.send_head) == lrpc_poll_send_tail(&th->rxq) &&
+	    (!h->enabled || !hwq_busy(h, ACCESS_ONCE(*h->consumer_idx))))
 		return -EINVAL;
 
 	ksched_run(th->core, th->tid);
@@ -458,7 +487,8 @@ int sched_init(void)
 		if (cpu_info_tbl[i].package != 0)
 			continue;
 
-		if (allowed_cores_supplied && !bitmap_test(input_allowed_cores, i))
+		if (allowed_cores_supplied &&
+		    !bitmap_test(input_allowed_cores, i))
 			continue;
 
 		bitmap_set(sched_allowed_cores, i);
