@@ -24,9 +24,6 @@
 
 #define PORT_NUM 1 // TODO: make this dynamic
 
-#define RX_BUF_RESERVED \
- (align_up(sizeof(struct rx_net_hdr), CACHE_LINE_SIZE))
-
 static struct mlx5_txq txqs[NCPU];
 
 struct mlx5_rxq rxqs[NCPU];
@@ -315,7 +312,6 @@ static int mlx5_init_txq(int index, struct mlx5_txq *v)
 static struct net_driver_ops mlx5_net_ops = {
 	.rx_batch = mlx5_gather_rx,
 	.tx_single = mlx5_transmit_one,
-	.rx_completion = directpath_rx_completion,
 	.steer_flows = mlx5_steer_flows,
 	.register_flow = mlx5_register_flow,
 	.deregister_flow = mlx5_deregister_flow,

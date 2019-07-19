@@ -26,7 +26,6 @@ static struct mlx5dv_dr_matcher		*match_just_mac;
 static struct mlx5dv_dr_rule		*root_tcp_rule;
 static struct mlx5dv_dr_rule		*root_udp_rule;
 static struct mlx5dv_dr_rule		*root_catchall_rule;
-// static struct mlx5dv_dr_rule		*root_broadcast_rule;
 
 /* second level flow tables */
 static struct tbl		tcp_tbl;
@@ -211,16 +210,6 @@ static int mlx5_init_root_table(void)
 	if (!root_catchall_rule)
 		return -errno;
 
-// TODO: fix broadcast traffic
-#if 0
-	memset(mask.buf, 0, sizeof(mask.buf));
-	action[0] = fg_tbl[0].ingress_action;
-	DEVX_SET(fte_match_param, mask.buf, outer_headers.dmac_47_16, __devx_mask(32));
-	DEVX_SET(fte_match_param, mask.buf, outer_headers.dmac_15_0, __devx_mask(16));
-	root_broadcast_rule = mlx5dv_dr_rule_create(match_just_mac, &mask.params, 1, action);
-	if (!root_broadcast_rule)
-		return -errno;
-#endif
 	return 0;
 }
 

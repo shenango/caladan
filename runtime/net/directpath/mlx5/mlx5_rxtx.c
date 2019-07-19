@@ -9,11 +9,6 @@
 
 #include "mlx5.h"
 
-static inline unsigned char *mlx5_rx_alloc_buf(void)
-{
-	assert_preempt_disabled();
-	return tcache_alloc(&perthread_get(directpath_buf_pt));
-}
 
 /*
  * mlx5_refill_rxqueue - replenish RX queue with nrdesc bufs
@@ -32,10 +27,10 @@ static inline int mlx5_refill_rxqueue(struct mlx5_rxq *vq, int nrdesc)
 
 	struct mlx5dv_rwq *wq = &vq->rx_wq_dv;
 
-	assert(nrdesc + vq->wq_head >= vq->rxq.consumer_idx + wq->wqe_cnt);
+	assert(wraps_lte(nrdesc + vq->wq_head, vq->rxq.consumer_idx + wq->wqe_cnt));
 
 	for (i = 0; i < nrdesc; i++) {
-		buf = mlx5_rx_alloc_buf();
+		buf = tcache_alloc(&perthread_get(directpath_buf_pt));
 		if (unlikely(!buf))
 			return -ENOMEM;
 
@@ -141,7 +136,23 @@ int mlx5_transmit_one(struct direct_txq *t, struct mbuf *m)
 
 }
 
-int mlx5_gather_rx(struct direct_rxq *rxq, struct rx_net_hdr **hdrs, unsigned int budget)
+static inline void mbuf_fill_cqe(struct mbuf *m, struct mlx5_cqe64 *cqe)
+{
+	uint32_t len;
+
+	len = be32toh(cqe->byte_cnt);
+
+	mbuf_init(m, (unsigned char *)m + RX_BUF_RESERVED, len, 0);
+	m->len = len;
+
+	m->csum_type = mlx5_csum_ok(cqe);
+	m->csum = 0;
+	m->rss_hash = mlx5_get_rss_result(cqe);
+
+	m->release = directpath_rx_completion;
+}
+
+int mlx5_gather_rx(struct direct_rxq *rxq, struct mbuf **ms, unsigned int budget)
 {
 	uint8_t opcode;
 	uint16_t wqe_idx;
@@ -152,8 +163,7 @@ int mlx5_gather_rx(struct direct_rxq *rxq, struct rx_net_hdr **hdrs, unsigned in
 	struct mlx5dv_cq *cq = &v->rx_cq_dv;
 
 	struct mlx5_cqe64 *cqe, *cqes = cq->buf;
-	unsigned char *buf;
-	struct rx_net_hdr *hdr;
+	struct mbuf *m;
 
 	for (rx_cnt = 0; rx_cnt < budget; rx_cnt++, v->rxq.consumer_idx++) {
 		cqe = &cqes[v->rxq.consumer_idx & (cq->cqe_cnt - 1)];
@@ -168,15 +178,10 @@ int mlx5_gather_rx(struct direct_rxq *rxq, struct rx_net_hdr **hdrs, unsigned in
 		}
 
 		assert(mlx5_get_cqe_format(cqe) != 0x3); // not compressed
-
 		wqe_idx = be16toh(cqe->wqe_counter) & (wq->wqe_cnt - 1);
-		buf = v->buffers[wqe_idx];
-		hdr = (struct rx_net_hdr *)(buf + RX_BUF_RESERVED - sizeof(*hdr));
-		hdr->completion_data = (unsigned long)buf;
-		hdr->len = be32toh(cqe->byte_cnt);
-		hdr->csum_type = mlx5_csum_ok(cqe);
-		hdr->rss_hash = mlx5_get_rss_result(cqe);
-		hdrs[rx_cnt] = hdr;
+		m = v->buffers[wqe_idx];
+		mbuf_fill_cqe(m, cqe);
+		ms[rx_cnt] = m;
 	}
 
 	if (unlikely(!rx_cnt))

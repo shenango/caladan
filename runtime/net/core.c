@@ -11,6 +11,7 @@
 #include <base/thread.h>
 #include <asm/chksum.h>
 #include <runtime/net.h>
+#include <runtime/smalloc.h>
 
 #include "defs.h"
 
@@ -19,11 +20,6 @@
 
 /* important global state */
 struct net_cfg netcfg __aligned(CACHE_LINE_SIZE);
-
-/* RX buffer allocation */
-static struct slab net_rx_buf_slab;
-static struct tcache *net_rx_buf_tcache;
-static DEFINE_PERTHREAD(struct tcache_perthread, net_rx_buf_pt);
 
 /* TX buffer allocation */
 struct mempool net_tx_buf_mp;
@@ -37,14 +33,6 @@ static DEFINE_PERTHREAD(struct tcache_perthread, net_tx_buf_pt);
  * RX Networking Functions
  */
 
-static void net_rx_release_mbuf(struct mbuf *m)
-{
-	preempt_disable();
-	tcache_free(&perthread_get(net_rx_buf_pt), m);
-	preempt_enable();
-}
-
-#ifndef DIRECTPATH
 static void net_rx_send_completion(unsigned long completion_data)
 {
 	struct kthread *k;
@@ -56,22 +44,16 @@ static void net_rx_send_completion(unsigned long completion_data)
 	}
 	putk();
 }
-#endif
 
 static struct mbuf *net_rx_alloc_mbuf(struct rx_net_hdr *hdr)
 {
 	struct mbuf *m;
 	void *buf;
 
-	preempt_disable();
 	/* allocate the buffer to store the payload */
-	m = tcache_alloc(&perthread_get(net_rx_buf_pt));
-	if (unlikely(!m)) {
-		preempt_enable();
-		goto fail_buf;
-	}
-
-	preempt_enable();
+	m = smalloc(hdr->len + MBUF_RESERVED);
+	if (unlikely(!m))
+		goto out;
 
 	buf = (unsigned char *)m + MBUF_RESERVED;
 
@@ -84,24 +66,11 @@ static struct mbuf *net_rx_alloc_mbuf(struct rx_net_hdr *hdr)
 	m->csum = hdr->csum;
 	m->rss_hash = hdr->rss_hash;
 
-	barrier();
-#ifdef DIRECTPATH
-	net_ops.rx_completion(hdr->completion_data);
-#else
-	net_rx_send_completion(hdr->completion_data);
-#endif
+	m->release = (void (*)(struct mbuf *))sfree;
 
-	m->release_data = 0;
-	m->release = net_rx_release_mbuf;
+out:
+	net_rx_send_completion(hdr->completion_data);
 	return m;
-
-fail_buf:
-#ifdef DIRECTPATH
-	net_ops.rx_completion(hdr->completion_data);
-#else
-	net_rx_send_completion(hdr->completion_data);
-#endif
-	return NULL;
 }
 
 static inline bool ip_hdr_supported(const struct ip_hdr *iphdr)
@@ -136,20 +105,14 @@ void net_error(struct mbuf *m, int err)
 		trans_error(m, err);
 }
 
-static struct mbuf *net_rx_one(struct rx_net_hdr *hdr)
+static struct mbuf *net_rx_one(struct mbuf *m)
 {
-	struct mbuf *m;
 	const struct eth_hdr *llhdr;
 	const struct ip_hdr *iphdr;
 	uint16_t len;
 
-	m = net_rx_alloc_mbuf(hdr);
-	if (unlikely(!m))
-		return NULL;
-
 	STAT(RX_PACKETS)++;
 	STAT(RX_BYTES) += mbuf_length(m);
-
 
 	/*
 	 * Link Layer Processing (OSI L2)
@@ -183,7 +146,7 @@ static struct mbuf *net_rx_one(struct rx_net_hdr *hdr)
 		goto drop;
 
 	/* Did HW checksum verification pass? */
-	if (hdr->csum_type != CHECKSUM_TYPE_UNNECESSARY) {
+	if (m->csum_type != CHECKSUM_TYPE_UNNECESSARY) {
 		if (chksum_internet(iphdr, sizeof(*iphdr)))
 			goto drop;
 	}
@@ -218,19 +181,48 @@ drop:
 }
 
 /**
+ * net_rx_softirq_direct - handles ingress packet processing
+ * This variant is intended for packets from directpath queues
+ * @ms: an array of ingress packets
+ * @nr: the size of the @ms array
+ */
+void net_rx_softirq_direct(struct mbuf **ms, unsigned int nr)
+{
+	struct mbuf *l4_reqs[SOFTIRQ_MAX_BUDGET];
+	int i, l4idx = 0;
+
+	for (i = 0; i < nr; i++) {
+		l4_reqs[l4idx] = net_rx_one(ms[i]);
+		if (l4_reqs[l4idx] != NULL)
+			l4idx++;
+	}
+
+	/* handle transport protocol layer */
+	if (l4idx > 0)
+		net_rx_trans(l4_reqs, l4idx);
+}
+
+/**
  * net_rx_softirq - handles ingress packet processing
+ * This variant is intended for packets from the IOKernel
  * @hdrs: an array of ingress packet headers
  * @nr: the size of the @hdrs array
  */
 void net_rx_softirq(struct rx_net_hdr **hdrs, unsigned int nr)
 {
+	struct mbuf *m;
 	struct mbuf *l4_reqs[SOFTIRQ_MAX_BUDGET];
 	int i, l4idx = 0;
 
 	for (i = 0; i < nr; i++) {
 		if (i + RX_PREFETCH_STRIDE < nr)
 			prefetch(hdrs[i + RX_PREFETCH_STRIDE]);
-		l4_reqs[l4idx] = net_rx_one(hdrs[i]);
+		m = net_rx_alloc_mbuf(hdrs[i]);
+		if (unlikely(!m)) {
+			STAT(DROPS)++;
+			continue;
+		}
+		l4_reqs[l4idx] = net_rx_one(m);
 		if (l4_reqs[l4idx] != NULL)
 			l4idx++;
 	}
@@ -541,7 +533,6 @@ int str_to_netaddr(const char *str, struct netaddr *addr)
  */
 int net_init_thread(void)
 {
-	tcache_init_perthread(net_rx_buf_tcache, &perthread_get(net_rx_buf_pt));
 	tcache_init_perthread(net_tx_buf_tcache, &perthread_get(net_tx_buf_pt));
 	return 0;
 }
@@ -568,16 +559,6 @@ static void net_dump_config(void)
 int net_init(void)
 {
 	int ret;
-
-	ret = slab_create(&net_rx_buf_slab, "runtime_rx_bufs",
-			  MBUF_DEFAULT_LEN, SLAB_FLAG_LGPAGE);
-	if (ret)
-		return ret;
-
-	net_rx_buf_tcache = slab_create_tcache(&net_rx_buf_slab,
-					       TCACHE_DEFAULT_MAG_SIZE);
-	if (!net_rx_buf_tcache)
-		return -ENOMEM;
 
 	ret = mempool_create(&net_tx_buf_mp, iok.tx_buf, iok.tx_len,
 			     PGSIZE_2MB, MBUF_DEFAULT_LEN);

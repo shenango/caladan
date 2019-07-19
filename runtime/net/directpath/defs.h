@@ -15,14 +15,14 @@
 #define SQ_CLEAN_MAX			SQ_CLEAN_THRESH
 
 #define RX_BUF_BOOL_SZ(nrqs) \
- (align_up(nrqs * RQ_NUM_DESC * 2UL * MBUF_DEFAULT_LEN, PGSIZE_2MB))
+ (align_up(nrqs * (32 * RQ_NUM_DESC) * 16UL * MBUF_DEFAULT_LEN, PGSIZE_2MB))
 #define RX_BUF_RESERVED \
- (align_up(sizeof(struct rx_net_hdr), CACHE_LINE_SIZE))
+ (align_up(sizeof(struct mbuf), 2 * CACHE_LINE_SIZE))
 
 extern struct mempool directpath_buf_mp;
 extern struct tcache *directpath_buf_tcache;
 extern DEFINE_PERTHREAD(struct tcache_perthread, directpath_buf_pt);
-extern void directpath_rx_completion(unsigned long completion_data);
+extern void directpath_rx_completion(struct mbuf *m);
 extern int mlx5_init(struct direct_rxq **rxq_out,
 	    struct direct_txq **txq_out, unsigned int nr_rxq,
 	    unsigned int nr_txq);

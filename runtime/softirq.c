@@ -10,8 +10,9 @@
 #include "net/defs.h"
 
 struct softirq_work {
-	unsigned int recv_cnt, compl_cnt, timer_budget, storage_cnt;
+	unsigned int recv_cnt, compl_cnt, timer_budget, storage_cnt, direct_rx_cnt;
 	struct kthread *k;
+	struct mbuf *direct_reqs[SOFTIRQ_MAX_BUDGET];
 	struct rx_net_hdr *recv_reqs[SOFTIRQ_MAX_BUDGET];
 	struct mbuf *compl_reqs[SOFTIRQ_MAX_BUDGET];
 	struct thread *storage_threads[SOFTIRQ_MAX_BUDGET];
@@ -28,6 +29,10 @@ static void softirq_fn(void *arg)
 
 	/* deliver new RX packets to the runtime */
 	net_rx_softirq(w->recv_reqs, w->recv_cnt);
+
+#ifdef DIRECTPATH
+	net_rx_softirq_direct(w->direct_reqs, w->direct_rx_cnt);
+#endif
 
 	/* handle any pending timeouts */
 	if (timer_needed(w->k))
@@ -78,8 +83,7 @@ static void softirq_gather_work(struct softirq_work *w, struct kthread *k,
 	}
 
 #ifdef DIRECTPATH
-	BUG_ON(recv_cnt || compl_cnt);
-	recv_cnt = net_ops.rx_batch(k->directpath_rxq, w->recv_reqs, real_budget);
+	w->direct_rx_cnt = net_ops.rx_batch(k->directpath_rxq, w->direct_reqs, real_budget);
 #endif
 
 #if __has_include("spdk/nvme.h")

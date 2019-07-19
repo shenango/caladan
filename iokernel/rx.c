@@ -135,8 +135,6 @@ static void rx_one_pkt(struct rte_mbuf *buf)
 
 		net_hdr = rx_prepend_rx_preamble(buf);
 		for (i = 0; i < dp.nr_clients; i++) {
-			if (dp.clients[i]->has_directpath)
-				continue;
 			success = rx_send_pkt_to_runtime(dp.clients[i], net_hdr);
 			if (success) {
 				n_sent++;

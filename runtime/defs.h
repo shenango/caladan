@@ -430,6 +430,7 @@ extern struct cfg_arp_static_entry static_entries[MAX_ARP_STATIC_ENTRIES];
 
 extern void __net_recurrent(void);
 extern void net_rx_softirq(struct rx_net_hdr **hdrs, unsigned int nr);
+extern void net_rx_softirq_direct(struct mbuf **ms, unsigned int nr);
 
 #ifdef DIRECTPATH
 
@@ -450,9 +451,8 @@ struct direct_rxq {
 struct direct_txq {};
 
 struct net_driver_ops {
-	int (*rx_batch)(struct direct_rxq *rxq, struct rx_net_hdr **bufs, unsigned int budget);
+	int (*rx_batch)(struct direct_rxq *rxq, struct mbuf **ms, unsigned int budget);
 	int (*tx_single)(struct direct_txq *txq, struct mbuf *m);
-	void (*rx_completion)(unsigned long completion_data);
 	int (*steer_flows)(unsigned int *new_fg_assignment);
 	int (*register_flow)(unsigned int affininty, uint8_t proto, struct netaddr laddr, struct netaddr raddr, void **handle_out);
 	int (*deregister_flow)(void *handle);

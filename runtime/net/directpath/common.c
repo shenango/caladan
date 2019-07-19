@@ -14,10 +14,10 @@ struct mempool directpath_buf_mp;
 struct tcache *directpath_buf_tcache;
 DEFINE_PERTHREAD(struct tcache_perthread, directpath_buf_pt);
 
-void directpath_rx_completion(unsigned long completion_data)
+void directpath_rx_completion(struct mbuf *m)
 {
 	preempt_disable();
-	tcache_free(&perthread_get(directpath_buf_pt), (void *)completion_data);
+	tcache_free(&perthread_get(directpath_buf_pt), (void *)m);
 	preempt_enable();
 }
 
