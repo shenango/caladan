@@ -21,22 +21,16 @@ struct ksched_intr_req {
 	const void __user	*mask;
 };
 
-enum {
-	KSCHED_REQ_NONE = 0,
-	KSCHED_REQ_SIGNAL,
-	KSCHED_REQ_PMC,
-};
-
 struct ksched_shm_cpu {
 	/* written by userspace */
 	unsigned int		gen;
 	pid_t			tid;
 	unsigned int		mwait_hint;
-	unsigned int		req;
-	union {
-		unsigned int	signum;
-		__u64		pmcsel;
-	};
+	unsigned int		sig;
+	unsigned int		signum;
+	unsigned int		pmc;
+	unsigned int		pad;
+	__u64			pmcsel;
 
 	/* written by kernelspace */
 	unsigned int		busy;
@@ -44,7 +38,7 @@ struct ksched_shm_cpu {
 	__u64			pmcval;
 
 	/* extra space for future features (and cache alignment) */
-	unsigned long		rsv[3];
+	unsigned long		rsv[2];
 };
 
 #define KSCHED_MAGIC		0xF0

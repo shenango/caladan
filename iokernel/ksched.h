@@ -97,7 +97,7 @@ static inline void ksched_enqueue_intr(unsigned int core, int type)
 	}
 
 	ksched_shm[core].signum = signum;
-	store_release(&ksched_shm[core].req, KSCHED_REQ_SIGNAL);
+	store_release(&ksched_shm[core].sig, ksched_gens[core]);
 	CPU_SET(core, &ksched_set);
 	ksched_count++;
 }
@@ -110,9 +110,24 @@ static inline void ksched_enqueue_intr(unsigned int core, int type)
 static inline void ksched_enqueue_pmc(unsigned int core, uint64_t sel)
 {
 	ksched_shm[core].pmcsel = sel;
-	store_release(&ksched_shm[core].req, KSCHED_REQ_PMC);
+	store_release(&ksched_shm[core].pmc, ksched_gens[core]);
 	CPU_SET(core, &ksched_set);
 	ksched_count++;
+}
+
+/**
+ * ksched_poll_pmc - polls for a performance counter result
+ * @core: the core to poll
+ * @val: a pointer to store the result
+ *
+ * Returns true if succesful, otherwise counter is still being measured.
+ */
+static inline bool ksched_poll_pmc(unsigned int core, uint64_t *val)
+{
+	if (load_acquire(&ksched_shm[core].pmc) != 0)
+		return false;
+	*val = ACCESS_ONCE(ksched_shm[core].pmcval);
+	return true;
 }
 
 /**

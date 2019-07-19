@@ -29,6 +29,7 @@
 /* Currently we only monitor the numa 0 mode since Shenango only manages 
 CPU cores in numa 0 */
 #define UCMEM_NUMA_NODE (0)
+#define KSCHED_PMC_PROBE_DELAY (3)
 
 MODULE_LICENSE("GPL");
 
@@ -265,7 +266,8 @@ static u64 ksched_measure_pmc(u64 sel)
 
 	wrmsrl(MSR_P6_EVNTSEL0, sel);
 	rdmsrl(MSR_P6_PERFCTR0, start);
-	udelay(3);
+	udelay(KSCHED_PMC_PROBE_DELAY);
+	wrmsrl(MSR_P6_EVNTSEL0, sel);
 	rdmsrl(MSR_P6_PERFCTR0, end);
 	return end - start;
 }
@@ -274,21 +276,22 @@ static void ksched_ipi(void *unused)
 {
 	struct ksched_percpu *p;
 	struct ksched_shm_cpu *s;
-	int cpu, req;
+	int cpu, tmp;
 
 	cpu = get_cpu();
 	p = this_cpu_ptr(&kp);
 	s = &shm[cpu];
 
-	/* check which request has been selected */
-	req = smp_load_acquire(&s->req);
-	switch (req) {
-	case KSCHED_REQ_SIGNAL:
+	/* check if a signal has been requested */
+	tmp = smp_load_acquire(&s->sig);
+	if (tmp == p->last_gen)
 		ksched_deliver_signal(p, READ_ONCE(s->signum));
-		break;
-	case KSCHED_REQ_PMC:
+
+	/* check if a performance counter has been requested */
+	tmp = smp_load_acquire(&s->pmc);
+	if (tmp == p->last_gen) {
 		s->pmcval = ksched_measure_pmc(READ_ONCE(s->pmcsel));
-		break;
+		smp_store_release(&s->pmc, 0);
 	}
 
 	put_cpu();
