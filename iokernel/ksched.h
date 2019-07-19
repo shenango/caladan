@@ -97,7 +97,20 @@ static inline void ksched_enqueue_intr(unsigned int core, int type)
 	}
 
 	ksched_shm[core].signum = signum;
-	store_release(&ksched_shm[core].sig, ksched_gens[core]);
+	store_release(&ksched_shm[core].req, KSCHED_REQ_SIGNAL);
+	CPU_SET(core, &ksched_set);
+	ksched_count++;
+}
+
+/**
+ * ksched_enqueue_pmc - enqueues a performance counter request on a core
+ * @core: the core to measure
+ * @sel: the architecture-specific counter selector
+ */
+static inline void ksched_enqueue_pmc(unsigned int core, uint64_t sel)
+{
+	ksched_shm[core].pmcsel = sel;
+	store_release(&ksched_shm[core].req, KSCHED_REQ_PMC);
 	CPU_SET(core, &ksched_set);
 	ksched_count++;
 }

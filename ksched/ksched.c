@@ -16,10 +16,13 @@
 #include <linux/uaccess.h>
 #include <linux/capability.h>
 #include <linux/cpuidle.h>
+#include <linux/delay.h>
 #include <asm/local.h>
 #include <asm/mwait.h>
 #include <asm/pgtable.h>
 #include <asm/tlbflush.h>
+#include <asm/msr.h>
+#include <asm/msr-index.h>
 
 #include "ksched.h"
 
@@ -233,16 +236,9 @@ static long ksched_start(void)
 	return 0;
 }
 
-static void ksched_ipi(void *unused)
+static void ksched_deliver_signal(struct ksched_percpu *p, unsigned int signum)
 {
-	struct ksched_percpu *p;
-	struct ksched_shm_cpu *s;
 	struct task_struct *t;
-	int cpu, gen;
-
-	cpu = get_cpu();
-	p = this_cpu_ptr(&kp);
-	s = &shm[cpu];
 
 	/* if core is already idle, don't bother delivering signals */
 	if (!local_read(&p->busy)) {
@@ -255,15 +251,45 @@ static void ksched_ipi(void *unused)
 	t = ksched_lookup_task(p->tid);
 	if (!t) {
 		rcu_read_unlock();
-		put_cpu();
 		return;
 	}
-	rcu_read_unlock();
 
-	/* check if yield has been requested (detecting race conditions) */
-	gen = smp_load_acquire(&s->sig);
-	if (gen == p->last_gen)
-		send_sig(READ_ONCE(s->signum), t, 0);
+	/* send the signal */
+	send_sig(signum, t, 0);
+	rcu_read_unlock();
+}
+
+static u64 ksched_measure_pmc(u64 sel)
+{
+	u64 start, end;
+
+	wrmsrl(MSR_P6_EVNTSEL0, sel);
+	rdmsrl(MSR_P6_PERFCTR0, start);
+	udelay(3);
+	rdmsrl(MSR_P6_PERFCTR0, end);
+	return end - start;
+}
+
+static void ksched_ipi(void *unused)
+{
+	struct ksched_percpu *p;
+	struct ksched_shm_cpu *s;
+	int cpu, req;
+
+	cpu = get_cpu();
+	p = this_cpu_ptr(&kp);
+	s = &shm[cpu];
+
+	/* check which request has been selected */
+	req = smp_load_acquire(&s->req);
+	switch (req) {
+	case KSCHED_REQ_SIGNAL:
+		ksched_deliver_signal(p, READ_ONCE(s->signum));
+		break;
+	case KSCHED_REQ_PMC:
+		s->pmcval = ksched_measure_pmc(READ_ONCE(s->pmcsel));
+		break;
+	}
 
 	put_cpu();
 }
