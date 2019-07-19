@@ -80,6 +80,7 @@ struct tcpconn {
 	unsigned int		rx_closed:1;
 	unsigned int		rx_exclusive:1;
 	waitq_t			rx_wq;
+	unsigned int		rxq_ooo_len;
 	struct list_head	rxq_ooo;
 	struct list_head	rxq;
 

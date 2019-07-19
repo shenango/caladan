@@ -287,6 +287,7 @@ tcpconn_t *tcp_conn_alloc(void)
 	c->rx_closed = false;
 	c->rx_exclusive = false;
 	waitq_init(&c->rx_wq);
+	c->rxq_ooo_len = 0;
 	list_head_init(&c->rxq_ooo);
 	list_head_init(&c->rxq);
 

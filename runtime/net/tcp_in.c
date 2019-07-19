@@ -108,21 +108,22 @@ static bool tcp_rx_text(tcpconn_t *c, struct mbuf *m, bool *wake)
 	} else {
 		/* we got an out-of-order segment */
 		STAT(RX_TCP_OUT_OF_ORDER)++;
-		int size = 0;
+
+		if (c->rxq_ooo_len >= TCP_OOO_MAX_SIZE)
+			return false;
+
 		list_for_each_rev(&c->rxq_ooo, pos, link) {
-			if (wraps_gt(m->seg_seq, pos->seg_seq)) {
+			if (wraps_gt(m->seg_end, pos->seg_end)) {
 				list_add_after(&pos->link, &m->link);
+				c->rxq_ooo_len++;
 				goto drain;
-			} else if (wraps_gte(m->seg_end, pos->seg_end)) {
+			} else if (wraps_gte(m->seg_seq, pos->seg_seq)) {
 				return false;
 			}
-			size++;
 		}
 
-		if (size >= TCP_OOO_MAX_SIZE)
-			 return false;
-
 		list_add(&c->rxq_ooo, &m->link);
+		c->rxq_ooo_len++;
 	}
 
 drain:
@@ -135,6 +136,7 @@ drain:
 		/* has the segment been fully received already? */
 		if (wraps_lte(pos->seg_end, c->pcb.rcv_nxt)) {
 			list_del(&pos->link);
+			c->rxq_ooo_len--;
 			mbuf_free(pos);
 			continue;
 		}
@@ -145,6 +147,7 @@ drain:
 
 		/* we got the next in-order segment */
 		list_del(&pos->link);
+		c->rxq_ooo_len--;
 		if ((pos->flags & (TCP_PUSH | TCP_FIN)) > 0)
 			*wake = true;
 		tcp_rx_append_text(c, pos);
