@@ -37,7 +37,7 @@ struct mis_data {
 
 	/* bandwidth monitoring */
 	int			threads_monitored;
-	uint64_t		stalls_mem_any;
+	uint64_t		llc_misses;
 };
 
 static bool mis_proc_is_preemptible(struct mis_data *cursd,
@@ -138,7 +138,7 @@ static void mis_sample_bandwidth(void)
 	bitmap_clear(mis_sampled_cores, NCPU);
 	list_for_each(&all_procs, sd, all_link) {
 		sd->threads_monitored = 0;
-		sd->stalls_mem_any = 0;
+		sd->llc_misses = 0;
 	}
 
 	sched_for_each_allowed_sibling(core, tmp) {
@@ -178,13 +178,13 @@ static void mis_sample_bandwidth_finish(void)
 			continue;
 		}
 		if (sd)
-			sd->stalls_mem_any += pmc;
+			sd->llc_misses += pmc;
 	}
 
 	list_for_each(&all_procs, sd, all_link) {
 		log_info("mis: proc %d monitored %d L3Miss %f",
 			 sd->p->pid, sd->threads_monitored,
-			 (float)sd->stalls_mem_any /
+			 (float)sd->llc_misses /
 			 (float)sd->threads_monitored *
 			 (float)sd->threads_active);
 	}
