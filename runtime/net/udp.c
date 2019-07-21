@@ -57,6 +57,9 @@ struct udpconn {
 	int			outq_cap;
 	int			outq_len;
 	waitq_t			outq_wq;
+
+	struct kref		ref;
+	struct flow_registration		flow;
 };
 
 /* handles ingress packets for UDP sockets */
@@ -129,6 +132,8 @@ static void udp_init_conn(udpconn_t *c)
 	c->outq_cap = UDP_OUT_DEFAULT_CAP;
 	c->outq_len = 0;
 	waitq_init(&c->outq_wq);
+
+	kref_init(&c->ref);
 }
 
 static void udp_finish_release_conn(struct rcu_head *h)
@@ -137,12 +142,35 @@ static void udp_finish_release_conn(struct rcu_head *h)
 	sfree(c);
 }
 
-static void udp_release_conn(udpconn_t *c)
+static void udp_release_conn_ref(struct kref *ref)
 {
+	udpconn_t *c = container_of(ref, udpconn_t, ref);
 	assert(waitq_empty(&c->inq_wq) && waitq_empty(&c->outq_wq));
 	assert(mbufq_empty(&c->inq));
 	rcu_free(&c->e.rcu, udp_finish_release_conn);
 }
+
+static inline void udp_conn_put(udpconn_t *c)
+{
+	kref_put(&c->ref, udp_release_conn_ref);
+}
+
+#ifdef DIRECTPATH
+static atomic64_t next_affinity;
+
+static void udp_init_flow(udpconn_t *c)
+{
+	struct flow_registration *f = &c->flow;
+
+	f->kthread_affinity = atomic64_fetch_and_add(&next_affinity, 1) % maxks;
+	f->e = &c->e;
+	f->ref = &c->ref;
+	f->release = udp_release_conn_ref;
+}
+
+#else
+static inline void udp_init_flow(udpconn_t *c) {}
+#endif
 
 /**
  * udp_dial - creates a UDP socket between a local and remote address
@@ -178,6 +206,9 @@ int udp_dial(struct netaddr laddr, struct netaddr raddr, udpconn_t **c_out)
 		sfree(c);
 		return ret;
 	}
+
+	udp_init_flow(c);
+	register_flow(&c->flow);
 
 	*c_out = c;
 	return 0;
@@ -330,7 +361,7 @@ static void udp_tx_release_mbuf(struct mbuf *m)
 
 	net_tx_release_mbuf(m);
 	if (free_conn)
-		udp_release_conn(c);
+		udp_conn_put(c);
 }
 
 /**
@@ -494,8 +525,10 @@ void udp_close(udpconn_t *c)
 	c->outq_free = true;
 	spin_unlock_np(&c->outq_lock);
 
+	deregister_flow(&c->flow);
+
 	if (free_conn)
-		udp_release_conn(c);
+		udp_conn_put(c);
 }
 
 

@@ -81,6 +81,7 @@ static const struct init_entry late_init_handlers[] = {
 	LATE_INITIALIZER(stat),
 	LATE_INITIALIZER(tcp),
 	LATE_INITIALIZER(rcu),
+	LATE_INITIALIZER(directpath),
 };
 
 static int run_init_handlers(const char *phase,

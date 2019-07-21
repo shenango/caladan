@@ -166,3 +166,28 @@ static inline void trans_init_5tuple(struct trans_entry *e, uint8_t proto,
 extern int trans_table_add(struct trans_entry *e);
 extern int trans_table_add_with_ephemeral_port(struct trans_entry *e);
 extern void trans_table_remove(struct trans_entry *e);
+
+/*
+ * Flow registration support
+ */
+
+
+struct flow_registration {
+	unsigned int		kthread_affinity;
+
+	struct trans_entry		*e;
+	struct kref		*ref;
+	void (*release)(struct kref *ref);
+
+	void		*hw_flow_handle;
+	struct list_node		flow_reg_link;
+	struct list_node		flow_dereg_link;
+};
+
+#ifdef DIRECTPATH
+extern void register_flow(struct flow_registration *f);
+extern void deregister_flow(struct flow_registration *f);
+#else
+static inline void register_flow(struct flow_registration *f) {}
+static inline void deregister_flow(struct flow_registration *f) {}
+#endif

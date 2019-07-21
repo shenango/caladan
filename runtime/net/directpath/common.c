@@ -1,5 +1,7 @@
 
+#include <base/kref.h>
 #include <base/mempool.h>
+#include <runtime/sync.h>
 
 #include "defs.h"
 
@@ -88,6 +90,71 @@ int directpath_init_thread(void)
 	return 0;
 }
 
+static DEFINE_SPINLOCK(flow_worker_lock);
+static thread_t *flow_worker_th;
+static LIST_HEAD(flow_to_register);
+static LIST_HEAD(flow_to_deregister);
+
+static void flow_registration_worker(void *arg)
+{
+	int ret;
+	struct flow_registration *f;
+
+	while (true) {
+		spin_lock_np(&flow_worker_lock);
+		f = list_pop(&flow_to_register, struct flow_registration, flow_reg_link);
+		if (f) {
+			spin_unlock_np(&flow_worker_lock);
+			ret = net_ops.register_flow(f->kthread_affinity, f->e->proto, f->e->laddr, f->e->raddr, &f->hw_flow_handle);
+			WARN_ON(ret);
+			continue;
+		}
+
+		f = list_pop(&flow_to_deregister, struct flow_registration, flow_dereg_link);
+		if (f) {
+			spin_unlock_np(&flow_worker_lock);
+			ret = net_ops.deregister_flow(f->hw_flow_handle);
+			WARN_ON(ret);
+			f->release(f->ref);
+			continue;
+		}
+
+		flow_worker_th = thread_self();
+		thread_park_and_unlock_np(&flow_worker_lock);
+	}
+}
+
+void register_flow(struct flow_registration *f)
+{
+	/* take a reference for the hardware flow table */
+	kref_get(f->ref);
+
+	spin_lock_np(&flow_worker_lock);
+	list_add(&flow_to_register, &f->flow_reg_link);
+	if (flow_worker_th) {
+		thread_ready(flow_worker_th);
+		flow_worker_th = NULL;
+	}
+	spin_unlock_np(&flow_worker_lock);
+
+}
+
+void deregister_flow(struct flow_registration *f)
+{
+	spin_lock_np(&flow_worker_lock);
+	list_add(&flow_to_deregister, &f->flow_dereg_link);
+	if (flow_worker_th) {
+		thread_ready(flow_worker_th);
+		flow_worker_th = NULL;
+	}
+	spin_unlock_np(&flow_worker_lock);
+}
+
+int directpath_init_late(void)
+{
+	return thread_spawn(flow_registration_worker, NULL);
+}
+
 #else
 
 int directpath_init(void)
@@ -99,5 +166,11 @@ int directpath_init_thread(void)
 {
 	return 0;
 }
+
+int directpath_init_late(void)
+{
+	return 0;
+}
+
 
 #endif

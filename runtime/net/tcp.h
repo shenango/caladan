@@ -106,12 +106,7 @@ struct tcpconn {
 	};
 	int			rep_acks;
 
-	/* flow steering */
-	unsigned int		kthread_affinity;
-	void		*flow_handle;
-	struct list_node		flow_reg_link;
-	struct list_node		flow_dereg_link;
-
+	struct flow_registration flow;
 };
 
 extern tcpconn_t *tcp_conn_alloc(void);
