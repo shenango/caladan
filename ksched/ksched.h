@@ -13,8 +13,12 @@
  */
 #define KSCHED_MAJOR		280
 #define KSCHED_MINOR		0
-#define UCMEM_MAJOR		281
-#define UCMEM_MINOR		0
+#define PCI_CFG_MAJOR		281
+#define PCI_CFG_MINOR		0
+
+/* TODO: should not be hard-coded. */
+#define PCI_CFG_ADDRESS         (0x80000000)
+#define PCI_CFG_SIZE            (0x10000000)
 
 struct ksched_intr_req {
 	size_t			len;

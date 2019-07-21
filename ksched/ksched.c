@@ -2,43 +2,43 @@
  * ksched.c - an accelerated scheduler interface for the IOKernel
  */
 
-#include <linux/module.h>
-#include <linux/moduleparam.h>
-#include <linux/init.h>
-#include <linux/kernel.h>
-#include <linux/fs.h>
-#include <linux/errno.h>
-#include <linux/cdev.h>
-#include <linux/smp.h>
-#include <linux/sched/signal.h>
-#include <linux/sched/task.h>
-#include <linux/sched.h>
-#include <linux/uaccess.h>
-#include <linux/capability.h>
-#include <linux/cpuidle.h>
-#include <linux/delay.h>
+#include <asm/io.h>
 #include <asm/local.h>
+#include <asm/set_memory.h>
+#include <asm/msr-index.h>
+#include <asm/msr.h>
 #include <asm/mwait.h>
+#include <asm/page.h>
 #include <asm/pgtable.h>
 #include <asm/tlbflush.h>
-#include <asm/msr.h>
-#include <asm/msr-index.h>
+#include <linux/capability.h>
+#include <linux/cdev.h>
+#include <linux/cpuidle.h>
+#include <linux/delay.h>
+#include <linux/dma-mapping.h>
+#include <linux/errno.h>
+#include <linux/fs.h>
+#include <linux/init.h>
+#include <linux/kernel.h>
+#include <linux/module.h>
+#include <linux/moduleparam.h>
+#include <linux/mm.h>
+#include <linux/sched.h>
+#include <linux/sched/signal.h>
+#include <linux/sched/task.h>
+#include <linux/smp.h>
+#include <linux/uaccess.h>
 
 #include "ksched.h"
 
-/* Currently we only monitor the numa 0 mode since Shenango only manages 
-CPU cores in numa 0 */
-#define UCMEM_NUMA_NODE (0)
 #define KSCHED_PMC_PROBE_DELAY (3)
 
 MODULE_LICENSE("GPL");
 
 /* the character device that provides the ksched IOCTL interface */
 static struct cdev ksched_cdev;
-/* the character device that provides the uncached memory interface */
-static struct cdev ucmem_cdev;
-/* the mem used by userspace to probing mem lat */
-void *probed_mem = NULL;
+/* the character device that mmaps the PCI configuration space */
+static struct cdev pci_cfg_cdev;
 
 /* shared memory between the IOKernel and the Linux Kernel */
 static __read_mostly struct ksched_shm_cpu *shm;
@@ -383,21 +383,20 @@ static struct file_operations ksched_ops = {
 	.release	= ksched_release,
 };
 
-static int ucmem_mmap(struct file *file, struct vm_area_struct *vma)
-{
-	if (!capable(CAP_SYS_ADMIN))
-		return -EACCES;
-	vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
-	if (io_remap_pfn_range(vma, vma->vm_start, vma->vm_pgoff,
-			       vma->vm_end - vma->vm_start,
-			       vma->vm_page_prot))
-	  return -EAGAIN;
+static int pci_cfg_mmap(struct file *file, struct vm_area_struct *vma) {
+        if (!capable(CAP_SYS_ADMIN))
+                return -EACCES;
+        vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
+        if (io_remap_pfn_range(vma, vma->vm_start, PCI_CFG_ADDRESS >> PAGE_SHIFT,
+			    vma->vm_end - vma->vm_start, vma->vm_page_prot)) {
+	        return -EAGAIN;
+	}
 	return 0;
 }
 
-static struct file_operations ucmem_ops = {
+static struct file_operations pci_cfg_ops = {
 	.owner		= THIS_MODULE,
-	.mmap		= ucmem_mmap,
+	.mmap		= pci_cfg_mmap,
 };
 
 /* TODO: This is a total hack to make ksched work as a module */
@@ -438,65 +437,11 @@ static void __exit ksched_cpuidle_unhijack(void)
 	cpuidle_resume_and_unlock();
 }
 
-static pte_t *walk_page_table(struct mm_struct *mm, size_t addr)
-{
-  pgd_t *pgd;
-  p4d_t *p4d;
-  pud_t *pud;
-  pmd_t *pmd;
-  pte_t *ptep;
-
-  pgd = pgd_offset(mm, addr);
-
-  if (pgd_none(*pgd) || unlikely(pgd_bad(*pgd)))
-    return NULL;
-
-  p4d = p4d_offset(pgd, addr);
-  if (p4d_none(*p4d) || unlikely(p4d_bad(*p4d)))
-    return NULL;
-
-  pud = pud_offset(p4d, addr);
-  if (pud_none(*pud) || unlikely(pud_bad(*pud)))
-    return NULL;
-
-  pmd = pmd_offset(pud, addr);
-  if (pmd_none(*pmd))
-    return NULL;
-
-  ptep = pte_offset_map(pmd, addr);
-
-  return ptep;
-}
-
-static int change_pte(size_t address)
-{
-  pte_t *p = walk_page_table(current->active_mm, address);
-  pte_t new_pte;
-
-  if (!p) {
-    printk(KERN_ERR "ksched: Cannot find the pte.");
-    return -EFAULT;
-  }
-  printk(KERN_INFO "ksched: old pte = %lu\n", p->pte);
-
-  // Set the UC bit.
-  new_pte = (pte_t){((p->pte) | (cachemode2protval(_PAGE_CACHE_MODE_UC)))};
-  set_pte(p, new_pte);
-  
-  // Flush the old tlb entry.
-  __flush_tlb_one_kernel(address);
-  printk(KERN_INFO "ksched: new pte = %lu\n",
-         walk_page_table(current->active_mm, address)->pte);
-
-  return 0;
-}
-
 static int __init ksched_init(void)
 {
 	dev_t devno_ksched = MKDEV(KSCHED_MAJOR, KSCHED_MINOR);
-	dev_t devno_ucmem;
-	int ret;
-	int i;
+        dev_t devno_pci_cfg;
+        int ret;
 
 	if (!cpu_has(&boot_cpu_data, X86_FEATURE_MWAIT)) {
 		printk(KERN_ERR "ksched: mwait support is required");
@@ -525,45 +470,22 @@ static int __init ksched_init(void)
 
 	printk(KERN_INFO "ksched: API V2 enabled");
 
-	/* Register the char dev for mmapping uncached mem. */
-        devno_ucmem = MKDEV(UCMEM_MAJOR, UCMEM_MINOR);
-	ret = register_chrdev_region(devno_ucmem, 1, "ucmem");
+        devno_pci_cfg = MKDEV(PCI_CFG_MAJOR, PCI_CFG_MINOR);
+	ret = register_chrdev_region(devno_pci_cfg, 1, "pcicfg");
 	if (ret) {
-	  goto fail_ucmem_reg_cdev_region;
+	  goto fail_pci_cfg_reg_cdev_region;
 	}
-	cdev_init(&ucmem_cdev, &ucmem_ops);
-	ret = cdev_add(&ucmem_cdev, devno_ucmem, 1);
+	cdev_init(&pci_cfg_cdev, &pci_cfg_ops);
+	ret = cdev_add(&pci_cfg_cdev, devno_pci_cfg, 1);
 	if (ret) {
-	  goto fail_ucmem_cdev_add;
+	  goto fail_pci_cfg_cdev_add;
 	}
-
-	/* Allocate memory for monitoring. */
-	probed_mem = vmalloc_node(PAGE_SIZE, UCMEM_NUMA_NODE);
-	if (!probed_mem) {
-	  printk(KERN_ERR "ksched: fail to vmalloc memory.");
-	  goto fail_vmalloc_node;
-	}
-
-	/* Flush the memory to ensure it does not reside in cache. */
-	for (i = 0; i < PAGE_SIZE; i += cache_line_size()) {
-	  char *ptr = (char *)(probed_mem) + i;
-	  clflush((volatile void *)ptr);
-	}
-
-	/* Set UC attr. */
-	if ((ret = change_pte((size_t)probed_mem)) < 0) {
-	  goto fail_set_uc_attr;
-	}
-
+	
 	return 0;
-
-fail_set_uc_attr:
-	vfree(probed_mem);
-fail_vmalloc_node:
-	cdev_del(&ucmem_cdev);
-fail_ucmem_cdev_add:
-	unregister_chrdev_region(devno_ucmem, 1);
-fail_ucmem_reg_cdev_region:
+	
+fail_pci_cfg_cdev_add:
+	unregister_chrdev_region(devno_pci_cfg, 1);
+fail_pci_cfg_reg_cdev_region:
 fail_hijack:
 	vfree(shm);
 fail_shm:
@@ -576,15 +498,14 @@ fail_ksched_cdev_add:
 static void __exit ksched_exit(void)
 {
 	dev_t devno_ksched = MKDEV(KSCHED_MAJOR, KSCHED_MINOR);
-	dev_t devno_ucmem = MKDEV(UCMEM_MAJOR, UCMEM_MINOR);
+        dev_t devno_pci_cfg = MKDEV(PCI_CFG_MAJOR, PCI_CFG_MINOR);
 
-	ksched_cpuidle_unhijack();
+        ksched_cpuidle_unhijack();
 	vfree(shm);
 	cdev_del(&ksched_cdev);
 	unregister_chrdev_region(devno_ksched, 1);
-	vfree(probed_mem);
-	cdev_del(&ucmem_cdev);
-	unregister_chrdev_region(devno_ucmem, 1);
+	cdev_del(&pci_cfg_cdev);
+	unregister_chrdev_region(devno_pci_cfg, 1);
 }
 
 module_init(ksched_init);
