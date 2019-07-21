@@ -36,6 +36,7 @@ static const struct init_entry iok_init_handlers[] = {
 	IOK_INITIALIZER(ksched),
 	IOK_INITIALIZER(sched),
 	IOK_INITIALIZER(simple),
+	IOK_INITIALIZER(mis),
 
 	/* control plane */
 	IOK_INITIALIZER(control),

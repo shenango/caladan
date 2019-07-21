@@ -6,10 +6,15 @@
 #include <string.h>
 
 #include <base/stddef.h>
+#include <base/log.h>
 
 #include "defs.h"
 #include "sched.h"
+#include "ksched.h"
+#include "pmc.h"
 
+/* a list of all processes */
+static LIST_HEAD(all_procs);
 /* a list of processes that are waiting for more cores */
 static LIST_HEAD(congested_procs);
 /* a list of processes that are using more than their guaranteed cores */
@@ -19,6 +24,7 @@ struct mis_data {
 	struct proc		*p;
 	unsigned int		is_congested:1;
 	struct list_node	congested_link;
+	struct list_node	all_link;
 
 	/* thread usage limits */
 	int			threads_guaranteed;
@@ -28,6 +34,10 @@ struct mis_data {
 	/* congestion info */
 	float			load;
 	uint64_t		standing_queue_us;
+
+	/* bandwidth monitoring */
+	int			threads_monitored;
+	uint64_t		llc_misses;
 };
 
 static bool mis_proc_is_preemptible(struct mis_data *cursd,
@@ -92,6 +102,7 @@ static int mis_attach(struct proc *p, struct sched_spec *cfg)
 	sd->threads_max = cfg->max_cores;
 	sd->threads_active = 0;
 	p->policy_data = (unsigned long)sd;
+	list_add(&all_procs, &sd->all_link);
 	return 0;
 }
 
@@ -101,6 +112,7 @@ static void mis_detach(struct proc *p)
 	int i, j;
 
 	mis_unmark_congested(sd);
+	list_del_from(&all_procs, &sd->all_link);
 
 	for (i = 0; i < NCPU; i++) {
 		if (cores[i] == sd)
@@ -112,6 +124,70 @@ static void mis_detach(struct proc *p)
 	}
 
 	free(sd);
+}
+
+static DEFINE_BITMAP(mis_sampled_cores, NCPU);
+
+static void mis_sample_bandwidth(void)
+{
+	struct mis_data *sd;
+	uint64_t sel = PMC_ARCH_LLC_MISSES | PMC_ESEL_USR | PMC_ESEL_OS |
+		       PMC_ESEL_ANY | PMC_ESEL_ENABLE;
+	int core, sib, tmp;
+
+	bitmap_clear(mis_sampled_cores, NCPU);
+	list_for_each(&all_procs, sd, all_link) {
+		sd->threads_monitored = 0;
+		sd->llc_misses = 0;
+	}
+
+	sched_for_each_allowed_sibling(core, tmp) {
+		struct mis_data *sd1, *sd2;
+
+		sib = sched_siblings[core];
+		sd1 = cores[core];
+		sd2 = cores[sib];
+
+		if (!sd1 && !sd2)
+			continue;
+		if (sd1 &&
+		    (!sd2 || sd1->threads_monitored < sd2->threads_monitored)) {
+			sd1->threads_monitored++;
+			ksched_enqueue_pmc(sib, sel);
+			bitmap_set(mis_sampled_cores, sib);
+		} else {
+			sd2->threads_monitored++;
+			ksched_enqueue_pmc(core, sel);
+			bitmap_set(mis_sampled_cores, core);
+		}
+	}
+}
+
+static void mis_sample_bandwidth_finish(void)
+{
+	struct mis_data *sd;
+	uint64_t pmc;
+	int i;
+
+	bitmap_for_each_set(mis_sampled_cores, NCPU, i) {
+		sd = cores[sched_siblings[i]];
+		if (unlikely(!ksched_poll_pmc(i, &pmc))) {
+			if (sd)
+				sd->threads_monitored--;
+			log_err_ratelimited("mis: pmc not ready");
+			continue;
+		}
+		if (sd)
+			sd->llc_misses += pmc;
+	}
+
+	list_for_each(&all_procs, sd, all_link) {
+		log_info("mis: proc %d monitored %d L3Miss %f",
+			 sd->p->pid, sd->threads_monitored,
+			 (float)sd->llc_misses /
+			 (float)sd->threads_monitored *
+			 (float)sd->threads_active);
+	}
 }
 
 static int mis_run_kthread_on_core(struct proc *p, unsigned int core)
@@ -144,7 +220,7 @@ static unsigned int mis_choose_core(struct proc *p)
 {
 	struct mis_data *sd = (struct mis_data *)p->policy_data;
 	struct thread *th;
-	unsigned int core;
+	unsigned int core, tmp;
 
 	/* first try to find a previously used core (to improve locality) */
 	list_for_each(&p->idle_threads, th, idle_link) {
@@ -171,7 +247,7 @@ static unsigned int mis_choose_core(struct proc *p)
 		return core;
 
 	/* finally look for any preemptible core */
-	for (core = 0; core < NCPU; core++) {
+	sched_for_each_allowed_core(core, tmp) {
 		if (cores[core] == sd)
 			continue;
 		if (cores[core] &&
@@ -279,10 +355,15 @@ static struct mis_data *mis_choose_kthread(unsigned int core)
 	return list_top(&congested_procs, struct mis_data, congested_link);
 }
 
-static void mis_sched_poll(bitmap_ptr_t idle)
+static void mis_sched_poll(uint64_t now, int idle_cnt, bitmap_ptr_t idle)
 {
+	static uint64_t sampling_time = 0;
+	static uint64_t last_time = 0;
 	struct mis_data *sd;
 	unsigned int core;
+
+	if (idle_cnt == 0)
+		goto skip_idle;
 
 	bitmap_for_each_set(idle, NCPU, core) {
 		if (cores[core] != NULL)
@@ -298,6 +379,18 @@ static void mis_sched_poll(bitmap_ptr_t idle)
 			bitmap_set(mis_idle_cores, core);
 			mis_mark_congested(sd);
 		}
+	}
+
+skip_idle:
+	if (now - last_time > 2000000) {
+		last_time = now;
+		sampling_time = now;
+		mis_sample_bandwidth();
+	}
+
+	if (sampling_time && now - sampling_time > 10) {
+		sampling_time = 0;
+		mis_sample_bandwidth_finish();
 	}
 }
 

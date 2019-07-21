@@ -26,9 +26,11 @@ unsigned int sched_dp_core;	/* used for the iokernel's dataplane */
 unsigned int sched_ctrl_core;	/* used for the iokernel's controlplane */
 unsigned int sched_linux_core;	/* used by normal linux scheduler */
 
-/* an array of core numbers that need to be polled */
-static unsigned int poll_cores[NCPU];
-static int poll_cores_nr;
+/* arrays of core numbers for fast polling */
+unsigned int sched_cores_tbl[NCPU];
+int sched_cores_nr;
+unsigned int sched_siblings_tbl[NCPU];
+int sched_siblings_nr;
 
 struct core_state {
 	struct thread	*pending_th;  /* a thread waiting run */
@@ -314,16 +316,14 @@ void sched_poll(void)
 	DEFINE_BITMAP(idle, NCPU);
 	struct core_state *s;
 	uint64_t now;
-	int i, core;
-	bool idled = false;
+	int i, core, idle_cnt = 0;
 
 	/*
 	 * fast pass --- runs every poll loop
 	 */
 
 	bitmap_init(idle, NCPU, false);
-	for (i = 0; i < poll_cores_nr; i++) {
-		core = poll_cores[i];
+	sched_for_each_allowed_core(core, i) {
 		s = &state[core];
 
 		/* check if a pending context switch finished */
@@ -356,7 +356,7 @@ void sched_poll(void)
 			}
 			s->idle = true;
 			bitmap_set(idle, core);
-			idled = true;
+			idle_cnt++;
 		}
 	}
 
@@ -377,8 +377,7 @@ void sched_poll(void)
 	 * final pass --- let the scheduler policy decide how to respond
 	 */
 
-	if (idled)
-		sched_ops->sched_poll(idle);
+	sched_ops->sched_poll(now, idle_cnt, idle);
 	ksched_send_intrs();
 }
 
@@ -524,8 +523,20 @@ int sched_init(void)
 		}
 	}
 
+	/* generate polling arrays */
 	bitmap_for_each_set(sched_allowed_cores, NCPU, i)
-		poll_cores[poll_cores_nr++] = i;
+		sched_cores_tbl[sched_cores_nr++] = i;
+	bitmap_for_each_set(sched_allowed_cores, NCPU, i) {
+		bool found = false;
+		for (sib = 0; sib < sched_siblings_nr; sib++) {
+			if (sched_siblings[sched_siblings_tbl[sib]] == i) {
+				found = true;
+				break;
+			}
+		}
+		if (!found)
+			sched_siblings_tbl[sched_siblings_nr++] = i;
+	}
 
 	return 0;
 }

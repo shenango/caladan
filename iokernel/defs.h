@@ -318,6 +318,7 @@ extern bool rx_send_to_runtime(struct proc *p, uint32_t hash, uint64_t cmd,
 extern int ksched_init(void);
 extern int sched_init(void);
 extern int simple_init(void);
+extern int mis_init(void);
 extern int control_init(void);
 extern int dpdk_init(void);
 extern int rx_init(void);
