@@ -24,9 +24,21 @@ static DEFINE_BITMAP(mis_idle_cores, NCPU);
 /* a bitmap of all cores with performance counters being sampled */
 static DEFINE_BITMAP(mis_sampled_cores, NCPU);
 
+/* this performance counter measures LLC misses as a proxy for mem bandwidth */
+#define PMC_LLC_MISSES (PMC_ARCH_LLC_MISSES | PMC_ESEL_USR | PMC_ESEL_OS | \
+			PMC_ESEL_ANY | PMC_ESEL_ENABLE)
+
+/* poll the global (system-wide) memory bandwidth over this time interval */
+#define MIS_BW_MEASURE_INTERVAL	50
+/* wait for performance counter results over this time interval */
+#define MIS_BW_PUNISH_INTERVAL	10
+/* punish processes consuming high bandwidth over this threshold */
+#define MIS_BW_THRESHOLD	20000 /* FIXME: should not be hard coded */
+
 struct mis_data {
 	struct proc		*p;
 	unsigned int		is_congested:1;
+	unsigned int		is_bwlimited:1;
 	struct list_node	all_link;
 	struct list_node	congested_link;
 	struct list_node	bwlimited_link;
@@ -120,7 +132,8 @@ static void mis_detach(struct proc *p)
 
 	mis_unmark_congested(sd);
 	list_del_from(&all_procs, &sd->all_link);
-	//list_del_from(&bwlimited_procs, &sd->bwlimited_link);
+	if (sd->is_bwlimited)
+		list_del_from(&bwlimited_procs, &sd->bwlimited_link);
 
 	for (i = 0; i < NCPU; i++) {
 		if (cores[i] == sd)
@@ -134,11 +147,9 @@ static void mis_detach(struct proc *p)
 	free(sd);
 }
 
-static void mis_sample_bandwidth(void)
+static void mis_sample_pmc(uint64_t sel)
 {
 	struct mis_data *sd;
-	uint64_t sel = PMC_ARCH_LLC_MISSES | PMC_ESEL_USR | PMC_ESEL_OS |
-		       PMC_ESEL_ANY | PMC_ESEL_ENABLE;
 	int core, sib, tmp;
 
 	bitmap_clear(mis_sampled_cores, NCPU);
@@ -193,6 +204,9 @@ static struct mis_data *mis_choose_bandwidth_victim(void)
 					 (float)sd->threads_active;
 		log_info("mis: proc %d monitored %d L3Miss %f",
 			 sd->p->pid, sd->threads_monitored, estimated_l3miss);
+		if (sd->threads_limit == 0 ||
+		    sd->threads_limit <= sd->threads_guaranteed)
+			continue;
 		if (!victim || estimated_l3miss > highest_l3miss) {
 			highest_l3miss = estimated_l3miss;
 			victim = sd;
@@ -202,22 +216,46 @@ static struct mis_data *mis_choose_bandwidth_victim(void)
 	return victim;
 }
 
-#define MIS_BW_PROBE_INTERVAL	50
-
 static void mis_bandwidth_state_machine(uint64_t now)
 {
+	static bool bw_punish_triggered = false;
+	static uint64_t last_tsc = 0, last_bw_measure_ts = 0, last_bw_punish_ts;
 	static uint32_t last_cas = 0;
-	static uint64_t last_bw_ts = 0;
+	uint64_t tsc;
+	uint32_t cur_cas;
 	float bw_estimate;
 
-	if (now - last_bw_ts > MIS_BW_PROBE_INTERVAL) {
-		uint32_t cur_cas = get_cas_count_all();
-		bw_estimate = (float)(cur_cas - last_cas) /
-			      ((float)microtime() - (float)last_bw_ts);
-		last_bw_ts = now;
-		last_cas = cur_cas;
-		log_info_ratelimited("bw estimate %f", bw_estimate);
+	/* punish a process that is using too much bandwidth */
+	if (bw_punish_triggered &&
+	    now - last_bw_punish_ts >= MIS_BW_PUNISH_INTERVAL) {
+		struct mis_data *sd;
+
+		bw_punish_triggered = false;
+		sd = mis_choose_bandwidth_victim();
 	}
+
+	/* check if it's time to sample bandwidth */
+	if (now - last_bw_measure_ts < MIS_BW_MEASURE_INTERVAL)
+		return;
+
+	/* update the bandwidth estimate */
+	barrier();
+	tsc = rdtsc();
+	barrier();
+	cur_cas = get_cas_count_all();
+	bw_estimate = (float)(cur_cas - last_cas) / (float)(tsc - last_tsc);
+	last_bw_measure_ts = now;
+	last_cas = cur_cas;
+	last_tsc = tsc;
+
+	/* check if the bandwidth limit has been exceeded */
+	if (bw_estimate > MIS_BW_THRESHOLD) {
+		mis_sample_pmc(PMC_LLC_MISSES);
+		bw_punish_triggered = true;
+		last_bw_punish_ts = microtime();
+	}
+
+	log_info_ratelimited("bw estimate %f", bw_estimate);
 }
 
 static int mis_run_kthread_on_core(struct proc *p, unsigned int core)
@@ -356,7 +394,7 @@ static void mis_update_congestion_info(struct mis_data *sd)
 }
 
 static void mis_notify_congested(struct proc *p, bitmap_ptr_t threads,
-				    bitmap_ptr_t io)
+				 bitmap_ptr_t io)
 {
 	struct mis_data *sd = (struct mis_data *)p->policy_data;
 	int ret;
