@@ -6,6 +6,8 @@
 #include "mlx5.h"
 #include "mlx5_ifc.h"
 
+#define PORT_MATCH_BITS 10
+
 static struct mlx5dv_dr_domain		*dmn;
 static unsigned int		nr_rxq;
 static DEFINE_SPINLOCK(direct_rule_lock);
@@ -19,7 +21,18 @@ struct tbl {
 	struct mlx5dv_dr_action		*ingress_action;
 };
 
-/* root level flow table */
+struct port_matcher_tbl {
+	struct tbl		tbl;
+	struct mlx5dv_dr_matcher		*match;
+	unsigned int		port_no_bits;
+	uint8_t ipproto;
+	bool use_dst;
+	size_t match_bit_off;
+	size_t match_bit_sz;
+	struct mlx5dv_dr_rule		*rules[];
+};
+
+/* level 0 flow table (root) */
 static struct mlx5dv_dr_table		*root_tbl;
 static struct mlx5dv_dr_matcher		*match_mac_and_tport;
 static struct mlx5dv_dr_matcher		*match_just_mac;
@@ -27,17 +40,18 @@ static struct mlx5dv_dr_rule		*root_tcp_rule;
 static struct mlx5dv_dr_rule		*root_udp_rule;
 static struct mlx5dv_dr_rule		*root_catchall_rule;
 
-/* second level flow tables */
+/* level 1 flow tables */
 static struct tbl		tcp_tbl;
 static struct tbl		udp_tbl;
 
-static struct mlx5dv_dr_matcher		*tcp_tbl_5tuple_match;
+static struct mlx5dv_dr_matcher		*udp_tbl_dport_match;
+static struct mlx5dv_dr_matcher		*tcp_tbl_dport_match;
 
-#define UDP_SPORT_BITS		10
-#define UDP_SPORT_NENTRIES		(1 << UDP_SPORT_BITS)
-static struct mlx5dv_dr_matcher		*udp_sport_match;
-static struct mlx5dv_dr_matcher		*udp_tbl_5tuple_match;
-static struct mlx5dv_dr_rule		*udp_rules[UDP_SPORT_NENTRIES];
+/* level 2 flow tables */
+static struct port_matcher_tbl		*tcp_dport_tbl;
+static struct port_matcher_tbl		*tcp_sport_tbl;
+static struct port_matcher_tbl		*udp_dport_tbl;
+static struct port_matcher_tbl		*udp_sport_tbl;
 
 /* last level flow groups */
 static struct tbl		fg_tbl[NCPU];
@@ -51,11 +65,6 @@ static union match empty_match = {
 enum dr_matcher_criteria {
 	DR_MATCHER_CRITERIA_EMPTY		= 0,
 	DR_MATCHER_CRITERIA_OUTER		= 1 << 0,
-	DR_MATCHER_CRITERIA_MISC		= 1 << 1,
-	DR_MATCHER_CRITERIA_INNER		= 1 << 2,
-	DR_MATCHER_CRITERIA_MISC2		= 1 << 3,
-	DR_MATCHER_CRITERIA_MISC3		= 1 << 4,
-	DR_MATCHER_CRITERIA_MAX 		= 1 << 5,
 };
 
 static int mlx5_tbl_init(struct tbl *tbl, int level, struct mlx5dv_dr_action *default_egress)
@@ -82,6 +91,64 @@ static int mlx5_tbl_init(struct tbl *tbl, int level, struct mlx5dv_dr_action *de
 	return 0;
 }
 
+static struct port_matcher_tbl *alloc_port_matcher(uint8_t ipproto,
+		      bool use_dst, unsigned int port_bits)
+{
+	int i, ret, pos = 0;
+	union match mask = {0};
+	struct port_matcher_tbl *t;
+	struct mlx5dv_dr_action *action[1];
+	unsigned int nrules = 1 << port_bits;
+
+	t = calloc(1, sizeof(*t) + nrules * sizeof(struct mlx5dv_dr_rule *));
+	if (!t)
+		return NULL;
+
+	t->port_no_bits = port_bits;
+	t->ipproto = ipproto;
+	t->use_dst = use_dst;
+
+	ret = mlx5_tbl_init(&t->tbl, 2, fg_tbl[0].ingress_action);
+	if (ret)
+		return NULL;
+
+	if (ipproto == IPPROTO_TCP && use_dst) {
+		t->match_bit_off = __devx_bit_off(fte_match_param, outer_headers.tcp_dport);
+		t->match_bit_sz = __devx_bit_sz(fte_match_param, outer_headers.tcp_dport);
+	} else if (ipproto == IPPROTO_TCP && !use_dst) {
+		t->match_bit_off = __devx_bit_off(fte_match_param, outer_headers.tcp_sport);
+		t->match_bit_sz = __devx_bit_sz(fte_match_param, outer_headers.tcp_sport);
+	} else if (ipproto == IPPROTO_UDP && use_dst) {
+		t->match_bit_off = __devx_bit_off(fte_match_param, outer_headers.udp_dport);
+		t->match_bit_sz = __devx_bit_sz(fte_match_param, outer_headers.udp_dport);
+	} else if (ipproto == IPPROTO_UDP && !use_dst) {
+		t->match_bit_off = __devx_bit_off(fte_match_param, outer_headers.udp_sport);
+		t->match_bit_sz = __devx_bit_sz(fte_match_param, outer_headers.udp_sport);
+	} else {
+		BUG();
+	}
+
+	mask.size = DEVX_ST_SZ_BYTES(fte_match_param);
+	DEVX_SET(fte_match_param, mask.buf, outer_headers.ip_version, 4);
+	_devx_set(mask.buf, __devx_mask(port_bits), t->match_bit_off, t->match_bit_sz);
+
+	t->match = mlx5dv_dr_matcher_create(t->tbl.tbl, 0,
+			      DR_MATCHER_CRITERIA_OUTER, &mask.params);
+	if (!t->match)
+		return NULL;
+
+	for (i = 0; i < nrules; i++) {
+		_devx_set(mask.buf, i, t->match_bit_off, t->match_bit_sz);
+		action[0] = fg_tbl[pos++ % nr_rxq].ingress_action;
+		t->rules[i] = mlx5dv_dr_rule_create(t->match, &mask.params, 1, action);
+		if (!t->rules[i])
+				return NULL;
+	}
+
+	return t;
+}
+
+
 static int mlx5_init_fg_tables(void)
 {
 	int i, ret;
@@ -92,7 +159,7 @@ static int mlx5_init_fg_tables(void)
 		if (!fg_fwd_action[i])
 			return -errno;
 
-		ret = mlx5_tbl_init(&fg_tbl[i], 2, fg_fwd_action[i]);
+		ret = mlx5_tbl_init(&fg_tbl[i], 3, fg_fwd_action[i]);
 		if (ret)
 			return ret;
 
@@ -105,69 +172,56 @@ static int mlx5_init_fg_tables(void)
 static int mlx5_init_udp(void)
 {
 	int ret;
-	unsigned int i, pos = 0;
-	struct mlx5dv_dr_action *action[1];
 	union match mask = {0};
-	mask.size = DEVX_ST_SZ_BYTES(fte_match_param);
 
-	ret = mlx5_tbl_init(&udp_tbl, 1, fg_tbl[0].ingress_action);
+	udp_dport_tbl = alloc_port_matcher(IPPROTO_UDP, true, PORT_MATCH_BITS);
+	if (!udp_dport_tbl)
+		return -EINVAL;
+
+	udp_sport_tbl = alloc_port_matcher(IPPROTO_UDP, false, PORT_MATCH_BITS);
+	if (!udp_sport_tbl)
+		return -EINVAL;
+
+	ret = mlx5_tbl_init(&udp_tbl, 1, udp_dport_tbl->tbl.ingress_action);
 	if (ret)
 		return ret;
 
+	mask.size = DEVX_ST_SZ_BYTES(fte_match_param);
 	DEVX_SET(fte_match_param, mask.buf, outer_headers.ip_version, 4);
-	DEVX_SET(fte_match_param, mask.buf, outer_headers.udp_sport, __devx_mask(UDP_SPORT_BITS));
-
-	udp_sport_match = mlx5dv_dr_matcher_create(udp_tbl.tbl, 1, DR_MATCHER_CRITERIA_OUTER, &mask.params);
-	if (!udp_sport_match)
-		return -errno;
-
-	for (i = 0; i < UDP_SPORT_NENTRIES; i++) {
-		DEVX_SET(fte_match_param, mask.buf, outer_headers.udp_sport, i);
-		action[0] = fg_tbl[pos++ % nr_rxq].ingress_action;
-		udp_rules[i] = mlx5dv_dr_rule_create(udp_sport_match, &mask.params, 1, action);
-		if (!udp_rules[i])
-				return -errno;
-	}
-
-	memset(mask.buf, 0, sizeof(mask.buf));
-	DEVX_SET(fte_match_param, mask.buf, outer_headers.ip_version, 4);
-	DEVX_SET(fte_match_param, mask.buf, outer_headers.udp_sport, __devx_mask(16));
 	DEVX_SET(fte_match_param, mask.buf, outer_headers.udp_dport, __devx_mask(16));
-	DEVX_SET(fte_match_param, mask.buf, outer_headers.src_ipv4_src_ipv6.ipv4_layout.ipv4, __devx_mask(32));
-	DEVX_SET(fte_match_param, mask.buf, outer_headers.dst_ipv4_dst_ipv6.ipv4_layout.ipv4, __devx_mask(32));
 
-	udp_tbl_5tuple_match = mlx5dv_dr_matcher_create(udp_tbl.tbl, 0,
+	udp_tbl_dport_match = mlx5dv_dr_matcher_create(udp_tbl.tbl, 0,
 		    DR_MATCHER_CRITERIA_OUTER, &mask.params);
-	if (!udp_tbl_5tuple_match)
+	if (!udp_tbl_dport_match)
 		return -errno;
 
 	return 0;
 }
 
-
-static int mlx5_init_transport_tables(void)
+static int mlx5_init_tcp(void)
 {
 	int ret;
 	union match mask = {0};
 
-	ret = mlx5_tbl_init(&tcp_tbl, 1, fg_tbl[0].ingress_action);
-	if (ret)
-		return ret;
+	tcp_dport_tbl = alloc_port_matcher(IPPROTO_TCP, true, PORT_MATCH_BITS);
+	if (!tcp_dport_tbl)
+		return -EINVAL;
 
-	ret = mlx5_init_udp();
+	tcp_sport_tbl = alloc_port_matcher(IPPROTO_TCP, false, PORT_MATCH_BITS);
+	if (!tcp_sport_tbl)
+		return -EINVAL;
+
+	ret = mlx5_tbl_init(&tcp_tbl, 1, tcp_dport_tbl->tbl.ingress_action);
 	if (ret)
 		return ret;
 
 	mask.size = DEVX_ST_SZ_BYTES(fte_match_param);
 	DEVX_SET(fte_match_param, mask.buf, outer_headers.ip_version, 4);
-	DEVX_SET(fte_match_param, mask.buf, outer_headers.tcp_sport, __devx_mask(16));
 	DEVX_SET(fte_match_param, mask.buf, outer_headers.tcp_dport, __devx_mask(16));
-	DEVX_SET(fte_match_param, mask.buf, outer_headers.src_ipv4_src_ipv6.ipv4_layout.ipv4, __devx_mask(32));
-	DEVX_SET(fte_match_param, mask.buf, outer_headers.dst_ipv4_dst_ipv6.ipv4_layout.ipv4, __devx_mask(32));
 
-	tcp_tbl_5tuple_match = mlx5dv_dr_matcher_create(tcp_tbl.tbl, 0,
+	tcp_tbl_dport_match = mlx5dv_dr_matcher_create(tcp_tbl.tbl, 0,
 		    DR_MATCHER_CRITERIA_OUTER, &mask.params);
-	if (!tcp_tbl_5tuple_match)
+	if (!tcp_tbl_dport_match)
 		return -errno;
 
 	return 0;
@@ -219,35 +273,38 @@ static int mlx5_init_root_table(void)
 	return 0;
 }
 
-int mlx5_register_flow(unsigned int affinity, uint8_t ipproto, struct netaddr laddr, struct netaddr raddr, void **handle_out)
+int mlx5_register_flow(unsigned int affinity, struct trans_entry *e, void **handle_out)
 {
 	union match key = {0};
+
+	struct port_matcher_tbl *dst_tbl;
+
 	struct mlx5dv_dr_matcher *match;
 	struct mlx5dv_dr_action *action[1];
 	void *rule;
 
-	if (affinity > nr_rxq)
+	if (e->match != TRANS_MATCH_3TUPLE)
 		return -EINVAL;
 
-	if (ipproto != IPPROTO_TCP && ipproto != IPPROTO_UDP)
-		return - EINVAL;
-
-	key.size = sizeof(key.buf);
+	key.size = DEVX_ST_SZ_BYTES(fte_match_param);
 	DEVX_SET(fte_match_param, key.buf, outer_headers.ip_version, 4);
-	DEVX_SET(fte_match_param, key.buf, outer_headers.src_ipv4_src_ipv6.ipv4_layout.ipv4, raddr.ip);
-	DEVX_SET(fte_match_param, key.buf, outer_headers.dst_ipv4_dst_ipv6.ipv4_layout.ipv4, laddr.ip);
 
-	if (ipproto == IPPROTO_TCP) {
-		DEVX_SET(fte_match_param, key.buf, outer_headers.tcp_sport, raddr.port);
-		DEVX_SET(fte_match_param, key.buf, outer_headers.tcp_dport, laddr.port);
-		match = tcp_tbl_5tuple_match;
-	} else {
-		DEVX_SET(fte_match_param, key.buf, outer_headers.udp_sport, raddr.port);
-		DEVX_SET(fte_match_param, key.buf, outer_headers.udp_dport, laddr.port);
-		match = udp_tbl_5tuple_match;
+	switch (e->proto) {
+		case IPPROTO_TCP:
+			match = tcp_tbl_dport_match;
+			dst_tbl = tcp_sport_tbl;
+			DEVX_SET(fte_match_param, key.buf, outer_headers.tcp_dport, e->laddr.port);
+			break;
+		case IPPROTO_UDP:
+			match = udp_tbl_dport_match;
+			dst_tbl = udp_sport_tbl;
+			DEVX_SET(fte_match_param, key.buf, outer_headers.udp_dport, e->laddr.port);
+			break;
+		default:
+			return -EINVAL;
 	}
 
-	action[0] = fg_tbl[affinity].ingress_action;
+	action[0] = dst_tbl->tbl.ingress_action;
 
 	spin_lock_np(&direct_rule_lock);
 	rule = mlx5dv_dr_rule_create(match, &key.params, 1, action);
@@ -320,7 +377,11 @@ int mlx5_init_flows(int rxq_count)
 	if (ret)
 		return ret;
 
-	ret = mlx5_init_transport_tables();
+	ret = mlx5_init_udp();
+	if (ret)
+		return ret;
+
+	ret = mlx5_init_tcp();
 	if (ret)
 		return ret;
 

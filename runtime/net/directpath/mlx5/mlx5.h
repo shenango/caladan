@@ -58,7 +58,7 @@ extern struct ibv_context *context;
 extern int mlx5_transmit_one(struct direct_txq *t, struct mbuf *m);
 extern int mlx5_gather_rx(struct direct_rxq *rxq, struct mbuf **ms, unsigned int budget);
 extern int mlx5_steer_flows(unsigned int *new_fg_assignment);
-extern int mlx5_register_flow(unsigned int affininty, uint8_t ipproto, struct netaddr laddr, struct netaddr raddr, void **handle_out);
+extern int mlx5_register_flow(unsigned int affinity, struct trans_entry *e, void **handle_out);
 extern int mlx5_deregister_flow(void *handle);
 
 static inline unsigned int nr_inflight_tx(struct mlx5_txq *v)

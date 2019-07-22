@@ -197,23 +197,6 @@ const struct trans_ops tcp_conn_ops = {
  * Connection initialization
  */
 
-#ifdef DIRECTPATH
-static atomic64_t next_affinity;
-
-static void tcp_init_flow(tcpconn_t *c)
-{
-	struct flow_registration *f = &c->flow;
-
-	f->kthread_affinity = atomic64_fetch_and_add(&next_affinity, 1) % maxks;
-	f->e = &c->e;
-	f->ref = &c->ref;
-	f->release = tcp_conn_release_ref;
-}
-
-#else
-static inline void tcp_init_flow(tcpconn_t *c) {}
-#endif
-
 /**
  * tcp_conn_alloc - allocates a TCP connection struct
  *
@@ -301,9 +284,6 @@ int tcp_conn_attach(tcpconn_t *c, struct netaddr laddr, struct netaddr raddr)
 
 	c->attach_ts = microtime();
 
-	tcp_init_flow(c);
-	register_flow(&c->flow);
-
 	return 0;
 }
 
@@ -356,6 +336,9 @@ struct tcpqueue {
 	struct list_head	conns;
 	int			backlog;
 	bool			shutdown;
+
+	struct kref ref;
+	struct flow_registration flow;
 };
 
 static void tcp_queue_recv(struct trans_entry *e, struct mbuf *m)
@@ -398,6 +381,18 @@ const struct trans_ops tcp_queue_ops = {
 	.recv = tcp_queue_recv,
 };
 
+static void tcp_queue_release(struct rcu_head *h)
+{
+	tcpqueue_t *q = container_of(h, tcpqueue_t, e.rcu);
+	sfree(q);
+}
+
+static void tcp_queue_release_ref(struct kref *ref)
+{
+	tcpqueue_t *q = container_of(ref, tcpqueue_t, ref);
+	rcu_free(&q->e.rcu, tcp_queue_release);
+}
+
 /**
  * tcp_listen - creates a TCP listening queue for a local address
  * @laddr: the local address to listen on
@@ -430,12 +425,20 @@ int tcp_listen(struct netaddr laddr, int backlog, tcpqueue_t **q_out)
 	list_head_init(&q->conns);
 	q->backlog = backlog;
 	q->shutdown = false;
+	kref_init(&q->ref);
 
 	ret = trans_table_add(&q->e);
 	if (ret) {
 		sfree(q);
 		return ret;
 	}
+
+	q->flow.kthread_affinity = 0;
+	q->flow.e = &q->e;
+	q->flow.ref = &q->ref;
+	q->flow.release = tcp_queue_release_ref;
+
+	register_flow(&q->flow);
 
 	*q_out = q;
 	return 0;
@@ -482,6 +485,8 @@ static void __tcp_qshutdown(tcpqueue_t *q)
 
 	/* prevent ingress receive and error dispatch (after RCU period) */
 	trans_table_remove(&q->e);
+
+	deregister_flow(&q->flow);
 }
 
 /**
@@ -497,12 +502,6 @@ void tcp_qshutdown(tcpqueue_t *q)
 
 	/* wake up all pending threads */
 	waitq_release(&q->wq);
-}
-
-static void tcp_queue_release(struct rcu_head *h)
-{
-	tcpqueue_t *q = container_of(h, tcpqueue_t, e.rcu);
-	sfree(q);
 }
 
 /**
@@ -527,7 +526,7 @@ void tcp_qclose(tcpqueue_t *q)
 		tcp_conn_destroy(c);
 	}
 
-	rcu_free(&q->e.rcu, tcp_queue_release);
+	kref_put(&q->ref, tcp_queue_release_ref);
 }
 
 
@@ -1033,7 +1032,6 @@ void tcp_conn_shutdown_rx(tcpconn_t *c)
 
 	c->rx_closed = true;
 	waitq_release(&c->rx_wq);
-	deregister_flow(&c->flow);
 }
 
 static int tcp_conn_shutdown_tx(tcpconn_t *c)

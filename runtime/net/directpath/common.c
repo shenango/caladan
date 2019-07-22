@@ -105,7 +105,7 @@ static void flow_registration_worker(void *arg)
 		f = list_pop(&flow_to_register, struct flow_registration, flow_reg_link);
 		if (f) {
 			spin_unlock_np(&flow_worker_lock);
-			ret = net_ops.register_flow(f->kthread_affinity, f->e->proto, f->e->laddr, f->e->raddr, &f->hw_flow_handle);
+			ret = net_ops.register_flow(f->kthread_affinity, f->e, &f->hw_flow_handle);
 			WARN_ON(ret);
 			continue;
 		}

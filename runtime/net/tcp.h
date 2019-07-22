@@ -105,8 +105,6 @@ struct tcpconn {
 		uint64_t		attach_ts;
 	};
 	int			rep_acks;
-
-	struct flow_registration flow;
 };
 
 extern tcpconn_t *tcp_conn_alloc(void);

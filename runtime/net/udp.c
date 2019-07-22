@@ -155,23 +155,6 @@ static inline void udp_conn_put(udpconn_t *c)
 	kref_put(&c->ref, udp_release_conn_ref);
 }
 
-#ifdef DIRECTPATH
-static atomic64_t next_affinity;
-
-static void udp_init_flow(udpconn_t *c)
-{
-	struct flow_registration *f = &c->flow;
-
-	f->kthread_affinity = atomic64_fetch_and_add(&next_affinity, 1) % maxks;
-	f->e = &c->e;
-	f->ref = &c->ref;
-	f->release = udp_release_conn_ref;
-}
-
-#else
-static inline void udp_init_flow(udpconn_t *c) {}
-#endif
-
 /**
  * udp_dial - creates a UDP socket between a local and remote address
  * @laddr: the local UDP address
@@ -207,9 +190,6 @@ int udp_dial(struct netaddr laddr, struct netaddr raddr, udpconn_t **c_out)
 		return ret;
 	}
 
-	udp_init_flow(c);
-	register_flow(&c->flow);
-
 	*c_out = c;
 	return 0;
 }
@@ -244,6 +224,12 @@ int udp_listen(struct netaddr laddr, udpconn_t **c_out)
 		sfree(c);
 		return ret;
 	}
+
+	c->flow.kthread_affinity = 0;
+	c->flow.e = &c->e;
+	c->flow.ref = &c->ref;
+	c->flow.release = udp_release_conn_ref;
+	register_flow(&c->flow);
 
 	*c_out = c;
 	return 0;
@@ -525,7 +511,8 @@ void udp_close(udpconn_t *c)
 	c->outq_free = true;
 	spin_unlock_np(&c->outq_lock);
 
-	deregister_flow(&c->flow);
+	if (c->e.match == TRANS_MATCH_3TUPLE)
+		deregister_flow(&c->flow);
 
 	if (free_conn)
 		udp_conn_put(c);
@@ -539,6 +526,9 @@ void udp_close(udpconn_t *c)
 struct udpspawner {
 	struct trans_entry	e;
 	udpspawn_fn_t		fn;
+
+	struct kref ref;
+	struct flow_registration flow;
 };
 
 /* handles ingress packets with parallel threads */
@@ -578,6 +568,19 @@ const struct trans_ops udp_par_ops = {
 	.recv = udp_par_recv,
 };
 
+static void udp_release_spawner(struct rcu_head *h)
+{
+	udpspawner_t *s = container_of(h, udpspawner_t, e.rcu);
+	sfree(s);
+}
+
+static void udp_release_spawner_ref(struct kref *ref)
+{
+	udpspawner_t *s = container_of(ref, udpspawner_t, ref);
+	rcu_free(&s->e.rcu, udp_release_spawner);
+}
+
+
 /**
  * udp_create_spawner - creates a UDP spawner for ingress datagrams
  * @laddr: the local address to bind to
@@ -602,6 +605,7 @@ int udp_create_spawner(struct netaddr laddr, udpspawn_fn_t fn,
 	if (!s)
 		return -ENOMEM;
 
+	kref_init(&s->ref);
 	trans_init_3tuple(&s->e, IPPROTO_UDP, &udp_par_ops, laddr);
 	s->fn = fn;
 	ret = trans_table_add(&s->e);
@@ -610,14 +614,14 @@ int udp_create_spawner(struct netaddr laddr, udpspawn_fn_t fn,
 		return ret;
 	}
 
+	s->flow.kthread_affinity = 0;
+	s->flow.e = &s->e;
+	s->flow.ref = &s->ref;
+	s->flow.release = udp_release_spawner_ref;
+	register_flow(&s->flow);
+
 	*s_out = s;
 	return 0;
-}
-
-static void udp_release_spawner(struct rcu_head *h)
-{
-	udpspawner_t *s = container_of(h, udpspawner_t, e.rcu);
-	sfree(s);
 }
 
 /**
@@ -627,7 +631,8 @@ static void udp_release_spawner(struct rcu_head *h)
 void udp_destroy_spawner(udpspawner_t *s)
 {
 	trans_table_remove(&s->e);
-	rcu_free(&s->e.rcu, udp_release_spawner);
+	deregister_flow(&s->flow);
+	kref_put(&s->ref, udp_release_spawner_ref);
 }
 
 /**

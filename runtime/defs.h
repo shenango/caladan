@@ -452,11 +452,12 @@ struct direct_rxq {
 
 struct direct_txq {};
 
+struct trans_entry;
 struct net_driver_ops {
 	int (*rx_batch)(struct direct_rxq *rxq, struct mbuf **ms, unsigned int budget);
 	int (*tx_single)(struct direct_txq *txq, struct mbuf *m);
 	int (*steer_flows)(unsigned int *new_fg_assignment);
-	int (*register_flow)(unsigned int affininty, uint8_t proto, struct netaddr laddr, struct netaddr raddr, void **handle_out);
+	int (*register_flow)(unsigned int affininty, struct trans_entry *e, void **handle_out);
 	int (*deregister_flow)(void *handle);
 };
 
