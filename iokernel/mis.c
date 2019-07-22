@@ -83,7 +83,7 @@ static void mis_cleanup_core(unsigned int core)
 	if (cores[core])
 		cores[core]->threads_active--;
 	cores[core] = NULL;
-	for (i = 1; i < NHIST; i++)
+	for (i = NHIST; i > 0; i--)
 		hist[core][i] = hist[core][i - 1];
 	hist[core][0] = sd;
 }
