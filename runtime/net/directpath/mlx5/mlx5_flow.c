@@ -278,7 +278,8 @@ int mlx5_steer_flows(unsigned int *new_fg_assignment)
 	struct tbl *tbl;
 	struct ibv_qp *new_qp, *old_qp;
 
-	spin_lock_np(&direct_rule_lock);
+
+	postsend_lock(dmn);
 
 	for (i = 0; i < nr_rxq; i++) {
 		if (new_fg_assignment[i] == fg_qp_assignment[i])
@@ -296,7 +297,7 @@ int mlx5_steer_flows(unsigned int *new_fg_assignment)
 		fg_qp_assignment[i] = new_fg_assignment[i];
 	}
 
-	spin_unlock_np(&direct_rule_lock);
+	postsend_unlock(dmn);
 
 	return ret;
 
