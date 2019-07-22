@@ -55,7 +55,7 @@ static void simple_cleanup_core(unsigned int core)
 	if (cores[core])
 		cores[core]->threads_active--;
 	cores[core] = NULL;
-	for (i = NHIST; i > 0; i--)
+	for (i = NHIST-1; i > 0; i--)
 		hist[core][i] = hist[core][i - 1];
 	hist[core][0] = sd;
 }
