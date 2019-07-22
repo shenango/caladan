@@ -212,7 +212,7 @@ static void mis_bandwidth_state_machine(uint64_t now)
 
 	if (now - last_bw_ts > MIS_BW_PROBE_INTERVAL) {
 		uint32_t cur_cas = get_cas_count_all();
-		bw_estimate = ((float)cur_cas - (float)last_cas) /
+		bw_estimate = (float)(cur_cas - last_cas) /
 			      ((float)microtime() - (float)last_bw_ts);
 		last_bw_ts = now;
 		last_cas = cur_cas;
