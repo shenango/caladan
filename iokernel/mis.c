@@ -33,7 +33,8 @@ static DEFINE_BITMAP(mis_sampled_cores, NCPU);
 /* wait for performance counter results over this time interval */
 #define MIS_BW_PUNISH_INTERVAL	10
 /* punish processes consuming high bandwidth over this threshold */
-#define MIS_BW_THRESHOLD	20000 /* FIXME: should not be hard coded */
+#define MIS_BW_HIGH_WATERMARK	0.10 /* FIXME: should not be hard coded */
+#define MIS_BW_LOW_WATERMARK	0.095 /* FIXME: should not be hard coded */
 
 struct mis_data {
 	struct proc		*p;
@@ -202,8 +203,8 @@ static struct mis_data *mis_choose_bandwidth_victim(void)
 		float estimated_l3miss = (float)sd->llc_misses /
 					 (float)sd->threads_monitored *
 					 (float)sd->threads_active;
-		log_info("mis: proc %d monitored %d L3Miss %f",
-			 sd->p->pid, sd->threads_monitored, estimated_l3miss);
+		// log_info("mis: proc %d monitored %d L3Miss %f",
+		//	 sd->p->pid, sd->threads_monitored, estimated_l3miss);
 		if (sd->threads_limit == 0 ||
 		    sd->threads_limit <= sd->threads_guaranteed)
 			continue;
@@ -229,13 +230,12 @@ static void mis_bandwidth_state_machine(uint64_t now)
 	if (bw_punish_triggered &&
 	    now - last_bw_punish_ts >= MIS_BW_PUNISH_INTERVAL) {
 		struct mis_data *sd;
-
-		bw_punish_triggered = false;
 		sd = mis_choose_bandwidth_victim();
 	}
 
 	/* check if it's time to sample bandwidth */
-	if (now - last_bw_measure_ts < MIS_BW_MEASURE_INTERVAL)
+	if (!bw_punish_triggered &&
+	    now - last_bw_measure_ts < MIS_BW_MEASURE_INTERVAL)
 		return;
 
 	/* update the bandwidth estimate */
@@ -249,10 +249,14 @@ static void mis_bandwidth_state_machine(uint64_t now)
 	last_tsc = tsc;
 
 	/* check if the bandwidth limit has been exceeded */
-	if (bw_estimate > MIS_BW_THRESHOLD) {
+	if (!bw_punish_triggered) {
+	        bw_punish_triggered = (bw_estimate > MIS_BW_HIGH_WATERMARK);
+	} else {
+	        bw_punish_triggered = (bw_estimate < MIS_BW_LOW_WATERMARK);
+	}
+	if (bw_punish_triggered) {
 		mis_sample_pmc(PMC_LLC_MISSES);
-		bw_punish_triggered = true;
-		last_bw_punish_ts = microtime();
+		last_bw_punish_ts = microtime();		       
 	}
 
 	log_info_ratelimited("bw estimate %f", bw_estimate);
