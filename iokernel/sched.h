@@ -105,13 +105,13 @@ extern int sched_siblings_nr;
 #define sched_for_each_allowed_core(core, tmp)			\
 	for ((core) = sched_cores_tbl[0], (tmp) = 0;		\
 	     (tmp) < sched_cores_nr &&				\
-		({(core) = sched_cores_tbl[(tmp)]; true;});	\
+	     ({(core) = sched_cores_tbl[(tmp)]; true;});	\
 	     (tmp)++)
 
 #define sched_for_each_allowed_sibling(core, tmp)		\
 	for ((core) = sched_siblings_tbl[0], (tmp) = 0;		\
 	     (tmp) < sched_siblings_nr &&			\
-		({(core) = sched_siblings_tbl[(tmp)]; true;});	\
+	     ({(core) = sched_siblings_tbl[(tmp)]; true;});	\
 	     (tmp)++)
 
 

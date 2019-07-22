@@ -12,7 +12,7 @@
 
 /* a list of processes that are waiting for more cores */
 static LIST_HEAD(congested_procs);
-/* a list of processes that are using more than their guaranteed cores */
+/* a bitmap of all available cores that are currently idle */
 static DEFINE_BITMAP(simple_idle_cores, NCPU);
 
 struct simple_data {
@@ -146,7 +146,18 @@ static unsigned int simple_choose_core(struct proc *p)
 	struct thread *th;
 	unsigned int core, tmp;
 
-	/* first try to find a previously used core (to improve locality) */
+        /* first try to find a matching active hyperthread */
+        sched_for_each_allowed_core(core, tmp) {
+		unsigned int sib = sched_siblings[core];
+		if (cores[core] != sd)
+			continue;
+		if (cores[sib] == sd || (cores[sib] != NULL &&
+		    !simple_proc_is_preemptible(cores[sib], sd)))
+			continue;
+		return sib;
+	}
+
+	/* then try to find a previously used core (to improve locality) */
 	list_for_each(&p->idle_threads, th, idle_link) {
 		core = th->core;
 		if (core >= NCPU)

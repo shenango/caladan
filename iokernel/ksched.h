@@ -177,50 +177,7 @@ static inline void ksched_send_intrs(void)
 	CPU_ZERO(&ksched_set);
 }
 
-/* A high precision timer that gives the cycle-level result. */
-struct hp_timer {
-        unsigned        start_cycles_low;
-        unsigned        start_cycles_high;
-        unsigned        end_cycles_low;
-        unsigned        end_cycles_high;
-};
-
-static void start_hp_timer(struct hp_timer *hp_timer)
-{
-        asm volatile(
-		"xorl %%eax, %%eax\n\t"
-                "CPUID\n\t"
-                "RDTSC\n\t"
-                "mov %%edx, %0\n\t"
-                "mov %%eax, %1\n\t"
-                : "=r"(hp_timer->start_cycles_high),
-                 "=r"(hp_timer->start_cycles_low)::"%rax", "%rbx", "%rcx", "%rdx");
-}
-
-static void end_hp_timer(struct hp_timer *hp_timer)
-{
-        asm volatile(
-		"RDTSCP\n\t"
-                "mov %%edx, %0\n\t"
-                "mov %%eax, %1\n\t"
-                "xorl %%eax, %%eax\n\t"
-	        "CPUID\n\t"
-                : "=r"(hp_timer->end_cycles_high),
-                  "=r"(hp_timer->end_cycles_low)::"%rax", "%rbx", "%rcx", "%rdx");
-}
-
-static unsigned get_hp_timer_elapse(struct hp_timer *hp_timer) {
-        uint64_t start, end;
-	start =
-	  (((uint64_t)hp_timer->start_cycles_high << 32) |
-	   hp_timer->start_cycles_low);
-	end =
-	  (((uint64_t)hp_timer->end_cycles_high << 32) |
-	   hp_timer->end_cycles_low);
-	return (unsigned int)(end - start);
-}
-
-static unsigned int pci_cfg_index(unsigned int bus, unsigned int device,
+static inline unsigned int pci_cfg_index(unsigned int bus, unsigned int device,
                                   unsigned int function, unsigned int offset) {
 	unsigned int byte_address;
         assert(device >= 0);
@@ -236,12 +193,6 @@ static unsigned int pci_cfg_index(unsigned int bus, unsigned int device,
 /* Get the number of DRAM read/write happens since the last call. This function
  * should be called every small time interval otherwise the counter will
  * overflow. */
-static unsigned int get_cas_count_all() {
-	unsigned int ret = *low_cas_count_all_ptr;
-        /* we reset it every time to ensure it is not overflowed. Besides, this
-         * makes us easier to compute the bandwidth. Surprinsly, an additional
-         * clear assignment actually does not increase the overhead (CPU
-         * cycles). */
-        *low_cas_count_all_ptr = 0;
-	return ret;
+static inline uint32_t get_cas_count_all(void) {
+	return ACCESS_ONCE(*low_cas_count_all_ptr);
 }
