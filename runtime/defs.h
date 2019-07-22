@@ -269,6 +269,8 @@ enum {
 	STAT_RX_TCP_OUT_OF_ORDER,
 	STAT_RX_TCP_TEXT_CYCLES,
 
+	STAT_RX_HW_DROP,
+
 	/* total number of counters */
 	STAT_NR,
 };

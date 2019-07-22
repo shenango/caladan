@@ -68,7 +68,7 @@ static int mlx5_gather_completions(struct mbuf **mbufs, struct mlx5_txq *v, unsi
 
 		BUG_ON(opcode != MLX5_CQE_REQ);
 
-		assert(mlx5_get_cqe_format(cqe) != 0x3);
+		BUG_ON(mlx5_get_cqe_format(cqe) == 0x3);
 
 		wqe_idx = be16toh(cqe->wqe_counter) & (v->tx_qp_dv.sq.wqe_cnt - 1);
 		mbufs[compl_cnt] = load_acquire(&v->buffers[wqe_idx]);
@@ -177,7 +177,9 @@ int mlx5_gather_rx(struct direct_rxq *rxq, struct mbuf **ms, unsigned int budget
 			BUG();
 		}
 
-		assert(mlx5_get_cqe_format(cqe) != 0x3); // not compressed
+		STAT(RX_HW_DROP) += be32toh(cqe->sop_drop_qpn) >> 24;
+
+		BUG_ON(mlx5_get_cqe_format(cqe) == 0x3); // not compressed
 		wqe_idx = be16toh(cqe->wqe_counter) & (wq->wqe_cnt - 1);
 		m = v->buffers[wqe_idx];
 		mbuf_fill_cqe(m, cqe);

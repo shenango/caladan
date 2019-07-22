@@ -41,6 +41,9 @@ static const char *stat_names[] = {
 	"rx_tcp_in_order",
 	"rx_tcp_out_of_order",
 	"rx_tcp_text_cycles",
+
+	"rx_hw_drop",
+
 };
 
 /* must correspond exactly to STAT_* enum definitions in defs.h */
