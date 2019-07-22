@@ -251,8 +251,14 @@ static void mis_bandwidth_state_machine(uint64_t now)
 	/* check if the bandwidth limit has been exceeded */
 	if (!bw_punish_triggered) {
 	        bw_punish_triggered = (bw_estimate > MIS_BW_HIGH_WATERMARK);
+		if (bw_punish_triggered) {
+			log_info_ratelimited("trigger bw punish.");
+		}
 	} else {
-	        bw_punish_triggered = (bw_estimate < MIS_BW_LOW_WATERMARK);
+	        bw_punish_triggered = (bw_estimate > MIS_BW_LOW_WATERMARK);
+		if (!bw_punish_triggered) {
+			log_info_ratelimited("untrigger bw punish.");
+		}
 	}
 	if (bw_punish_triggered) {
 		mis_sample_pmc(PMC_LLC_MISSES);
