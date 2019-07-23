@@ -222,27 +222,38 @@ int sched_idle_on_core(uint32_t mwait_hint, unsigned int core)
 	return __sched_run(s, NULL, core);
 }
 
+static uint32_t hwq_find_head(struct hwq *h, uint32_t cur_tail, uint32_t last_head)
+{
+	uint32_t i = 0;
+	uint32_t start_idx = wraps_lt(cur_tail, last_head) ? last_head : cur_tail;
+	uint32_t nr_desc = h->nr_descriptors - (start_idx - cur_tail);
+
+	while (i < nr_desc) {
+		if (!hwq_busy(h, start_idx + i))
+			break;
+		i++;
+	}
+
+	return i + start_idx;
+}
+
 static bool hardware_queue_congested(struct thread *th, struct hwq *h)
 {
-	bool last_pending, cur_pending;
-	uint32_t cur_tail, last_tail;
+	uint32_t cur_tail, cur_head, last_head;
 
 	if (!h->enabled)
 		return false;
 
-	last_tail = h->last_tail;
-	last_pending = h->last_pending;
+	last_head = h->last_head;
 
 	cur_tail = ACCESS_ONCE(*h->consumer_idx);
-	cur_pending = hwq_busy(h, cur_tail);
+	cur_head = hwq_find_head(h, cur_tail, last_head);
 
 	h->last_tail = cur_tail;
-	h->last_pending = cur_pending;
-	if (cur_pending)
-		if (!th->active || (last_tail == cur_tail && last_pending))
-			return true;
+	h->last_head = cur_head;
 
-	return false;
+	return th->active ? wraps_lt(cur_tail, last_head) :
+				 cur_head != cur_tail;
 }
 
 static void sched_detect_congestion(struct proc *p)

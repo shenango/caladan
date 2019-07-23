@@ -81,6 +81,9 @@ static int control_init_hwq(struct shm_region *r,
 	if (h->parity_byte_offset > h->descriptor_size)
 		return -EINVAL;
 
+	h->last_head = 0;
+	h->last_tail = 0;
+
 	return 0;
 }
 

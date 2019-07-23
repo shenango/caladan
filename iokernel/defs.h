@@ -62,7 +62,7 @@ struct hwq {
 	uint32_t		hwq_type;
 
 	uint32_t		last_tail;
-	bool			last_pending;
+	uint32_t		last_head;
 };
 
 struct timer {
