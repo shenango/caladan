@@ -381,8 +381,8 @@ static void mis_sample_pmc(uint64_t sel)
 
 		if (!sd1 && !sd2)
 			continue;
-		if (sd1 &&
-		    (!sd2 || sd1->threads_monitored < sd2->threads_monitored)) {
+		if (sd1 && (!sd2 ||
+			    sd1->threads_monitored <= sd2->threads_monitored)) {
 			sd1->threads_monitored++;
 			ksched_enqueue_pmc(sib, sel);
 			bitmap_set(mis_sampled_cores, sib);
@@ -461,7 +461,7 @@ static void mis_bandwidth_state_machine(uint64_t now)
 		/* first prefer lone hyperthreads */
 		sched_for_each_allowed_core(core, tmp) {
 			if (cores[core] == sd &&
-			   cores[sched_siblings[core]] != sd) {
+			    cores[sched_siblings[core]] != sd) {
 				if (mis_add_kthread_on_core(core))
 					mis_idle_on_core(core);
 				goto done;

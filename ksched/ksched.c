@@ -273,16 +273,10 @@ static u64 ksched_measure_pmc(u64 sel)
 	return end - start;
 }
 
-static void ksched_enable_pmc(void) {
-        wrmsrl(MSR_CORE_PERF_GLOBAL_CTRL, CORE_PERF_GLOBAL_CTRL_ENABLE_PMC_0 |
-                                          CORE_PERF_GLOBAL_CTRL_ENABLE_PMC_1);
-}
-
 static void ksched_ipi(void *unused)
 {
 	struct ksched_percpu *p;
 	struct ksched_shm_cpu *s;
-	static bool pmc_ctrl_enabled[NR_CPUS];
 	int cpu, tmp;
 
 	cpu = get_cpu();
@@ -296,12 +290,7 @@ static void ksched_ipi(void *unused)
 
 	/* check if a performance counter has been requested */
 	tmp = smp_load_acquire(&s->pmc);
-	if (tmp == p->last_gen) {
-		if (!pmc_ctrl_enabled[cpu]) {
-	        	ksched_enable_pmc();
-	        	pmc_ctrl_enabled[cpu] = true;
-	        }
-	  
+	if (tmp != 0) {
 		s->pmcval = ksched_measure_pmc(READ_ONCE(s->pmcsel));
 		smp_store_release(&s->pmc, 0);
 	}
@@ -449,6 +438,12 @@ static void __exit ksched_cpuidle_unhijack(void)
 	cpuidle_resume_and_unlock();
 }
 
+static void __init ksched_init_pmc(void *arg)
+{
+        wrmsrl(MSR_CORE_PERF_GLOBAL_CTRL, CORE_PERF_GLOBAL_CTRL_ENABLE_PMC_0 |
+                                          CORE_PERF_GLOBAL_CTRL_ENABLE_PMC_1);
+}
+
 static int __init ksched_init(void)
 {
 	dev_t devno_ksched = MKDEV(KSCHED_MAJOR, KSCHED_MINOR);
@@ -480,6 +475,7 @@ static int __init ksched_init(void)
 	if (ret)
 		goto fail_hijack;
 
+	smp_call_function(ksched_init_pmc, NULL, 1);
 	printk(KERN_INFO "ksched: API V2 enabled");
 
         devno_pci_cfg = MKDEV(PCI_CFG_MAJOR, PCI_CFG_MINOR);
