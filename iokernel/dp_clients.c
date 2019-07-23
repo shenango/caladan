@@ -2,6 +2,8 @@
  * dp_clients.c - functions for registering/unregistering dataplane clients
  */
 
+#include <unistd.h>
+
 #include <rte_ether.h>
 #include <rte_hash.h>
 #include <rte_jhash.h>
@@ -47,10 +49,14 @@ static void dp_clients_add_client(struct proc *p)
 
 void proc_release(struct ref *r)
 {
+	ssize_t ret;
+
 	struct proc *p = container_of(r, struct proc, ref);
 	if (!lrpc_send(&lrpc_data_to_control, CONTROL_PLANE_REMOVE_CLIENT,
 			(unsigned long) p))
 		log_err("dp_clients: failed to inform control of client removal");
+	ret = write(data_to_control_efd, &(uint64_t){ 1 }, sizeof(uint64_t));
+	WARN_ON(ret != sizeof(uint64_t));
 }
 
 /*

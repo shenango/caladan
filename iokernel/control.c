@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/eventfd.h>
 #include <sys/select.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -32,6 +33,7 @@ static struct proc *clients[IOKERNEL_MAX_PROC];
 static int nr_clients;
 struct lrpc_params lrpc_control_to_data_params;
 struct lrpc_params lrpc_data_to_control_params;
+int data_to_control_efd;
 static struct lrpc_chan_out lrpc_control_to_data;
 static struct lrpc_chan_in lrpc_data_to_control;
 static int nr_guaranteed;
@@ -426,14 +428,15 @@ static void control_loop(void)
 {
 	fd_set readset;
 	int maxfd, i, nrdy;
-	uint64_t cmd;
+	uint64_t cmd, efdval;
 	unsigned long payload;
 	struct proc *p;
 
 	while (1) {
-		maxfd = controlfd;
+		maxfd = MAX(controlfd, data_to_control_efd);
 		FD_ZERO(&readset);
 		FD_SET(controlfd, &readset);
+		FD_SET(data_to_control_efd, &readset);
 
 		for (i = 0; i < nr_clients; i++) {
 			if (clients[i]->removed)
@@ -454,7 +457,9 @@ static void control_loop(void)
 			if (!FD_ISSET(i, &readset))
 				continue;
 
-			if (i == controlfd) {
+			if (i == data_to_control_efd) {
+				/* do nothing */
+			} else if (i == controlfd) {
 				/* accept a new connection */
 				control_add_client();
 			} else {
@@ -465,13 +470,14 @@ static void control_loop(void)
 			nrdy--;
 		}
 
-		while (lrpc_recv(&lrpc_data_to_control, &cmd, &payload)) {
-			p = (struct proc *) payload;
-			assert(cmd == CONTROL_PLANE_REMOVE_CLIENT);
-
-			/* it is now safe to remove data structures for this client */
-			control_remove_client(p);
-		}
+		do {
+			while (lrpc_recv(&lrpc_data_to_control, &cmd, &payload)) {
+				p = (struct proc *) payload;
+				assert(cmd == CONTROL_PLANE_REMOVE_CLIENT);
+				/* it is now safe to remove data structures for this client */
+				control_remove_client(p);
+			}
+		} while (read(data_to_control_efd, &efdval, sizeof(efdval)) == sizeof(efdval));
 	}
 }
 
@@ -559,6 +565,10 @@ static int control_init_dataplane_comm(void)
 		log_err("control: initializing LRPC from dataplane failed");
 		goto fail_free_wb_in;
 	}
+
+	data_to_control_efd = eventfd(0, EFD_NONBLOCK);
+	if (data_to_control_efd < 0)
+		return -errno;
 
 	return 0;
 

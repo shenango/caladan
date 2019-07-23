@@ -220,6 +220,7 @@ struct lrpc_params {
 };
 extern struct lrpc_params lrpc_control_to_data_params;
 extern struct lrpc_params lrpc_data_to_control_params;
+extern int data_to_control_efd;
 
 /*
  * Commands from control plane to dataplane.
