@@ -29,7 +29,7 @@
 #define COMMAND_QUEUE_MCOUNT	4096
 /* the egress buffer pool must be large enough to fill all the TXQs entirely */
 #define EGRESS_POOL_SIZE(nks) \
-	(PACKET_QUEUE_MCOUNT * MBUF_DEFAULT_LEN * MAX(16, (nks)) * 16UL)
+	(PACKET_QUEUE_MCOUNT * MBUF_DEFAULT_LEN * MAX(16, (nks)) * 8UL)
 
 struct iokernel_control iok;
 
@@ -268,6 +268,7 @@ int ioqueues_register_iokernel(void)
 	hdr->sched_cfg.guaranteed_cores = guaranteedks;
 	hdr->sched_cfg.congestion_latency_us = 0;
 	hdr->sched_cfg.scaleout_latency_us = 0;
+	hdr->sched_cfg.preferred_socket = preferred_socket;
 
 	hdr->thread_specs = ptr_to_shmptr(r, iok.threads, sizeof(*iok.threads) * maxks);
 

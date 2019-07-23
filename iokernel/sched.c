@@ -432,6 +432,8 @@ static int sched_scan_node(int node)
 		if (info->package != node)
 			continue;
 
+		bitmap_set(socket_state[node].cores, i);
+
 		/* TODO: can only support hyperthread pairs */
 		if (bitmap_popcount(info->thread_siblings_mask, NCPU) != 2)
 			ret = -EINVAL;
@@ -482,10 +484,6 @@ int sched_init(void)
 	 */
 
 	for (i = 0; i < cpu_count; i++) {
-		/* TODO: can only support one package */
-		if (cpu_info_tbl[i].package != 0)
-			continue;
-
 		if (allowed_cores_supplied &&
 		    !bitmap_test(input_allowed_cores, i))
 			continue;

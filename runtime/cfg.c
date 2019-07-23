@@ -16,6 +16,7 @@
 
 int arp_static_count = 0;
 struct cfg_arp_static_entry static_entries[MAX_ARP_STATIC_ENTRIES];
+int preferred_socket = 0;
 
 /*
  * Configuration Options
@@ -211,6 +212,24 @@ static int parse_log_level(const char *name, const char *val)
 	return 0;
 }
 
+static int parse_preferred_socket(const char *name, const char *val)
+{
+	long tmp;
+	int ret;
+
+	ret = str_to_long(val, &tmp);
+	if (ret)
+		return ret;
+
+	if (tmp < 0 || tmp > numa_count - 1) {
+		log_err("invalid preferred socket requested, '%ld'", tmp);
+		log_err("must be >=0 and < %d (number of NUMA nodes)", numa_count);
+		return -EINVAL;
+	}
+
+	preferred_socket = tmp;
+	return 0;
+}
 
 /*
  * Parsing Infrastructure
@@ -236,6 +255,7 @@ static const struct cfg_handler cfg_handlers[] = {
 	{ "static_arp", parse_static_arp_entry, false },
 	{ "log_level", parse_log_level, false },
 	{ "disable_watchdog", parse_watchdog_flag, false },
+	{ "preferred_socket", parse_preferred_socket, false },
 };
 
 /**

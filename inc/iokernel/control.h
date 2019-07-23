@@ -87,6 +87,7 @@ struct sched_spec {
 	unsigned int		guaranteed_cores;
 	unsigned int		congestion_latency_us;
 	unsigned int		scaleout_latency_us;
+	unsigned int		preferred_socket;
 };
 
 #define CONTROL_HDR_MAGIC	0x696f6b3a /* "iok:" */

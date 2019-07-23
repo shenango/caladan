@@ -31,7 +31,7 @@ RUNTIME_LIBS = $(ROOT_PATH)/libruntime.a $(ROOT_PATH)/libnet.a \
 
 # parse configuration options
 ifeq ($(CONFIG_DEBUG),y)
-FLAGS += -DDEBUG -DCCAN_LIST_DEBUG -rdynamic -O0 -ggdb
+FLAGS += -DDEBUG -DCCAN_LIST_DEBUG -rdynamic -O0 -ggdb -mssse3
 LDFLAGS += -rdynamic
 else
 FLAGS += -DNDEBUG -O3

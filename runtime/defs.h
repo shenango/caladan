@@ -380,6 +380,7 @@ struct cpu_record {
 BUILD_ASSERT(sizeof(struct cpu_record) == CACHE_LINE_SIZE);
 
 extern struct cpu_record cpu_map[NCPU];
+extern int preferred_socket;
 
 /**
  * STAT - gets a stat counter

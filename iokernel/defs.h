@@ -320,6 +320,7 @@ extern int ksched_init(void);
 extern int sched_init(void);
 extern int simple_init(void);
 extern int mis_init(void);
+extern int numa_init(void);
 extern int control_init(void);
 extern int dpdk_init(void);
 extern int rx_init(void);
