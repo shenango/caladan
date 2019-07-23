@@ -321,6 +321,7 @@ again:
 	/* we may have got a preempt signal before voluntarily yielding */
 	kthread_park(!preempt_needed());
 	start_tsc = rdtsc();
+	iters = 0;
 
 	spin_lock(&l->lock);
 	l->parked = false;
