@@ -1,9 +1,13 @@
 extern crate bindgen;
+extern crate build_deps;
 
 use std::env;
 use std::path::PathBuf;
 
 fn main() {
+    build_deps::rerun_if_changed_paths( "../../inc/**" ).unwrap();
+    build_deps::rerun_if_changed_paths( "../../*.a" ).unwrap();
+
     // Tell cargo to tell rustc to link the library.
     println!("cargo:rustc-link-lib=static=base");
     println!("cargo:rustc-link-lib=static=net");
