@@ -1,5 +1,5 @@
 diff --git a/providers/mlx5/dr_domain.c b/providers/mlx5/dr_domain.c
-index 11af4589..61dc6e45 100644
+index 11af45895..61dc6e451 100644
 --- a/providers/mlx5/dr_domain.c
 +++ b/providers/mlx5/dr_domain.c
 @@ -188,9 +188,9 @@ static int dr_domain_caps_init(struct ibv_context *ctx,
@@ -24,7 +24,7 @@ index 11af4589..61dc6e45 100644
  	if (dr_domain_caps_init(ctx, dmn)) {
  		dr_dbg(dmn, "Failed init domain, no caps\n");
 diff --git a/providers/mlx5/dr_rule.c b/providers/mlx5/dr_rule.c
-index 7a3bf633..f6f90a60 100644
+index 7a3bf633f..f6f90a602 100644
 --- a/providers/mlx5/dr_rule.c
 +++ b/providers/mlx5/dr_rule.c
 @@ -32,6 +32,7 @@
@@ -78,7 +78,7 @@ index 7a3bf633..f6f90a60 100644
  {
  	struct mlx5dv_dr_matcher *matcher = rule->matcher;
 diff --git a/providers/mlx5/dr_send.c b/providers/mlx5/dr_send.c
-index 64d892ea..c10bb720 100644
+index 64d892eae..c10bb720e 100644
 --- a/providers/mlx5/dr_send.c
 +++ b/providers/mlx5/dr_send.c
 @@ -39,7 +39,7 @@
@@ -132,17 +132,19 @@ index 64d892ea..c10bb720 100644
  				   struct dr_ste_htbl *htbl,
  				   uint8_t **data,
 diff --git a/providers/mlx5/libmlx5.map b/providers/mlx5/libmlx5.map
-index 1558e093..c5a147a1 100644
+index 1558e0932..aeb4820b1 100644
 --- a/providers/mlx5/libmlx5.map
 +++ b/providers/mlx5/libmlx5.map
-@@ -105,4 +105,5 @@ MLX5_1.10 {
+@@ -105,4 +105,7 @@ MLX5_1.10 {
  		mlx5dv_dr_table_create;
  		mlx5dv_dr_table_destroy;
  		mlx5dv_qp_ex_from_ibv_qp_ex;
 +		switch_qp_action;
++		postsend_lock;
++		postsend_unlock;
  } MLX5_1.9;
 diff --git a/providers/mlx5/mlx5dv.h b/providers/mlx5/mlx5dv.h
-index 4e9c2733..2ef14f23 100644
+index 4e9c2733a..2ef14f23e 100644
 --- a/providers/mlx5/mlx5dv.h
 +++ b/providers/mlx5/mlx5dv.h
 @@ -1416,6 +1416,13 @@ mlx5dv_dr_rule_create(struct mlx5dv_dr_matcher *matcher,
@@ -160,7 +162,7 @@ index 4e9c2733..2ef14f23 100644
  
  enum mlx5dv_dr_action_flags {
 diff --git a/providers/mlx5/mlx5dv_dr.h b/providers/mlx5/mlx5dv_dr.h
-index ffc400d7..89188c0b 100644
+index ffc400d7c..89188c0b9 100644
 --- a/providers/mlx5/mlx5dv_dr.h
 +++ b/providers/mlx5/mlx5dv_dr.h
 @@ -629,6 +629,7 @@ struct mlx5dv_dr_domain {
