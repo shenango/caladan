@@ -414,6 +414,10 @@ static struct mis_data *mis_choose_bandwidth_victim(void)
 	}
 
 	list_for_each(&all_procs, sd, all_link) {
+		if (!sd->threads_monitored) {
+		  // pmc not ready, pass
+		  continue;
+		}
 		float estimated_l3miss = (float)sd->llc_misses /
 					 (float)sd->threads_monitored *
 					 (float)sd->threads_active;
