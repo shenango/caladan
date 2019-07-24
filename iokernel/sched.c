@@ -262,6 +262,7 @@ static void sched_detect_congestion(struct proc *p)
 	DEFINE_BITMAP(ios, NCPU);
 	struct thread *th;
 	uint32_t cur_tail, cur_head, last_head;
+	uint64_t now, timer_tsc;
 	int i;
 
 	bitmap_init(threads, NCPU, false);
@@ -293,6 +294,19 @@ static void sched_detect_congestion(struct proc *p)
 		}
 
 		if (hardware_queue_congested(th, &th->directpath_hwq))
+			bitmap_set(ios, i);
+	}
+
+	/* detect expired timers */
+	now = rdtsc();
+	for (i = 0; i < p->thread_count; i++) {
+		th = &p->threads[i];
+		timer_tsc = ACCESS_ONCE(*th->timer_heap.next_tsc);
+
+		if (!timer_tsc || timer_tsc > now)
+			continue;
+
+		if (!th->active || timer_tsc + IOKERNEL_POLL_INTERVAL * cycles_per_us < now)
 			bitmap_set(ios, i);
 	}
 

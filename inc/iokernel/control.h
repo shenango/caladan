@@ -15,7 +15,7 @@
  * struct control_hdr, please increment the version number!
  */
 
-#define CONTROL_HDR_VERSION 2
+#define CONTROL_HDR_VERSION 3
 
 /* The abstract namespace path for the control socket. */
 #define CONTROL_SOCK_PATH	"\0/control/iokernel.sock"
@@ -26,6 +26,7 @@ struct q_ptrs {
 	uint32_t		rq_head;
 	uint32_t		rq_tail;
 	uint32_t		directpath_rx_tail;
+	uint64_t		next_timer_tsc;
 };
 
 struct congestion_info {
@@ -52,7 +53,6 @@ struct hardware_queue_spec {
 };
 
 struct timer_spec {
-	shmptr_t		timern;
 	shmptr_t		next_tsc;
 	unsigned long		timer_resolution;
 };
@@ -68,6 +68,7 @@ struct thread_spec {
 	int32_t			park_efd;
 
 	struct hardware_queue_spec		direct_rxq;
+	struct timer_spec		timer_heap;
 
 	shmptr_t		nvme_qpair_cpl;
 	shmptr_t		nvme_qpair_cq_head;
