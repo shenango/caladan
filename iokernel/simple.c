@@ -231,7 +231,7 @@ static void simple_update_congestion_info(struct simple_data *sd)
 
 	/* update the CPU load */
 	/* TODO: handle using more than guaranteed cores */
-	instant_load = (float)sd->threads_active / (float)sd->threads_max;
+        instant_load = (float)sd->threads_active / (float)sd->threads_max;
 	sd->load = sd->load * (1 - EWMA_WEIGHT) + instant_load * EWMA_WEIGHT;
 	ACCESS_ONCE(info->load) = sd->load;
 }

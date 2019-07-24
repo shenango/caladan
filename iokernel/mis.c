@@ -302,7 +302,8 @@ static void mis_update_congestion_info(struct mis_data *sd)
 
 	/* update the CPU load */
 	/* TODO: handle using more than guaranteed cores */
-	instant_load = (float)sd->threads_active / (float)sd->threads_limit;
+	instant_load = (sd->threads_limit)
+		? (float)sd->threads_active / (float)sd->threads_limit : 0;
 	sd->load = sd->load * (1 - EWMA_WEIGHT) + instant_load * EWMA_WEIGHT;
 	ACCESS_ONCE(info->load) = sd->load;
 }
