@@ -29,13 +29,18 @@ static DEFINE_BITMAP(mis_sampled_cores, NCPU);
 			PMC_ESEL_ANY | PMC_ESEL_ENABLE)
 
 /* poll the global (system-wide) memory bandwidth over this time interval */
-#define MIS_BW_MEASURE_INTERVAL	50
+#define MIS_BW_MEASURE_INTERVAL	25
 /* wait for performance counter results over this time interval */
 #define MIS_BW_PUNISH_INTERVAL	10
 /* punish processes consuming high bandwidth over this threshold */
-#define MIS_BW_HIGH_WATERMARK	0.10 /* FIXME: should not be hard coded */
-#define MIS_BW_LOW_WATERMARK	0.095 /* FIXME: should not be hard coded */
-#define MIS_BW_THRESHOLD	0.11 /* FIXME: should not be hard coded */
+/* FIXME: should not be hard coded */
+#define MIS_BW_HIGH_WATERMARK	0.105 
+/* FIXME: should not be hard coded */
+#define MIS_BW_LOW_WATERMARK	(0.8 * MIS_BW_HIGH_WATERMARK)
+/* FIXME: should not be hard coded */
+#define MIS_UNDER_LOW_WATERMARK_CNT_THRESHOLD 3
+
+unsigned int under_low_watermark_cnt = 0;
 
 struct mis_data {
 	struct proc		*p;
@@ -458,6 +463,7 @@ static void mis_bandwidth_state_machine(uint64_t now)
 		sd->threads_limit = MIN(sd->threads_limit - 1,
 					sd->threads_active - 1);
 		mis_unmark_congested(sd);
+		list_add(&bwlimited_procs, &sd->bwlimited_link);
 
 		/* first prefer lone hyperthreads */
 		sched_for_each_allowed_core(core, tmp) {
@@ -495,10 +501,25 @@ done:
 	last_tsc = tsc;
 
 	/* check if the bandwidth limit has been exceeded */
-	if (bw_estimate > MIS_BW_THRESHOLD && !bw_punish_triggered) {
+	if (bw_estimate > MIS_BW_HIGH_WATERMARK && !bw_punish_triggered) {
 		mis_sample_pmc(PMC_LLC_MISSES);
 		bw_punish_triggered = true;
 		last_bw_punish_ts = microtime();
+	}
+	if (bw_estimate < MIS_BW_LOW_WATERMARK) {
+	  under_low_watermark_cnt++;
+	} else {
+	  under_low_watermark_cnt = 0;
+	}
+	if (under_low_watermark_cnt == MIS_UNDER_LOW_WATERMARK_CNT_THRESHOLD) {
+	  under_low_watermark_cnt = 0;
+	  struct mis_data *sd = NULL;
+	  sd = list_pop(&bwlimited_procs, struct mis_data, bwlimited_link);
+	  if (sd) {
+	    sd->threads_limit++;
+	    assert(sd->threads_limit == 1);
+	    log_info_ratelimited("add back pid = %d\n", sd->p->pid);
+	  }
 	}
 
 	log_info_ratelimited("bw estimate %f", bw_estimate);
