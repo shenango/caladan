@@ -146,15 +146,16 @@ static unsigned int simple_choose_core(struct proc *p)
 	struct thread *th;
 	unsigned int core, tmp;
 
-        /* first try to find a matching active hyperthread */
-        sched_for_each_allowed_core(core, tmp) {
+	/* first try to find a matching active hyperthread */
+	sched_for_each_allowed_core(core, tmp) {
 		unsigned int sib = sched_siblings[core];
 		if (cores[core] != sd)
 			continue;
 		if (cores[sib] == sd || (cores[sib] != NULL &&
 		    !simple_proc_is_preemptible(cores[sib], sd)))
 			continue;
-		return sib;
+		if (bitmap_test(sched_allowed_cores, sib))
+			return sib;
 	}
 
 	/* then try to find a previously used core (to improve locality) */

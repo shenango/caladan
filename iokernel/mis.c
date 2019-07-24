@@ -209,7 +209,8 @@ static unsigned int mis_choose_core(struct proc *p)
 		if (cores[sib] == sd || (cores[sib] != NULL &&
 		    !mis_proc_is_preemptible(cores[sib], sd)))
 			continue;
-		return sib;
+		if (bitmap_test(sched_allowed_cores, sib))
+			return sib;
 	}
 
 	/* then try to find a previously used core (to improve locality) */
