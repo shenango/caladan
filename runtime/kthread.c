@@ -118,7 +118,7 @@ static DEFINE_BITMAP(kthread_awake, NCPU);
 static void flows_update(void)
 {
 	int i, pos, nrawake;
-	uint64_t cur_gen;
+	uint64_t start = rdtsc(), cur_gen;
 	unsigned int fg_map[maxks];
 	unsigned int awakeks[maxks];
 	DEFINE_BITMAP(kawake_local, NCPU);
@@ -126,12 +126,12 @@ static void flows_update(void)
 again:
 
 	if (!spin_try_lock_np(&flow_assignment_lock))
-		return;
+		goto done;
 
 	cur_gen = atomic64_read(&kthread_gen);
 	if (cur_gen == flow_assignment_gen) {
 		spin_unlock_np(&flow_assignment_lock);
-		return;
+		goto done;
 	}
 
 	ACCESS_ONCE(flow_assignment_gen) = cur_gen;
@@ -164,6 +164,9 @@ out:
 
 	if (unlikely(ACCESS_ONCE(flow_assignment_gen) != atomic64_read(&kthread_gen)))
 		goto again;
+
+done:
+	STAT(FLOW_STEERING_CYCLES) += rdtsc() - start;
 }
 
 static void flows_notify_waking(void)

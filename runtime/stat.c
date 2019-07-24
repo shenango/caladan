@@ -42,7 +42,9 @@ static const char *stat_names[] = {
 	"rx_tcp_out_of_order",
 	"rx_tcp_text_cycles",
 
+	/* directpath counters */
 	"rx_hw_drop",
+	"flow_steering_cycles",
 
 };
 
