@@ -507,19 +507,18 @@ done:
 		last_bw_punish_ts = microtime();
 	}
 	if (bw_estimate < MIS_BW_LOW_WATERMARK) {
-	  under_low_watermark_cnt++;
+		under_low_watermark_cnt++;
 	} else {
-	  under_low_watermark_cnt = 0;
+		under_low_watermark_cnt = 0;
 	}
 	if (under_low_watermark_cnt == MIS_UNDER_LOW_WATERMARK_CNT_THRESHOLD) {
-	  under_low_watermark_cnt = 0;
-	  struct mis_data *sd = NULL;
-	  sd = list_pop(&bwlimited_procs, struct mis_data, bwlimited_link);
-	  if (sd) {
-	    sd->threads_limit++;
-	    assert(sd->threads_limit == 1);
-	    log_info_ratelimited("add back pid = %d\n", sd->p->pid);
-	  }
+		under_low_watermark_cnt = 0;
+	  	struct mis_data *sd = NULL;
+		sd = list_pop(&bwlimited_procs, struct mis_data, bwlimited_link);
+		if (sd) {
+			sd->threads_limit++;
+			log_info_ratelimited("add back pid = %d\n", sd->p->pid);
+		}
 	}
 
 	log_info_ratelimited("bw estimate %f", bw_estimate);
