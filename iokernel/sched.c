@@ -149,7 +149,7 @@ int __sched_run(struct core_state *s, struct thread *th, unsigned int core)
 	}
 
 	/* check if we need to interrupt the current core */
-	if (!s->idle)
+	if (!s->idle && s->cur_th != NULL)
 		ksched_enqueue_intr(core, KSCHED_INTR_CEDE);
 
 	/* finally request that the new kthread run on this core */
