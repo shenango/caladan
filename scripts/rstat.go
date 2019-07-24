@@ -40,6 +40,7 @@ func prettyPrint(m, lastm map[string]uint64, interval int) {
 		   (dm["local_runs"] / (dm["local_runs"] + dm["remote_runs"])) * 100,
 		   (dm["local_wakes"] / (dm["local_wakes"] + dm["remote_wakes"])) * 100,
 		   dm["program_cycles"], dm["sched_cycles"], measured_interval)
+	fmt.Println("raw map:", dm)
 }
 
 func main() {

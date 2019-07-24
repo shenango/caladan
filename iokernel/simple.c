@@ -250,7 +250,7 @@ static void simple_notify_congested(struct proc *p, bitmap_ptr_t threads,
 	}
 
 	/* do nothing if already marked as congested */
-	if (sd->is_congested)
+	if (sd->is_congested || sd->threads_active >= sd->threads_max)
 		goto done;
 
 	/* try to add an additional core right away */
@@ -272,18 +272,18 @@ static struct simple_data *simple_choose_kthread(unsigned int core)
 
 	/* first try to run the same process as the sibling */
 	sd = cores[sched_siblings[core]];
-	if (sd && sd->is_congested)
+	if (sd && sd->is_congested && sd->threads_active < sd->threads_max)
 		return sd;
 
 	/* then try to find a congested process that ran on this core last */
 	for (i = 0; i < NHIST; i++) {
 		sd = hist[core][i];
-		if (sd && sd->is_congested)
+		if (sd && sd->is_congested && sd->threads_active < sd->threads_max)
 			return sd;
 
 		/* the hyperthread sibling has equally good locality */
 		sd = hist[sched_siblings[core]][i];
-		if (sd && sd->is_congested)
+		if (sd && sd->is_congested && sd->threads_active < sd->threads_max)
 			return sd;
 	}
 
