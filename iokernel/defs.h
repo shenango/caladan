@@ -66,7 +66,6 @@ struct hwq {
 };
 
 struct timer {
-	unsigned int		*timern;
 	uint64_t		*next_tsc;
 };
 
@@ -85,6 +84,7 @@ struct thread {
 	unsigned int		at_idx;
 	unsigned int		ts_idx;
 	struct hwq		directpath_hwq;
+	struct timer		timer_heap;
 	struct list_node	idle_link;
 };
 

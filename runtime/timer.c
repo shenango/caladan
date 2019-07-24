@@ -94,6 +94,14 @@ static void sift_down(struct timer_idx *heap, int i, int n)
 	}
 }
 
+static inline void update_q_ptrs(struct kthread *k)
+{
+	if (k->timern)
+		ACCESS_ONCE(k->q_ptrs->next_timer_tsc) = k->timers[0].deadline_us * cycles_per_us + start_tsc;
+	else
+		ACCESS_ONCE(k->q_ptrs->next_timer_tsc) = 0;
+}
+
 /**
  * timer_merge - merges a timer heap from another kthread into our timer heap
  * @r: the remote kthread whose timer heap we will absorb
@@ -122,6 +130,7 @@ void timer_merge(struct kthread *r)
 			BUG();
 	}
 	r->timern = 0;
+	update_q_ptrs(r);
 	spin_unlock(&r->timer_lock);
 
 	/*
@@ -133,6 +142,7 @@ void timer_merge(struct kthread *r)
 		sift_down(k->timers, i, k->timern);
 
 done:
+	update_q_ptrs(k);
 	spin_unlock(&k->timer_lock);
 }
 
@@ -191,6 +201,7 @@ void timer_start(struct timer_entry *e, uint64_t deadline_us)
 
 	spin_lock_np(&k->timer_lock);
 	timer_start_locked(e, deadline_us);
+	update_q_ptrs(k);
 	spin_unlock_np(&k->timer_lock);
 	putk();
 }
@@ -229,6 +240,7 @@ try_again:
 
 	last = --k->timern;
 	if (e->idx == last) {
+		update_q_ptrs(k);
 		spin_unlock_np(&k->timer_lock);
 		preempt_enable();
 		return true;
@@ -238,6 +250,7 @@ try_again:
 	k->timers[e->idx].e->idx = e->idx;
 	sift_up(k->timers, e->idx);
 	sift_down(k->timers, e->idx, k->timern);
+	update_q_ptrs(k);
 	spin_unlock_np(&k->timer_lock);
 
 	preempt_enable();
@@ -261,6 +274,7 @@ static void __timer_sleep(uint64_t deadline_us)
 	spin_lock_np(&k->timer_lock);
 	putk();
 	timer_start_locked(&e, deadline_us);
+	update_q_ptrs(k);
 	thread_park_and_unlock_np(&k->timer_lock);
 }
 
@@ -309,6 +323,7 @@ void timer_softirq(struct kthread *k, unsigned int budget)
 			k->timers[0].e->idx = 0;
 			sift_down(k->timers, 0, i);
 		}
+		update_q_ptrs(k);
 		spin_unlock_np(&k->timer_lock);
 
 		/* execute the timer handler */
@@ -329,12 +344,18 @@ void timer_softirq(struct kthread *k, unsigned int budget)
 int timer_init_thread(void)
 {
 	struct kthread *k = myk();
+	struct timer_spec *ts = &iok.threads[k->kthread_idx].timer_heap;
 
 	k->timers = aligned_alloc(CACHE_LINE_SIZE,
 			align_up(sizeof(struct timer_idx) * RUNTIME_MAX_TIMERS,
 				 CACHE_LINE_SIZE));
 	if (!k->timers)
 		return -ENOMEM;
+
+	k->q_ptrs->next_timer_tsc = 0;
+	ts->next_tsc = ptr_to_shmptr(&netcfg.tx_region,
+			    &k->q_ptrs->next_timer_tsc, sizeof(uint64_t));
+	ts->timer_resolution = cycles_per_us;
 
 	return 0;
 }

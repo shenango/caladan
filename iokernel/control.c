@@ -173,6 +173,10 @@ static struct proc *control_create_proc(mem_key_t key, size_t len, pid_t pid,
 		if (ret)
 			goto fail;
 
+		th->timer_heap.next_tsc = shmptr_to_ptr(&reg, s->timer_heap.next_tsc, sizeof(uint64_t));
+		if (!th->timer_heap.next_tsc)
+			goto fail;
+
 #if __has_include("spdk/nvme.h")
 		/* set SPDK pointers */
 		p->nvmeq[i].cpl_ref = (struct spdk_nvme_cpl *)shmptr_to_ptr(&reg,

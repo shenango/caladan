@@ -29,13 +29,14 @@ static DEFINE_BITMAP(mis_sampled_cores, NCPU);
 			PMC_ESEL_ANY | PMC_ESEL_ENABLE)
 
 /* poll the global (system-wide) memory bandwidth over this time interval */
-#define MIS_BW_MEASURE_INTERVAL	100
+#define MIS_BW_MEASURE_INTERVAL	25
 /* wait for performance counter results over this time interval */
 #define MIS_BW_PUNISH_INTERVAL	10
-/* the number of intervals of bandwidth below the threshold to relax limits */
-#define MIS_BW_RELAX_CNT	1
-/* punish processes consuming high bandwidth over this threshold */
-#define MIS_BW_THRESHOLD	0.10 /* FIXME: should not be hard coded */
+/* FIXME: should not be hard coded */
+#define MIS_BW_HIGH_WATERMARK	0.105 
+/* FIXME: should not be hard coded */
+#define MIS_BW_LOW_WATERMARK	(0.8 * MIS_BW_HIGH_WATERMARK)
+#define MIS_UNDER_LOW_WATERMARK_CNT_THRESHOLD 3
 
 struct mis_data {
 	struct proc		*p;
@@ -509,17 +510,17 @@ done:
 	last_tsc = tsc;
 
 	/* check if the bandwidth limit has been exceeded */
-	if (bw_estimate > MIS_BW_THRESHOLD && !bw_punish_triggered) {
+	if (bw_estimate > MIS_BW_HIGH_WATERMARK && !bw_punish_triggered) {
 		mis_sample_pmc(PMC_LLC_MISSES);
 		bw_punish_triggered = true;
 		last_bw_punish_ts = microtime();
 		bw_okay_cnt = 0;
-	} else {
+	} else if (bw_estimate < MIS_BW_LOW_WATERMARK) {
 		bw_okay_cnt++;
 	}
 
 	/* check if bandwidth has been below threshold long enough to relax */
-	if (bw_okay_cnt >= MIS_BW_RELAX_CNT) {
+	if (bw_okay_cnt >= MIS_UNDER_LOW_WATERMARK_CNT_THRESHOLD) {
 		struct mis_data *sd;
 
 		sd = list_pop(&bwlimited_procs, struct mis_data,
