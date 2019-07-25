@@ -137,7 +137,7 @@ static inline void ksched_enqueue_intr(unsigned int core, int type)
 static inline void ksched_enqueue_pmc(unsigned int core, uint64_t sel)
 {
 	ksched_shm[core].pmcsel = sel;
-	store_release(&ksched_shm[core].pmc, ksched_gens[core]);
+	store_release(&ksched_shm[core].pmc, 1);
 	CPU_SET(core, &ksched_set);
 	ksched_count++;
 }
