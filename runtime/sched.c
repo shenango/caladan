@@ -47,6 +47,13 @@ static __thread uint64_t last_watchdog_tsc;
  */
 thread_t *thread_self(void);
 
+static __noreturn __noinline void schedule(void);
+static void thread_finish_exit(void);
+
+static __noreturn void jmp_runtime_nosave(runtime_fn_t fn);
+static void jmp_runtime(runtime_fn_t fn);
+
+
 /**
  * cores_have_affinity - returns true if two cores have cache affinity
  * @cpua: the first core
@@ -76,7 +83,18 @@ static __noreturn void jmp_thread(thread_t *th)
 		/* wait until the scheduler finishes switching stacks */
 		while (load_acquire(&th->stack_busy))
 			cpu_relax();
+	} else if (!th->stack) {
+		th->stack = stack_alloc();
+		if (unlikely(!th->stack)) {
+			log_warn_ratelimited("runtime: out of stacks");
+			th->state = THREAD_STATE_SLEEPING;
+			thread_ready(th);
+			spin_lock(&myk()->lock);
+			jmp_runtime_nosave(schedule);
+		}
+		th->tf.rsp = stack_init_to_rsp(th->stack, thread_exit);
 	}
+
 	__jmp_thread(&th->tf);
 }
 
@@ -99,7 +117,19 @@ static void jmp_thread_direct(thread_t *oldth, thread_t *newth)
 		/* wait until the scheduler finishes switching stacks */
 		while (load_acquire(&newth->stack_busy))
 			cpu_relax();
+	} else if (!newth->stack) {
+		newth->stack = stack_alloc();
+		if (unlikely(!newth->stack)) {
+			log_warn_ratelimited("runtime: out of stacks");
+			newth->state = THREAD_STATE_SLEEPING;
+			thread_ready(newth);
+			spin_lock(&myk()->lock);
+			jmp_runtime(schedule);
+			return;
+		}
+		newth->tf.rsp = stack_init_to_rsp(newth->stack, thread_exit);
 	}
+
 	__jmp_thread_direct(&oldth->tf, &newth->tf, &oldth->stack_busy);
 }
 
@@ -358,8 +388,10 @@ done:
 	jmp_thread(th);
 }
 
-static __always_inline void enter_schedule(thread_t *myth)
+
+static __always_inline void enter_schedule(thread_t *myth, bool is_exit)
 {
+	uint64_t now;
 	struct kthread *k = myk();
 	thread_t *th;
 
@@ -367,21 +399,29 @@ static __always_inline void enter_schedule(thread_t *myth)
 
 	spin_lock(&k->lock);
 
+	th = k->rq[k->rq_tail % RUNTIME_RQ_SIZE];
+
 	/* slow path: switch from the uthread stack to the runtime stack */
 	if (k->rq_head == k->rq_tail ||
+	    (is_exit && (myth->main_thread || th->stack)) ||
 	    (!disable_watchdog &&
 	     unlikely(rdtsc() - last_watchdog_tsc >
 		      cycles_per_us * RUNTIME_WATCHDOG_US))) {
-		jmp_runtime(schedule);
-		return;
+		if (is_exit) {
+			jmp_runtime_nosave(thread_finish_exit);
+		} else {
+			jmp_runtime(schedule);
+			return;
+		}
 	}
 
 	/* fast path: switch directly to the next uthread */
-	STAT(PROGRAM_CYCLES) += rdtsc() - last_tsc;
-	last_tsc = rdtsc();
+	now = rdtsc();
+	STAT(PROGRAM_CYCLES) += now - last_tsc;
+	last_tsc = now;
 
 	/* pop the next runnable thread from the queue */
-	th = k->rq[k->rq_tail++ % RUNTIME_RQ_SIZE];
+	k->rq_tail++;
 	ACCESS_ONCE(k->q_ptrs->rq_tail)++;
 	spin_unlock(&k->lock);
 
@@ -393,7 +433,7 @@ static __always_inline void enter_schedule(thread_t *myth)
 	BUG_ON((preempt_cnt & ~PREEMPT_NOT_PENDING) != 1);
 
 	/* check if we're switching into the same thread as before */
-	if (unlikely(th == myth)) {
+	if (!is_exit && unlikely(th == myth)) {
 		th->state = THREAD_STATE_RUNNING;
 		th->stack_busy = false;
 		preempt_enable();
@@ -406,8 +446,31 @@ static __always_inline void enter_schedule(thread_t *myth)
 		STAT(LOCAL_RUNS)++;
 	else
 		STAT(REMOTE_RUNS)++;
-	jmp_thread_direct(myth, th);
+
+	if (is_exit) {
+		th->stack = myth->stack;
+		tcache_free(&perthread_get(thread_pt), myth);
+		th->tf.rsp = stack_init_to_rsp(th->stack, thread_exit);
+		assert(th->state == THREAD_STATE_RUNNABLE);
+		__self = th;
+		th->state = THREAD_STATE_RUNNING;
+		__jmp_thread(&th->tf);
+	} else {
+		jmp_thread_direct(myth, th);
+	}
 }
+
+static __noreturn __always_inline void enter_schedule_exit(thread_t *myth)
+{
+	enter_schedule(myth, true);
+	 __builtin_unreachable();
+}
+
+static __always_inline void enter_schedule_yield(thread_t *myth)
+{
+	enter_schedule(myth, false);
+}
+
 
 /**
  * thread_park_and_unlock_np - puts a thread to sleep, unlocks the lock @l,
@@ -427,7 +490,7 @@ void thread_park_and_unlock_np(spinlock_t *l)
 	myth->last_cpu = myk()->curr_cpu;
 	spin_unlock(l);
 
-	enter_schedule(myth);
+	enter_schedule_yield(myth);
 }
 
 /**
@@ -449,7 +512,7 @@ void thread_yield(void)
 	store_release(&myth->stack_busy, true);
 	thread_ready(myth);
 
-	enter_schedule(myth);
+	enter_schedule_yield(myth);
 }
 
 /**
@@ -529,10 +592,10 @@ void thread_cede(void)
 	jmp_runtime(thread_finish_cede);
 }
 
-static __always_inline thread_t *__thread_create(void)
+static __always_inline thread_t *__thread_create(bool include_stack)
 {
 	struct thread *th;
-	struct stack *s;
+	struct stack *s = NULL;
 
 	preempt_disable();
 	th = tcache_alloc(&perthread_get(thread_pt));
@@ -541,11 +604,13 @@ static __always_inline thread_t *__thread_create(void)
 		return NULL;
 	}
 
-	s = stack_alloc();
-	if (unlikely(!s)) {
-		tcache_free(&perthread_get(thread_pt), th);
-		preempt_enable();
-		return NULL;
+	if (include_stack) {
+		s = stack_alloc();
+		if (unlikely(!s)) {
+			tcache_free(&perthread_get(thread_pt), th);
+			preempt_enable();
+			return NULL;
+		}
 	}
 	preempt_enable();
 
@@ -557,6 +622,15 @@ static __always_inline thread_t *__thread_create(void)
 	return th;
 }
 
+static __always_inline thread_t *__thread_create_nostack(void)
+{
+	return __thread_create(false);
+}
+static __always_inline thread_t *__thread_create_withstack(void)
+{
+	return __thread_create(true);
+}
+
 /**
  * thread_create - creates a new thread
  * @fn: a function pointer to the starting method of the thread
@@ -566,11 +640,10 @@ static __always_inline thread_t *__thread_create(void)
  */
 thread_t *thread_create(thread_fn_t fn, void *arg)
 {
-	thread_t *th = __thread_create();
+	thread_t *th = __thread_create_nostack();
 	if (unlikely(!th))
 		return NULL;
 
-	th->tf.rsp = stack_init_to_rsp(th->stack, thread_exit);
 	th->tf.rdi = (uint64_t)arg;
 	th->tf.rbp = (uint64_t)0; /* just in case base pointers are enabled */
 	th->tf.rip = (uint64_t)fn;
@@ -590,7 +663,7 @@ thread_t *thread_create(thread_fn_t fn, void *arg)
 thread_t *thread_create_with_buf(thread_fn_t fn, void **buf, size_t buf_len)
 {
 	void *ptr;
-	thread_t *th = __thread_create();
+	thread_t *th = __thread_create_withstack();
 	if (unlikely(!th))
 		return NULL;
 
@@ -657,7 +730,6 @@ static void thread_finish_exit(void)
 	tcache_free(&perthread_get(thread_pt), th);
 	__self = NULL;
 
-	spin_lock(&myk()->lock);
 	schedule();
 }
 
@@ -666,9 +738,9 @@ static void thread_finish_exit(void)
  */
 void thread_exit(void)
 {
-	/* can't free the stack we're currently using, so switch */
 	preempt_disable();
-	jmp_runtime_nosave(thread_finish_exit);
+
+	enter_schedule_exit(thread_self());
 }
 
 /**
