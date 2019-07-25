@@ -27,3 +27,7 @@
 #define PMC_ARCH_LLC_MISSES     PMC_ESEL_ENTRY(0x2E, 0x41, 0)
 #define PMC_ARCH_BRANCHES       PMC_ESEL_ENTRY(0xC4, 0x00, 0)
 #define PMC_ARCH_BRANCH_MISSES  PMC_ESEL_ENTRY(0xC5, 0x00, 0)
+
+/* this performance counter measures LLC misses as a proxy for mem bandwidth */
+#define PMC_LLC_MISSES (PMC_ARCH_LLC_MISSES | PMC_ESEL_USR | PMC_ESEL_OS | \
+			PMC_ESEL_ANY | PMC_ESEL_ENABLE)

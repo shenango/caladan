@@ -24,10 +24,6 @@ static DEFINE_BITMAP(mis_idle_cores, NCPU);
 /* a bitmap of all cores with performance counters being sampled */
 static DEFINE_BITMAP(mis_sampled_cores, NCPU);
 
-/* this performance counter measures LLC misses as a proxy for mem bandwidth */
-#define PMC_LLC_MISSES (PMC_ARCH_LLC_MISSES | PMC_ESEL_USR | PMC_ESEL_OS | \
-			PMC_ESEL_ANY | PMC_ESEL_ENABLE)
-
 /* poll the global (system-wide) memory bandwidth over this time interval */
 #define MIS_BW_MEASURE_INTERVAL	25
 /* wait for performance counter results over this time interval */

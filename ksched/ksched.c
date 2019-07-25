@@ -30,8 +30,9 @@
 #include <linux/uaccess.h>
 
 #include "ksched.h"
+#include "../iokernel/pmc.h"
 
-#define KSCHED_PMC_PROBE_DELAY (3)
+#define KSCHED_PMC_PROBE_DELAY (1)
 #define CORE_PERF_GLOBAL_CTRL_ENABLE_PMC_0 (0x1)
 #define CORE_PERF_GLOBAL_CTRL_ENABLE_PMC_1 (0x2)
 
@@ -266,7 +267,6 @@ static u64 ksched_measure_pmc(u64 sel)
 {
 	u64 start, end;
 
-	wrmsrl(MSR_P6_EVNTSEL0, sel);
 	rdmsrl(MSR_P6_PERFCTR0, start);
 	udelay(KSCHED_PMC_PROBE_DELAY);
 	rdmsrl(MSR_P6_PERFCTR0, end);
@@ -442,6 +442,7 @@ static void __exit ksched_cpuidle_unhijack(void)
 
 static void __init ksched_init_pmc(void *arg)
 {
+        wrmsrl(MSR_P6_EVNTSEL0, PMC_LLC_MISSES);
         wrmsrl(MSR_CORE_PERF_GLOBAL_CTRL, CORE_PERF_GLOBAL_CTRL_ENABLE_PMC_0 |
                                           CORE_PERF_GLOBAL_CTRL_ENABLE_PMC_1);
 }
