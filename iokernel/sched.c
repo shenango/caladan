@@ -509,6 +509,9 @@ int sched_init(void)
 	 */
 
 	for (i = 0; i < cpu_count; i++) {
+		if (cpu_info_tbl[i].package != 0 && sched_ops != &numa_ops)
+			continue;
+
 		if (allowed_cores_supplied &&
 		    !bitmap_test(input_allowed_cores, i))
 			continue;
