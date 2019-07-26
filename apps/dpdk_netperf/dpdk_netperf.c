@@ -19,6 +19,7 @@
 #define BURST_SIZE 32
 #define MAX_CORES 64
 #define UDP_MAX_PAYLOAD 1472
+#define MAX_SAMPLES (100*1000*1000)
 
 static const struct rte_eth_conf port_conf_default = {
 	.rxmode = {
@@ -68,6 +69,7 @@ static uint32_t my_ip;
 static uint32_t server_ip;
 static int seconds;
 static size_t payload_len;
+static unsigned int interval_us;
 static unsigned int client_port;
 static unsigned int server_port;
 static unsigned int num_queues = 1;
@@ -78,6 +80,8 @@ struct ether_addr broadcast_mac = {
 		.addr_bytes = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}
 };
 uint16_t next_port = 50000;
+static uint64_t snd_times[MAX_SAMPLES];
+static uint64_t rcv_times[MAX_SAMPLES];
 
 /* dpdk_netperf.c: simple implementation of netperf on DPDK */
 
@@ -273,7 +277,7 @@ static bool check_ip_hdr(struct rte_mbuf *buf)
  */
 static void do_client(uint8_t port)
 {
-	uint64_t start_time, end_time;
+	uint64_t start_time, end_time, next_send_time;
 	struct rte_mbuf *bufs[BURST_SIZE];
 	struct rte_mbuf *buf;
 	struct ether_hdr *ptr_mac_hdr;
@@ -282,12 +286,18 @@ static void do_client(uint8_t port)
 	struct ether_hdr *eth_hdr;
 	struct ipv4_hdr *ipv4_hdr;
 	struct udp_hdr *udp_hdr;
-	uint16_t nb_tx, nb_rx, i;
+	uint32_t nb_tx, nb_rx, i;
 	uint64_t reqs = 0;
 	struct ether_addr server_eth;
 	struct nbench_req *control_req;
 	struct nbench_resp *control_resp;
 	bool setup_port = false;
+	uint64_t interval_cycles, time_received;
+
+	/* Verify that we have enough space for all the datapoints */
+	uint32_t samples = seconds / ((float) interval_us / (1000*1000));
+	if (samples > MAX_SAMPLES)
+		rte_exit(EXIT_FAILURE, "Too many samples: %d\n", samples);
 
 	/*
 	 * Check that the port is on the same NUMA node as the polling thread
@@ -337,6 +347,8 @@ got_mac:
 
 	/* run for specified amount of time */
 	start_time = rte_get_timer_cycles();
+	interval_cycles = (float) interval_us / (1000 * 1000) * rte_get_timer_hz();
+	next_send_time = start_time;
 	while (rte_get_timer_cycles() <
 			start_time + seconds * rte_get_timer_hz()) {
 		buf = rte_pktmbuf_alloc(tx_mbuf_pool);
@@ -387,6 +399,7 @@ got_mac:
 		buf->ol_flags = PKT_TX_IP_CKSUM | PKT_TX_IPV4;
 
 		/* send packet */
+		snd_times[reqs] = rte_get_timer_cycles();
 		nb_tx = rte_eth_tx_burst(port, 0, &buf, 1);
 
 		if (unlikely(nb_tx != 1)) {
@@ -396,6 +409,7 @@ got_mac:
 		nb_rx = 0;
 		while (true) {
 			nb_rx = rte_eth_rx_burst(port, 0, bufs, BURST_SIZE);
+			time_received = rte_get_timer_cycles();
 			if (nb_rx == 0)
 				continue;
 
@@ -442,18 +456,24 @@ got_mac:
 			}
 		}
 	found_match:
-
-		reqs++;
+		rcv_times[reqs++] = time_received;
+		next_send_time += interval_cycles;
+		while (rte_get_timer_cycles() < next_send_time) {
+		  /* spin until time for next packet */
+		}
 	}
 	end_time = rte_get_timer_cycles();
-	if (setup_port)
-		reqs--;
+
+	/* add up total cycles across all RTTs */
+	uint64_t total_cycles = 0;
+	for (i = 0; i < reqs; i++)
+		total_cycles += rcv_times[i] - snd_times[i];
 
 	printf("ran for %f seconds, sent %"PRIu64" packets\n",
 			(float) (end_time - start_time) / rte_get_timer_hz(), reqs);
 	printf("client reqs/s: %f\n",
 			(float) (reqs * rte_get_timer_hz()) / (end_time - start_time));
-	printf("mean latency (us): %f\n", (float) (end_time - start_time) *
+	printf("mean latency (us): %f\n", (float) total_cycles *
 			1000 * 1000 / (reqs * rte_get_timer_hz()));
 }
 
@@ -635,7 +655,7 @@ static int parse_netperf_args(int argc, char *argv[])
 	if (!strcmp(argv[1], "UDP_CLIENT")) {
 		mode = MODE_UDP_CLIENT;
 		argc -= 3;
-		if (argc < 5) {
+		if (argc < 6) {
 			printf("not enough arguments left: %d\n", argc);
 			return -EINVAL;
 		}
@@ -648,6 +668,8 @@ static int parse_netperf_args(int argc, char *argv[])
 		seconds = tmp;
 		str_to_long(argv[7], &tmp);
 		payload_len = tmp;
+		str_to_long(argv[8], &tmp);
+		interval_us = tmp;
 	} else if (!strcmp(argv[1], "UDP_SERVER")) {
 		mode = MODE_UDP_SERVER;
 		argc -= 3;
