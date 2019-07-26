@@ -628,15 +628,19 @@ fn run_client(
 
     let mut start_index = 0;
     let mut start = Duration::from_nanos(100_000_000);
-    schedules.iter().all(|sched| {
+    schedules.iter().fold(true, |pres, sched| {
         let npackets = packets[start_index..]
             .iter()
             .position(|p| p.target_start >= start + sched.runtime)
             .unwrap_or(packets.len() - start_index);
-        let res = process_result(&sched, &mut packets[start_index..start_index + npackets], start_unix);
+        let res = process_result(
+            &sched,
+            &mut packets[start_index..start_index + npackets],
+            start_unix,
+        );
         start_index += npackets;
         start += sched.runtime;
-        res
+        pres && res
     })
 }
 

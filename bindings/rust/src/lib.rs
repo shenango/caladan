@@ -11,8 +11,8 @@ use std::cell::UnsafeCell;
 use std::ffi::CString;
 use std::mem;
 use std::os::raw::{c_int, c_void};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 pub mod ffi {
@@ -136,14 +136,14 @@ impl SpinLock {
 
     #[inline]
     pub fn lock_np(&self) {
-	preempt_disable();
-	self.lock();
+        preempt_disable();
+        self.lock();
     }
 
     #[inline]
     pub fn unlock_np(&self) {
-	self.unlock();
-	preempt_enable();
+        self.unlock();
+        preempt_enable();
     }
 
     #[inline]

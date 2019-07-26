@@ -87,7 +87,6 @@ impl ReflexProtocol {
     }
 
     pub fn gen_request(i: usize, p: &Packet, buf: &mut Vec<u8>, tport: Transport) {
-
         if let Transport::Udp = tport {
             panic!("udp is unsupported by the reflex protocol");
         }
