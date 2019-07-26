@@ -327,7 +327,7 @@ static void numa_sched_poll(uint64_t now, int idle_cnt, bitmap_ptr_t idle)
 			bitmap_set(numa_idle_cores, core);
 			continue;
 		}
-		numa_unmark_congested(sd);
+
 		if (unlikely(numa_run_kthread_on_core(sd->p, core))) {
 			bitmap_set(numa_idle_cores, core);
 			numa_mark_congested(sd);

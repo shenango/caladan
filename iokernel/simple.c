@@ -308,7 +308,7 @@ static void simple_sched_poll(uint64_t now, int idle_cnt, bitmap_ptr_t idle)
 			bitmap_set(simple_idle_cores, core);
 			continue;
 		}
-		simple_unmark_congested(sd);
+
 		if (unlikely(simple_run_kthread_on_core(sd->p, core))) {
 			bitmap_set(simple_idle_cores, core);
 			simple_mark_congested(sd);
