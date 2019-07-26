@@ -27,7 +27,7 @@ static DEFINE_BITMAP(mis_sampled_cores, NCPU);
 /* poll the global (system-wide) memory bandwidth over this time interval */
 #define MIS_BW_MEASURE_INTERVAL	25
 /* wait for performance counter results over this time interval */
-#define MIS_BW_PUNISH_INTERVAL	10
+#define MIS_BW_PUNISH_INTERVAL	20
 /* FIXME: should not be hard coded */
 #define MIS_BW_HIGH_WATERMARK	0.105 
 /* FIXME: should not be hard coded */
@@ -414,17 +414,27 @@ static struct mis_data *mis_choose_bandwidth_victim(void)
 	float highest_l3miss;
 	uint64_t pmc;
 	int i;
+	int has_not_ready = 0;
+	static int invoked_cnt = 0;
+	static int not_ready_cnt = 0;
 
 	bitmap_for_each_set(mis_sampled_cores, NCPU, i) {
 		sd = cores[sched_siblings[i]];
 		if (unlikely(!ksched_poll_pmc(i, &pmc))) {
-			if (sd)
+			if (sd) {
+				has_not_ready = 1;
 				sd->threads_monitored--;
+			}
 			continue;
 		}
 		if (sd)
 			sd->llc_misses += pmc;
 	}
+
+	not_ready_cnt += has_not_ready;
+	invoked_cnt++;
+	log_ratelimited(LOG_INFO, "not ready ratio = %f",
+			(float)not_ready_cnt / (float)invoked_cnt);
 
 	list_for_each(&all_procs, sd, all_link) {
 		if (!sd->threads_monitored) {
