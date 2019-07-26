@@ -281,7 +281,6 @@ int storage_write(const void *payload, uint64_t lba, uint32_t lba_count)
 				    thread_self(), 0);
 
 	if (unlikely(rc != 0)) {
-		log_err_ratelimited("starting write I/O failed");
 		spin_unlock(&q->lock);
 		rc = -EIO;
 		goto done_np;
@@ -341,7 +340,6 @@ int storage_read(void *dest, uint64_t lba, uint32_t lba_count)
 				   thread_self(), 0);
 
 	if (unlikely(rc != 0)) {
-		log_err_ratelimited("starting read I/O failed\n");
 		spin_unlock(&q->lock);
 		rc = -EIO;
 		goto done_np;

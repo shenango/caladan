@@ -70,10 +70,8 @@ class RequestContext {
 
 void HandleGetRequest(RequestContext *ctx) {
   ssize_t ret = storage_read(ctx->buf, ctx->header.lba, ctx->header.lba_count);
-  if (ret < 0) {
-    log_err_ratelimited("storage_read failed");
+  if (ret < 0)
     return;
-  }
   size_t payload_size = kSectorSize * ctx->header.lba_count;
   struct iovec response[2] = {
       {
@@ -94,10 +92,8 @@ void HandleGetRequest(RequestContext *ctx) {
 
 void HandleSetRequest(RequestContext *ctx) {
   ssize_t ret = storage_write(ctx->buf, ctx->header.lba, ctx->header.lba_count);
-  if (ret < 0) {
-    log_err_ratelimited("storage_write failed");
+  if (ret < 0)
     return;
-  }
 
   ret = ctx->conn->WriteFull(&ctx->header, sizeof(ctx->header));
   if (ret != static_cast<ssize_t>(sizeof(ctx->header))) {
