@@ -16,7 +16,6 @@
 
 #include "mlx.h"
 #include "ref.h"
-#include "spdk.h"
 
 /* #define STATS 1 */
 
@@ -55,7 +54,7 @@ struct hwq {
 	bool			enabled;
 	void			*descriptor_table;
 	uint32_t		*consumer_idx;
-	uint32_t		descriptor_size;
+	uint32_t		descriptor_log_size;
 	uint32_t		nr_descriptors;
 	uint32_t		parity_byte_offset;
 	uint32_t		parity_bit_mask;
@@ -83,7 +82,13 @@ struct thread {
 	unsigned int		core;
 	unsigned int		at_idx;
 	unsigned int		ts_idx;
-	struct hwq		directpath_hwq;
+	union {
+		struct {
+			struct hwq		directpath_hwq;
+			struct hwq		storage_hwq;
+		};
+		struct hwq		hwqs[2];
+	};
 	struct timer		timer_heap;
 	struct list_node	idle_link;
 };
@@ -95,7 +100,7 @@ static inline bool hwq_busy(struct hwq *h, uint32_t cq_idx)
 
 	idx = cq_idx & (h->nr_descriptors - 1);
 	parity = !!(cq_idx & h->nr_descriptors);
-	addr = h->descriptor_table + (h->descriptor_size * idx) + h->parity_byte_offset;
+	addr = h->descriptor_table + (idx << h->descriptor_log_size) + h->parity_byte_offset;
 	hd_parity = !!(ACCESS_ONCE(*addr) & h->parity_bit_mask);
 
 	return parity == hd_parity;
@@ -138,16 +143,6 @@ struct proc {
 	size_t max_overflows;
 	size_t nr_overflows;
 	unsigned long *overflow_queue;
-
-	unsigned int nvmeq_cnt;
-	struct {
-		void* last_cpl;
-		bool last_pending;
-
-		struct spdk_nvme_cpl	*cpl_ref;
-		uint16_t		*nvme_io_cq_head;
-		uint8_t			*nvme_io_phase;
-	} nvmeq[NCPU];
 
 	/* table of physical addresses for shared memory */
 	physaddr_t		page_paddrs[];

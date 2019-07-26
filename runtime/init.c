@@ -43,10 +43,8 @@ static const struct init_entry global_init_handlers[] = {
 	GLOBAL_INITIALIZER(arp),
 	GLOBAL_INITIALIZER(trans),
 
-#if __has_include("spdk/nvme.h")
 	/* storage */
 	GLOBAL_INITIALIZER(storage),
-#endif
 };
 
 #define THREAD_INITIALIZER(name) \
@@ -66,10 +64,8 @@ static const struct init_entry thread_init_handlers[] = {
 	THREAD_INITIALIZER(net),
 	THREAD_INITIALIZER(directpath),
 
-#if __has_include("spdk/nvme.h")
 	/* storage */
 	THREAD_INITIALIZER(storage),
-#endif
 };
 
 #define LATE_INITIALIZER(name) \

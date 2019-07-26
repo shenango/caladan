@@ -220,15 +220,83 @@ struct iokernel_control {
 	mem_key_t key;
 	struct control_hdr *hdr;
 	struct thread_spec *threads;
-	struct timer_spec *timers;
-	struct hwq_spec *hwqs;
 	void *tx_buf;
 	size_t tx_len;
-	unsigned int spdk_shm_id;
 };
 
 extern struct iokernel_control iok;
 extern void *iok_shm_alloc(size_t size, size_t alignment, shmptr_t *shm_out);
+
+/*
+ * Direct hardware queue support
+ */
+
+struct hardware_q {
+	void		*descriptor_table;
+	uint32_t		*consumer_idx;
+	uint32_t		*shadow_tail;
+	uint32_t		descriptor_log_size;
+	uint32_t		nr_descriptors;
+	uint32_t		parity_byte_offset;
+	uint32_t		parity_bit_mask;
+};
+
+static inline bool hardware_q_pending(struct hardware_q *q)
+{
+	uint32_t tail, idx, parity, hd_parity;
+	unsigned char *addr;
+
+	tail = ACCESS_ONCE(*q->consumer_idx);
+	idx = tail & (q->nr_descriptors - 1);
+	parity = !!(tail & q->nr_descriptors);
+	addr = q->descriptor_table +
+		     (idx << q->descriptor_log_size) + q->parity_byte_offset;
+	hd_parity = !!(ACCESS_ONCE(*addr) & q->parity_bit_mask);
+
+	return parity == hd_parity;
+}
+
+/*
+ * Storage support
+ */
+
+#ifdef DIRECT_STORAGE
+
+struct storage_q {
+
+	spinlock_t lock;
+
+	unsigned int outstanding_reqs;
+	void *spdk_qp_handle;
+
+	struct hardware_q hq;
+
+	unsigned long pad[1];
+};
+
+static inline bool storage_available_completions(struct storage_q *q)
+{
+	return hardware_q_pending(&q->hq);
+}
+
+extern int storage_proc_completions(struct storage_q *q,
+	    unsigned int budget, struct thread **wakeable_threads);
+#else
+
+struct storage_q {};
+
+static inline bool storage_available_completions(struct storage_q *q)
+{
+	return false;
+}
+
+static inline int storage_proc_completions(struct storage_q *q,
+	    unsigned int budget, struct thread **wakeable_threads)
+{
+	return 0;
+}
+
+#endif
 
 
 /*
@@ -312,13 +380,10 @@ struct kthread {
 	unsigned long		pad2[6];
 
 	/* 9th cache-line, storage nvme queues */
-	void			*nvme_io_pair;
-	spinlock_t		io_pair_lock;
-	unsigned long		outstanding_reqs;
-	unsigned long		pad3[5];
+	struct storage_q		storage_q;
 
 	/* 10th cache-line, direct path queues */
-	struct direct_rxq		*directpath_rxq;
+	struct hardware_q		*directpath_rxq;
 	struct direct_txq		*directpath_txq;
 	unsigned long		pad4[6];
 
@@ -332,7 +397,8 @@ BUILD_ASSERT(offsetof(struct kthread, q_ptrs) % CACHE_LINE_SIZE == 0);
 BUILD_ASSERT(offsetof(struct kthread, txpktq) % CACHE_LINE_SIZE == 0);
 BUILD_ASSERT(offsetof(struct kthread, rq) % CACHE_LINE_SIZE == 0);
 BUILD_ASSERT(offsetof(struct kthread, timer_lock) % CACHE_LINE_SIZE == 0);
-BUILD_ASSERT(offsetof(struct kthread, nvme_io_pair) % CACHE_LINE_SIZE == 0);
+BUILD_ASSERT(offsetof(struct kthread, storage_q) % CACHE_LINE_SIZE == 0);
+BUILD_ASSERT(offsetof(struct kthread, directpath_rxq) % CACHE_LINE_SIZE == 0);
 BUILD_ASSERT(offsetof(struct kthread, stats) % CACHE_LINE_SIZE == 0);
 
 extern __thread struct kthread *mykthread;
@@ -439,25 +505,12 @@ extern void net_rx_softirq_direct(struct mbuf **ms, unsigned int nr);
 
 #ifdef DIRECTPATH
 
-struct direct_rxq {
-	/* runtime provides this memory location */
-	uint32_t		*shadow_tail; /* shared with iokernel */
-	uint32_t		consumer_idx;
-
-	/* driver provides details for business monitoring */
-	void		*descriptor_table;
-	uint32_t		descriptor_log_size;
-	uint32_t		nr_descriptors;
-	uint32_t		parity_byte_offset;
-	uint32_t		parity_bit_mask;
-	uint32_t		hwq_type;
-};
 
 struct direct_txq {};
 
 struct trans_entry;
 struct net_driver_ops {
-	int (*rx_batch)(struct direct_rxq *rxq, struct mbuf **ms, unsigned int budget);
+	int (*rx_batch)(struct hardware_q *rxq, struct mbuf **ms, unsigned int budget);
 	int (*tx_single)(struct direct_txq *txq, struct mbuf *m);
 	int (*steer_flows)(unsigned int *new_fg_assignment);
 	int (*register_flow)(unsigned int affininty, struct trans_entry *e, void **handle_out);
@@ -466,24 +519,18 @@ struct net_driver_ops {
 
 extern struct net_driver_ops net_ops;
 
-static inline bool rx_pending(struct direct_rxq *rxq)
+static inline bool rx_pending(struct hardware_q *rxq)
 {
-	uint32_t tail, idx, parity, hd_parity;
-	unsigned char *addr;
-
-	tail = ACCESS_ONCE(rxq->consumer_idx);
-	idx = tail & (rxq->nr_descriptors - 1);
-	parity = !!(tail & rxq->nr_descriptors);
-	addr = rxq->descriptor_table + (idx << rxq->descriptor_log_size) + rxq->parity_byte_offset;
-	hd_parity = !!(ACCESS_ONCE(*addr) & rxq->parity_bit_mask);
-
-	return parity == hd_parity;
+	return hardware_q_pending(rxq);
 }
+
 #else
-static inline bool rx_pending(struct direct_rxq *rxq)
+
+static inline bool rx_pending(struct hardware_q *rxq)
 {
 	return false;
 }
+
 #endif
 
 
@@ -512,29 +559,6 @@ static inline bool timer_needed(struct kthread *k)
 }
 
 
-/*
- * Storage support
- */
-
-#if __has_include("spdk/nvme.h")
-
-extern int storage_available_completions(struct kthread *k);
-extern int storage_proc_completions(struct kthread *k,
-	    unsigned int budget, struct thread **wakeable_threads);
-#else
-
-static inline int storage_available_completions(struct kthread *k)
-{
-	return 0;
-}
-static inline int storage_proc_completions(struct kthread *k,
-	    unsigned int budget, struct thread **wakeable_threads)
-{
-	return 0;
-}
-
-#endif
-
 static inline bool softirq_work_available(struct kthread *k)
 {
 	bool work_available;
@@ -542,7 +566,7 @@ static inline bool softirq_work_available(struct kthread *k)
 	work_available = rx_pending(k->directpath_rxq) ||
 	  !lrpc_empty(&k->rxq) || timer_needed(k);
 
-	work_available |= storage_available_completions(k);
+	work_available |= storage_available_completions(&k->storage_q);
 
 	return work_available;
 }

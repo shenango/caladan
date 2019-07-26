@@ -94,8 +94,12 @@ static size_t estimate_shm_space(void)
 	ret += EGRESS_POOL_SIZE(maxks);
 	ret = align_up(ret, PGSIZE_2MB);
 
+	// mlx5 directpath
+	ret += PGSIZE_2MB;
+
 	// SPDK Memory - TODO: size this correctly
-	ret += 12 * PGSIZE_2MB;
+	ret += 5 * PGSIZE_2MB;
+	ret += 2 * maxks * PGSIZE_2MB;
 
 	return ret;
 }
@@ -256,7 +260,6 @@ int ioqueues_register_iokernel(void)
 	BUG_ON((uintptr_t)iok.hdr != (uintptr_t)r->base);
 	hdr->magic = CONTROL_HDR_MAGIC;
 	hdr->version_no = CONTROL_HDR_VERSION;
-	hdr->spdk_shm_id = iok.spdk_shm_id;
 	hdr->egress_buf_count = div_up(iok.tx_len, MBUF_DEFAULT_LEN);
 	hdr->thread_count = maxks;
 	hdr->mac = netcfg.mac;

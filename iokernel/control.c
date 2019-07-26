@@ -63,9 +63,9 @@ static int control_init_hwq(struct shm_region *r,
 		return 0;
 	}
 
-	h->descriptor_table = shmptr_to_ptr(r, hs->descriptor_table, hs->descriptor_size * hs->nr_descriptors);
+	h->descriptor_table = shmptr_to_ptr(r, hs->descriptor_table, (1 << hs->descriptor_log_size) * hs->nr_descriptors);
 	h->consumer_idx = shmptr_to_ptr(r, hs->consumer_idx, sizeof(*h->consumer_idx));
-	h->descriptor_size = hs->descriptor_size;
+	h->descriptor_log_size = hs->descriptor_log_size;
 	h->nr_descriptors = hs->nr_descriptors;
 	h->parity_byte_offset = hs->parity_byte_offset;
 	h->parity_bit_mask = hs->parity_bit_mask;
@@ -78,7 +78,7 @@ static int control_init_hwq(struct shm_region *r,
 	if (!is_power_of_two(h->nr_descriptors))
 		return -EINVAL;
 
-	if (h->parity_byte_offset > h->descriptor_size)
+	if (h->parity_byte_offset > (1 << h->descriptor_log_size))
 		return -EINVAL;
 
 	h->last_head = 0;
@@ -177,25 +177,6 @@ static struct proc *control_create_proc(mem_key_t key, size_t len, pid_t pid,
 		if (!th->timer_heap.next_tsc)
 			goto fail;
 
-#if __has_include("spdk/nvme.h")
-		/* set SPDK pointers */
-		p->nvmeq[i].cpl_ref = (struct spdk_nvme_cpl *)shmptr_to_ptr(&reg,
-				(shmptr_t)s->nvme_qpair_cpl,
-				sizeof(p->nvmeq[i].cpl_ref));
-		if (!p->nvmeq[i].cpl_ref)
-			goto fail;
-		p->nvmeq[i].nvme_io_cq_head = (uint16_t *)shmptr_to_ptr(&reg,
-				(shmptr_t)s->nvme_qpair_cq_head,
-				sizeof(p->nvmeq[i].nvme_io_cq_head));
-		if (!p->nvmeq[i].nvme_io_cq_head)
-			goto fail;
-		p->nvmeq[i].nvme_io_phase = (uint8_t *)shmptr_to_ptr(&reg,
-				(shmptr_t)s->nvme_qpair_phase,
-				sizeof(p->nvmeq[i].nvme_io_phase));
-		if (!p->nvmeq[i].nvme_io_phase)
-			goto fail;
-#endif
-
 		th->tid = s->tid;
 		th->park_efd = fds[i];
 		th->p = p;
@@ -209,6 +190,10 @@ static struct proc *control_create_proc(mem_key_t key, size_t len, pid_t pid,
 			goto fail;
 
 		ret = control_init_hwq(&reg, &s->direct_rxq, &th->directpath_hwq);
+		if (ret)
+			goto fail;
+
+		ret = control_init_hwq(&reg, &s->storage_hwq, &th->storage_hwq);
 		if (ret)
 			goto fail;
 

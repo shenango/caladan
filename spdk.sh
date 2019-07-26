@@ -3,8 +3,10 @@
 set -e
 
 git submodule update --init --recursive
-patch -p 1 -d spdk < spdk.patch
-cd spdk
+
+pushd spdk
+git apply ../spdk.patch || true
 ./configure
-make
+make -j
 sudo scripts/setup.sh
+popd

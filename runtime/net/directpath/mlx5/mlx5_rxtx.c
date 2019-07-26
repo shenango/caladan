@@ -27,7 +27,7 @@ static inline int mlx5_refill_rxqueue(struct mlx5_rxq *vq, int nrdesc)
 
 	struct mlx5dv_rwq *wq = &vq->rx_wq_dv;
 
-	assert(wraps_lte(nrdesc + vq->wq_head, vq->rxq.consumer_idx + wq->wqe_cnt));
+	assert(wraps_lte(nrdesc + vq->wq_head, vq->consumer_idx + wq->wqe_cnt));
 
 	for (i = 0; i < nrdesc; i++) {
 		buf = tcache_alloc(&perthread_get(directpath_buf_pt));
@@ -152,7 +152,7 @@ static inline void mbuf_fill_cqe(struct mbuf *m, struct mlx5_cqe64 *cqe)
 	m->release = directpath_rx_completion;
 }
 
-int mlx5_gather_rx(struct direct_rxq *rxq, struct mbuf **ms, unsigned int budget)
+int mlx5_gather_rx(struct hardware_q *rxq, struct mbuf **ms, unsigned int budget)
 {
 	uint8_t opcode;
 	uint16_t wqe_idx;
@@ -165,9 +165,9 @@ int mlx5_gather_rx(struct direct_rxq *rxq, struct mbuf **ms, unsigned int budget
 	struct mlx5_cqe64 *cqe, *cqes = cq->buf;
 	struct mbuf *m;
 
-	for (rx_cnt = 0; rx_cnt < budget; rx_cnt++, v->rxq.consumer_idx++) {
-		cqe = &cqes[v->rxq.consumer_idx & (cq->cqe_cnt - 1)];
-		opcode = cqe_status(cqe, cq->cqe_cnt, v->rxq.consumer_idx);
+	for (rx_cnt = 0; rx_cnt < budget; rx_cnt++, v->consumer_idx++) {
+		cqe = &cqes[v->consumer_idx & (cq->cqe_cnt - 1)];
+		opcode = cqe_status(cqe, cq->cqe_cnt, v->consumer_idx);
 
 		if (opcode == MLX5_CQE_INVALID)
 			break;
@@ -189,9 +189,9 @@ int mlx5_gather_rx(struct direct_rxq *rxq, struct mbuf **ms, unsigned int budget
 	if (unlikely(!rx_cnt))
 		return rx_cnt;
 
-	ACCESS_ONCE(*rxq->shadow_tail) = v->rxq.consumer_idx;
+	ACCESS_ONCE(*rxq->shadow_tail) = v->consumer_idx;
 
-	cq->dbrec[0] = htobe32(v->rxq.consumer_idx & 0xffffff);
+	cq->dbrec[0] = htobe32(v->consumer_idx & 0xffffff);
 	BUG_ON(mlx5_refill_rxqueue(v, rx_cnt));
 
 	return rx_cnt;

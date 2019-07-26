@@ -17,4 +17,5 @@ test_smalloc
 test_thread
 test_udp_echo
 test_storage
+test_storage_iops
 netperf

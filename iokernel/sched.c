@@ -295,6 +295,9 @@ static void sched_detect_congestion(struct proc *p)
 
 		if (hardware_queue_congested(th, &th->directpath_hwq))
 			bitmap_set(ios, i);
+
+		if (hardware_queue_congested(th, &th->storage_hwq))
+			bitmap_set(ios, i);
 	}
 
 	/* detect expired timers */
@@ -316,17 +319,26 @@ static void sched_detect_congestion(struct proc *p)
 
 static int sched_try_fast_rewake(struct thread *th)
 {
-	struct hwq *h = &th->directpath_hwq;
+	int i;
+	struct hwq *h;
 
 	/*
 	 * If the kthread has yielded voluntarily but still has pending I/O
 	 * requests in flight, we can just wake it back up directly without
 	 * wasting any extra time in the scheduler.
 	 */
-	if (ACCESS_ONCE(th->rxq.send_head) == lrpc_poll_send_tail(&th->rxq) &&
-	    (!h->enabled || !hwq_busy(h, ACCESS_ONCE(*h->consumer_idx))))
-		return -EINVAL;
+	if (ACCESS_ONCE(th->rxq.send_head) != lrpc_poll_send_tail(&th->rxq))
+		goto rewake;
 
+	for (i = 0; i < ARRAY_SIZE(th->hwqs); i++) {
+		h = &th->hwqs[i];
+		if (h->enabled && hwq_busy(h, ACCESS_ONCE(*h->consumer_idx)))
+			goto rewake;
+	}
+
+	return -EINVAL;
+
+rewake:
 	ksched_run(th->core, th->tid);
 	state[th->core].wait = true;
 	return 0;

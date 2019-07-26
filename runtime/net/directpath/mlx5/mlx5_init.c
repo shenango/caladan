@@ -179,12 +179,12 @@ static int mlx5_create_rxq(int index, struct mlx5_rxq *v)
 	if (!v->buffers)
 		return -ENOMEM;
 
+	v->rxq.consumer_idx = &v->consumer_idx;
 	v->rxq.descriptor_table = v->rx_cq_dv.buf;
 	v->rxq.nr_descriptors = v->rx_cq_dv.cqe_cnt;
 	v->rxq.descriptor_log_size = __builtin_ctz(sizeof(struct mlx5_cqe64));
 	v->rxq.parity_byte_offset = offsetof(struct mlx5_cqe64, op_own);
 	v->rxq.parity_bit_mask = MLX5_CQE_OWNER_MASK;
-	v->rxq.hwq_type = HWQ_MLX5;
 
 	/* set byte_count and lkey for all descriptors once */
 	struct mlx5dv_rwq *wq = &v->rx_wq_dv;
@@ -320,7 +320,7 @@ static struct net_driver_ops mlx5_net_ops = {
 /*
  * mlx5_init - intialize all TX/RX queues
  */
-int mlx5_init(struct direct_rxq **rxq_out, struct direct_txq **txq_out,
+int mlx5_init(struct hardware_q **rxq_out, struct direct_txq **txq_out,
 	             unsigned int nr_rxq, unsigned int nr_txq)
 {
 	int i, ret;

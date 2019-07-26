@@ -10,7 +10,8 @@
 #include "net/defs.h"
 
 struct softirq_work {
-	unsigned int recv_cnt, compl_cnt, timer_budget, storage_cnt, direct_rx_cnt;
+	unsigned int recv_cnt, compl_cnt, timer_budget, storage_cnt,
+		direct_rx_cnt;
 	struct kthread *k;
 	struct mbuf *direct_reqs[SOFTIRQ_MAX_BUDGET];
 	struct rx_net_hdr *recv_reqs[SOFTIRQ_MAX_BUDGET];
@@ -27,6 +28,11 @@ static void softirq_fn(void *arg)
 	for (i = 0; i < w->compl_cnt; i++)
 		mbuf_free(w->compl_reqs[i]);
 
+#ifdef DIRECT_STORAGE
+	for (i = 0; i < w->storage_cnt; i++)
+		thread_ready(w->storage_threads[i]);
+#endif
+
 	/* deliver new RX packets to the runtime */
 	net_rx_softirq(w->recv_reqs, w->recv_cnt);
 
@@ -37,11 +43,6 @@ static void softirq_fn(void *arg)
 	/* handle any pending timeouts */
 	if (timer_needed(w->k))
 		timer_softirq(w->k, w->timer_budget);
-
-#if __has_include("spdk/nvme.h")
-	for (i = 0; i < w->storage_cnt; i++)
-		thread_ready(w->storage_threads[i]);
-#endif
 }
 
 static void softirq_gather_work(struct softirq_work *w, struct kthread *k,
@@ -62,9 +63,10 @@ static void softirq_gather_work(struct softirq_work *w, struct kthread *k,
 
 		switch (cmd) {
 		case RX_NET_RECV:
-			w->recv_reqs[recv_cnt] = shmptr_to_ptr(
-				&netcfg.rx_region,
-				(shmptr_t)payload, MBUF_DEFAULT_LEN);
+			w->recv_reqs[recv_cnt] =
+				shmptr_to_ptr(&netcfg.rx_region,
+					      (shmptr_t)payload,
+					      MBUF_DEFAULT_LEN);
 			BUG_ON(w->recv_reqs[recv_cnt] == NULL);
 			recv_cnt++;
 			break;
@@ -77,17 +79,17 @@ static void softirq_gather_work(struct softirq_work *w, struct kthread *k,
 			log_err_ratelimited("net: invalid RXQ cmd '%ld'", cmd);
 		}
 
-
 		if (recv_cnt >= real_budget || compl_cnt >= SOFTIRQ_MAX_BUDGET)
 			break;
 	}
 
 #ifdef DIRECTPATH
-	w->direct_rx_cnt = net_ops.rx_batch(k->directpath_rxq, w->direct_reqs, real_budget);
+	w->direct_rx_cnt = net_ops.rx_batch(k->directpath_rxq, w->direct_reqs,
+					    real_budget);
 #endif
 
-#if __has_include("spdk/nvme.h")
-	w->storage_cnt = storage_proc_completions(k, budget,
+#ifdef DIRECT_STORAGE
+	w->storage_cnt = storage_proc_completions(&k->storage_q, real_budget,
 						  w->storage_threads);
 #endif
 
@@ -96,7 +98,6 @@ static void softirq_gather_work(struct softirq_work *w, struct kthread *k,
 	w->compl_cnt = compl_cnt;
 	w->timer_budget = budget;
 }
-
 
 /**
  * softirq_run_thread - creates a closure for softirq handling

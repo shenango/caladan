@@ -13,7 +13,9 @@
 
 struct mlx5_rxq {
 	/* handle for runtime */
-	struct direct_rxq rxq;
+	struct hardware_q rxq;
+
+	uint32_t consumer_idx;
 
 	struct mlx5dv_cq rx_cq_dv;
 	struct mlx5dv_rwq rx_wq_dv;
@@ -56,7 +58,7 @@ extern struct mlx5_rxq rxqs[NCPU];
 extern struct ibv_context *context;
 
 extern int mlx5_transmit_one(struct direct_txq *t, struct mbuf *m);
-extern int mlx5_gather_rx(struct direct_rxq *rxq, struct mbuf **ms, unsigned int budget);
+extern int mlx5_gather_rx(struct hardware_q *rxq, struct mbuf **ms, unsigned int budget);
 extern int mlx5_steer_flows(unsigned int *new_fg_assignment);
 extern int mlx5_register_flow(unsigned int affinity, struct trans_entry *e, void **handle_out);
 extern int mlx5_deregister_flow(void *handle);

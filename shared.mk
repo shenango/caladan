@@ -49,6 +49,7 @@ FLAGS += -DMLX4
 endif
 endif
 ifeq ($(CONFIG_SPDK),y)
+FLAGS += -DDIRECT_STORAGE
 RUNTIME_LIBS += -L$(ROOT_PATH)/spdk/build/lib -L$(ROOT_PATH)/spdk/dpdk/build/lib
 RUNTIME_LIBS += -lspdk_nvme -lspdk_util -lspdk_env_dpdk -lspdk_log -lspdk_sock \
 		-ldpdk -lpthread -lrt -luuid -lcrypto -lnuma -ldl
