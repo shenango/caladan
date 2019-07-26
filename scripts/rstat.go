@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"fmt"
 	"strings"
+	"encoding/binary"
 )
 
 func prettyPrint(m, lastm map[string]uint64, interval int) {
@@ -50,12 +51,12 @@ func main() {
 	}
 
 	host := os.Args[1]
-	uaddr, err := net.ResolveUDPAddr("udp4", host + ":40")
+	uaddr, err := net.ResolveTCPAddr("tcp4", host + ":40")
 	if err != nil {
 		os.Exit(1)
 	}
 
-	c, err := net.DialUDP("udp", nil, uaddr)
+	c, err := net.DialTCP("tcp", nil, uaddr)
 	if err != nil {
 		os.Exit(1)
 	}
@@ -74,18 +75,13 @@ func main() {
 		if err != nil {
 			os.Exit(1)
 		}
-
-		c.SetReadDeadline(time.Now().Add(time.Duration(100) * time.Millisecond))
-		n, err := c.Read(buf[0:])
+		n, err := c.Read(buf[0:8])
 		if err != nil {
-			if nerr, ok := err.(net.Error); ok && nerr.Timeout() {
-				 c.Close()
-				 c,err = net.DialUDP("udp", nil, uaddr)
-				      if err != nil {
-			                os.Exit(1)
-				}
-				continue
-			}
+			os.Exit(1)
+		}
+		datalen := binary.LittleEndian.Uint64(buf[0:8])
+		n, err = c.ReadFull(buf[0:datalen])
+		if err != nil {
 			os.Exit(1)
 		}
 		strs := strings.Split(string(buf[0:n-1]), ",")
