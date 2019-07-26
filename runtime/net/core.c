@@ -328,11 +328,15 @@ static void net_tx_raw(struct mbuf *m)
 	hdr->olflags = m->txflags;
 	shmptr_t shm = ptr_to_shmptr(&netcfg.tx_region, hdr, len + sizeof(*hdr));
 
-	if (!lrpc_send(&k->txpktq, TXPKT_NET_XMIT, shm))
+	if (!lrpc_send(&k->txpktq, TXPKT_NET_XMIT, shm)) {
 		mbufq_push_tail(&k->txpktq_overflow, m);
+		STAT(TXQ_OVERFLOW)++;
+	}
 #else
-	if (unlikely(net_ops.tx_single(k->directpath_txq, m)))
+	if (unlikely(net_ops.tx_single(k->directpath_txq, m))) {
 		mbufq_push_tail(&k->txpktq_overflow, m);
+		STAT(TXQ_OVERFLOW)++;
+	}
 #endif
 	putk();
 }

@@ -479,6 +479,7 @@ void thread_ready(thread_t *th)
 		list_add_tail(&k->rq_overflow, &th->link);
 		spin_unlock(&k->lock);
 		putk();
+		STAT(RQ_OVERFLOW)++;
 		return;
 	}
 
