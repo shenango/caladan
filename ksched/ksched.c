@@ -347,7 +347,6 @@ static void send_ipi(cpumask_var_t mask)
 
 	for_each_cpu(cpu, mask) {
 	        ipi_ldrs[ipi_ldrs_num++] = ldrs[cpu];
-		// printk(KERN_INFO "cpu = %d, ipi_ldrs = %x\n", cpu, ldrs[cpu]);
 	}
 	if (!ipi_ldrs_num)
 		return;
@@ -362,14 +361,12 @@ static void send_ipi(cpumask_var_t mask)
 		} else {
 			icr = ZAIN_VECTOR | ICR_LOGICAL_MODE |
 				ICR_DEST_FIELD(clustered_ldr);
-			// printk(KERN_INFO "issue clustered_ldr = %llx\n", icr);
 			wrmsrl(MSR_X2APIC_ICR, icr);
 			clustered_ldr = cur_ldr;
 		}
 	}
 	icr = ZAIN_VECTOR | ICR_LOGICAL_MODE |
 		ICR_DEST_FIELD(clustered_ldr);
-	// printk(KERN_INFO "issue clustered_ldr = %llx\n", icr);
 	wrmsrl(MSR_X2APIC_ICR, icr);
 }
 
@@ -417,7 +414,6 @@ static long ksched_intr(struct ksched_intr_req __user *ureq)
 		return -EFAULT;
 	}
 
-	/* send interrupts */
 #ifdef OS_SUPPORT_CUSTOMIZED_IPI_HANDER
         send_ipi(mask);
 #else

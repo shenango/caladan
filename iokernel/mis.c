@@ -27,7 +27,7 @@ static DEFINE_BITMAP(mis_sampled_cores, NCPU);
 /* poll the global (system-wide) memory bandwidth over this time interval */
 #define MIS_BW_MEASURE_INTERVAL	25
 /* wait for performance counter results over this time interval */
-#define MIS_BW_PUNISH_INTERVAL	20
+#define MIS_BW_PUNISH_INTERVAL	10
 /* FIXME: should not be hard coded */
 #define MIS_BW_HIGH_WATERMARK	0.105 
 /* FIXME: should not be hard coded */

@@ -24,3 +24,8 @@ echo 8192 > /sys/devices/system/node/node1/hugepages/hugepages-2048kB/nr_hugepag
 for n in /sys/devices/system/node/node[2-9]; do
 	echo 0 > $n/hugepages/hugepages-2048kB/nr_hugepages
 done
+
+# reserve the first LLC to iokernel
+sudo pqos -R l3cdp-any
+sudo pqos -e "llc:1=0x00001;llc:0=0xffffe;"
+sudo pqos -a "llc:1=0"
