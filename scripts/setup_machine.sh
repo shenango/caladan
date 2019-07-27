@@ -28,5 +28,5 @@ done
 # reserve the first LLC to iokernel
 modprobe msr
 pqos -R l3cdp-any
-pqos -e "llc:1=0x00001;llc:0=0xffffe;"
+pqos -e "llc:1=0x00003;llc:0=0xffffc;"
 pqos -a "llc:1=0"
