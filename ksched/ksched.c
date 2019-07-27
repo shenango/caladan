@@ -3,7 +3,9 @@
  */
 
 #include <asm/io.h>
+#include <asm/irq.h>
 #include <asm/local.h>
+#include <asm/irq_vectors.h>
 #include <asm/set_memory.h>
 #include <asm/msr-index.h>
 #include <asm/msr.h>
@@ -19,6 +21,7 @@
 #include <linux/errno.h>
 #include <linux/fs.h>
 #include <linux/init.h>
+#include <linux/sort.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/moduleparam.h>
@@ -36,7 +39,17 @@
 #define CORE_PERF_GLOBAL_CTRL_ENABLE_PMC_0 (0x1)
 #define CORE_PERF_GLOBAL_CTRL_ENABLE_PMC_1 (0x2)
 
-MODULE_LICENSE("GPL");
+#ifdef ZAIN_VECTOR
+#define OS_SUPPORT_CUSTOMIZED_IPI_HANDER
+#endif
+
+#define MSR_X2APIC_ICR (0x830)
+#define ICR_LOGICAL_MODE (1 << 11)
+#define ICR_DEST_FIELD(x) (((unsigned long long)x) << 32)
+#define MSR_X2APIC_LDR (0x80D)
+#define X2APIC_LDR_MAX_LOGICAL_IDS (16)
+
+static unsigned int ldrs[NR_CPUS];
 
 /* the character device that provides the ksched IOCTL interface */
 static struct cdev ksched_cdev;
@@ -273,7 +286,7 @@ static u64 ksched_measure_pmc(u64 sel)
 	return end - start;
 }
 
-static void ksched_ipi(void *unused)
+static void ipi_handler(void)
 {
 	struct ksched_percpu *p;
 	struct ksched_shm_cpu *s;
@@ -297,7 +310,80 @@ static void ksched_ipi(void *unused)
 		smp_store_release(&s->pmc, 0);
 	}
 
+	put_cpu();	
+}
+
+static void ksched_ipi(void *unused)
+{
+	ipi_handler();
+}
+
+static inline int get_cluster_id(unsigned int ldr)
+{
+	return ldr >> X2APIC_LDR_MAX_LOGICAL_IDS;
+
+}
+
+static int compare(const void *lhs, const void *rhs)
+{
+	unsigned int lhs_integer = *(const int *)(lhs);
+	unsigned int rhs_integer = *(const int *)(rhs);
+
+	if (lhs_integer < rhs_integer) return -1;
+	if (lhs_integer > rhs_integer) return 1;
+	return 0;
+}
+
+static void send_ipi(cpumask_var_t mask)
+{
+	static unsigned int ipi_ldrs[NR_CPUS];
+		
+	unsigned int clustered_ldr = 0;
+	unsigned int cur_ldr;
+	int cpu;
+	unsigned long long icr;
+	int ipi_ldrs_num = 0;
+	int i;
+
+	for_each_cpu(cpu, mask) {
+	        ipi_ldrs[ipi_ldrs_num++] = ldrs[cpu];
+		// printk(KERN_INFO "cpu = %d, ipi_ldrs = %x\n", cpu, ldrs[cpu]);
+	}
+	if (!ipi_ldrs_num)
+		return;
+	
+	sort(ipi_ldrs, ipi_ldrs_num, sizeof(unsigned int), &compare, NULL);
+	clustered_ldr = ipi_ldrs[0];
+	for (i = 1; i < ipi_ldrs_num; i++) {
+		cur_ldr = ipi_ldrs[i];
+		if (get_cluster_id(cur_ldr) ==
+		    get_cluster_id(clustered_ldr)) {
+			clustered_ldr |= cur_ldr;
+		} else {
+			icr = ZAIN_VECTOR | ICR_LOGICAL_MODE |
+				ICR_DEST_FIELD(clustered_ldr);
+			// printk(KERN_INFO "issue clustered_ldr = %llx\n", icr);
+			wrmsrl(MSR_X2APIC_ICR, icr);
+			clustered_ldr = cur_ldr;
+		}
+	}
+	icr = ZAIN_VECTOR | ICR_LOGICAL_MODE |
+		ICR_DEST_FIELD(clustered_ldr);
+	// printk(KERN_INFO "issue clustered_ldr = %llx\n", icr);
+	wrmsrl(MSR_X2APIC_ICR, icr);
+}
+
+static void local_read_ldr(void *unused)
+{
+	int cpu;
+	cpu = get_cpu();
+	rdmsrl(MSR_X2APIC_LDR, ldrs[cpu]);
 	put_cpu();
+}
+
+static void read_ldrs(void)
+{
+	on_each_cpu(local_read_ldr, NULL, true);
 }
 
 static int get_user_cpu_mask(const unsigned long __user *user_mask_ptr,
@@ -332,7 +418,11 @@ static long ksched_intr(struct ksched_intr_req __user *ureq)
 	}
 
 	/* send interrupts */
+#ifdef OS_SUPPORT_CUSTOMIZED_IPI_HANDER
+        send_ipi(mask);
+#else
 	smp_call_function_many(mask, ksched_ipi, NULL, false);
+#endif
 	free_cpumask_var(mask);
 	return 0;
 }
@@ -386,7 +476,8 @@ static struct file_operations ksched_ops = {
 	.release	= ksched_release,
 };
 
-static int pci_cfg_mmap(struct file *file, struct vm_area_struct *vma) {
+static int pci_cfg_mmap(struct file *file, struct vm_area_struct *vma)
+{
         if (!capable(CAP_SYS_ADMIN))
                 return -EACCES;
         vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
@@ -492,6 +583,11 @@ static int __init ksched_init(void)
 	  goto fail_pci_cfg_cdev_add;
 	}
 
+#ifdef OS_SUPPORT_CUSTOMIZED_IPI_HANDER
+	set_customized_ipi_handler(ipi_handler);
+	read_ldrs();
+#endif
+	
 	return 0;
 	
 fail_pci_cfg_cdev_add:
@@ -521,3 +617,5 @@ static void __exit ksched_exit(void)
 
 module_init(ksched_init);
 module_exit(ksched_exit);
+
+MODULE_LICENSE("GPL");
