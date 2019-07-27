@@ -26,6 +26,7 @@ for n in /sys/devices/system/node/node[2-9]; do
 done
 
 # reserve the first LLC to iokernel
-sudo pqos -R l3cdp-any
-sudo pqos -e "llc:1=0x00001;llc:0=0xffffe;"
-sudo pqos -a "llc:1=0"
+modprobe msr
+pqos -R l3cdp-any
+pqos -e "llc:1=0x00001;llc:0=0xffffe;"
+pqos -a "llc:1=0"
