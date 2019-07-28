@@ -49,7 +49,9 @@
 #define MSR_X2APIC_LDR (0x80D)
 #define X2APIC_LDR_MAX_LOGICAL_IDS (16)
 
+#ifdef OS_SUPPORT_CUSTOMIZED_IPI_HANDER
 static unsigned int ldrs[NR_CPUS];
+#endif
 
 /* the character device that provides the ksched IOCTL interface */
 static struct cdev ksched_cdev;
@@ -313,11 +315,12 @@ static void ipi_handler(void)
 	put_cpu();	
 }
 
+#ifndef OS_SUPPORT_CUSTOMIZED_IPI_HANDER
 static void ksched_ipi(void *unused)
 {
 	ipi_handler();
 }
-
+#else
 static inline int get_cluster_id(unsigned int ldr)
 {
 	return ldr >> X2APIC_LDR_MAX_LOGICAL_IDS;
@@ -382,6 +385,7 @@ static void read_ldrs(void)
 {
 	on_each_cpu(local_read_ldr, NULL, true);
 }
+#endif
 
 static int get_user_cpu_mask(const unsigned long __user *user_mask_ptr,
 			     unsigned len, struct cpumask *new_mask)
