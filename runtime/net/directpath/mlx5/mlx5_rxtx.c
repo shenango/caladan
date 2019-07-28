@@ -81,15 +81,15 @@ static int mlx5_gather_completions(struct mbuf **mbufs, struct mlx5_txq *v, unsi
 
 /*
  * mlx5_transmit_one - send one mbuf
- * @t: queue to use
  * @m: mbuf to send
  *
- * returns 0 on success, errno on error
+ * uses local kthread tx queue
+ * returns 0 on success, -1 on error
  */
-int mlx5_transmit_one(struct direct_txq *t, struct mbuf *m)
+int mlx5_transmit_one(struct mbuf *m)
 {
 	int i, compl = 0;
-	struct mlx5_txq *v = container_of(t, struct mlx5_txq, txq);
+	struct mlx5_txq *v = container_of(myk()->directpath_txq, struct mlx5_txq, txq);
 	uint32_t idx = v->sq_head & (v->tx_qp_dv.sq.wqe_cnt - 1);
 	struct mbuf *mbs[SQ_CLEAN_MAX];
 	struct mlx5_wqe_ctrl_seg *ctrl;
@@ -103,7 +103,7 @@ int mlx5_transmit_one(struct direct_txq *t, struct mbuf *m)
 			mbuf_free(mbs[i]);
 		if (unlikely(nr_inflight_tx(v) >= v->tx_qp_dv.sq.wqe_cnt)) {
 			log_warn_ratelimited("txq full");
-			return 1;
+			return -1;
 		}
 	}
 

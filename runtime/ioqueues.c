@@ -94,13 +94,19 @@ static size_t estimate_shm_space(void)
 	ret += EGRESS_POOL_SIZE(maxks);
 	ret = align_up(ret, PGSIZE_2MB);
 
+#ifdef DIRECTPATH
 	// mlx5 directpath
-	ret += PGSIZE_2MB;
+	if (cfg_directpath_enabled)
+		ret += PGSIZE_2MB;
+#endif
 
+#ifdef DIRECT_STORAGE
 	// SPDK Memory - TODO: size this correctly
-	ret += 5 * PGSIZE_2MB;
-	ret += 2 * maxks * PGSIZE_2MB;
-
+	if (cfg_storage_enabled) {
+		ret += 5 * PGSIZE_2MB;
+		ret += 2 * maxks * PGSIZE_2MB;
+	}
+#endif
 	return ret;
 }
 

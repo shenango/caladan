@@ -262,6 +262,8 @@ static inline bool hardware_q_pending(struct hardware_q *q)
 
 #ifdef DIRECT_STORAGE
 
+extern bool cfg_storage_enabled;
+
 struct storage_q {
 
 	spinlock_t lock;
@@ -276,7 +278,7 @@ struct storage_q {
 
 static inline bool storage_available_completions(struct storage_q *q)
 {
-	return hardware_q_pending(&q->hq);
+	return cfg_storage_enabled && hardware_q_pending(&q->hq);
 }
 
 extern int storage_proc_completions(struct storage_q *q,
@@ -505,15 +507,10 @@ extern void __net_recurrent(void);
 extern void net_rx_softirq(struct rx_net_hdr **hdrs, unsigned int nr);
 extern void net_rx_softirq_direct(struct mbuf **ms, unsigned int nr);
 
-#ifdef DIRECTPATH
-
-
-struct direct_txq {};
-
 struct trans_entry;
 struct net_driver_ops {
 	int (*rx_batch)(struct hardware_q *rxq, struct mbuf **ms, unsigned int budget);
-	int (*tx_single)(struct direct_txq *txq, struct mbuf *m);
+	int (*tx_single)(struct mbuf *m);
 	int (*steer_flows)(unsigned int *new_fg_assignment);
 	int (*register_flow)(unsigned int affininty, struct trans_entry *e, void **handle_out);
 	int (*deregister_flow)(void *handle);
@@ -521,9 +518,14 @@ struct net_driver_ops {
 
 extern struct net_driver_ops net_ops;
 
+#ifdef DIRECTPATH
+
+extern bool cfg_directpath_enabled;
+struct direct_txq {};
+
 static inline bool rx_pending(struct hardware_q *rxq)
 {
-	return hardware_q_pending(rxq);
+	return cfg_directpath_enabled && hardware_q_pending(rxq);
 }
 
 #else

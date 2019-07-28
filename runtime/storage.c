@@ -18,6 +18,8 @@
 
 #include "defs.h"
 
+bool cfg_storage_enabled;
+
 static struct spdk_nvme_ctrlr *controller;
 static struct spdk_nvme_ns *spdk_namespace;
 static uint32_t block_size;
@@ -100,6 +102,9 @@ int storage_init(void)
 	struct spdk_env_opts opts;
 	void *buf;
 
+	if (!cfg_storage_enabled)
+		return 0;
+
 	spdk_env_opts_init(&opts);
 	opts.name = "shenango runtime";
 	shm_id = rand_crc32c((uintptr_t)myk());
@@ -155,6 +160,9 @@ int storage_init_thread(void)
 	struct hardware_queue_spec *hs =
 		&iok.threads[k->kthread_idx].storage_hwq;
 	struct storage_q *q = &k->storage_q;
+
+	if (!cfg_storage_enabled)
+		return 0;
 
 	uint32_t max_xfer_size, entries, depth, nr_descriptors;
 	uint32_t *consumer_idx;
@@ -228,6 +236,9 @@ int storage_proc_completions(struct storage_q *q, unsigned int budget,
 {
 	assert_preempt_disabled();
 
+	if (!cfg_storage_enabled)
+		return 0;
+
 	cb_ths = wakeable_threads;
 	nrcb_ths = 0;
 
@@ -253,6 +264,9 @@ int storage_write(const void *payload, uint64_t lba, uint32_t lba_count)
 	struct kthread *k;
 	struct storage_q *q;
 	void *spdk_payload;
+
+	if (!cfg_storage_enabled)
+		return -ENODEV;
 
 	size_t req_size = lba_count * block_size;
 	bool use_thread_cache = req_size <= REQUEST_BUF_SZ;
@@ -315,6 +329,9 @@ int storage_read(void *dest, uint64_t lba, uint32_t lba_count)
 	struct storage_q *q;
 	void *spdk_payload;
 
+	if (!cfg_storage_enabled)
+		return -ENODEV;
+
 	size_t req_size = lba_count * block_size;
 	bool use_thread_cache = req_size <= REQUEST_BUF_SZ;
 
@@ -365,6 +382,9 @@ done_np:
  */
 uint32_t storage_block_size(void)
 {
+	if (!cfg_storage_enabled)
+		return 0;
+
 	return block_size;
 }
 
@@ -373,6 +393,9 @@ uint32_t storage_block_size(void)
  */
 uint64_t storage_num_blocks(void)
 {
+	if (!cfg_storage_enabled)
+		return 0;
+
 	return num_blocks;
 }
 

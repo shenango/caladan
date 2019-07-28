@@ -231,6 +231,30 @@ static int parse_preferred_socket(const char *name, const char *val)
 	return 0;
 }
 
+static int parse_enable_storage(const char *name, const char *val)
+{
+#ifdef DIRECT_STORAGE
+	cfg_storage_enabled = true;
+	return 0;
+#else
+	log_err("cfg: cannot enable storage, "
+		"please recompile with storage support");
+	return -EINVAL;
+#endif
+}
+
+static int parse_enable_directpath(const char *name, const char *val)
+{
+#ifdef DIRECTPATH
+	cfg_directpath_enabled = true;
+	return 0;
+#else
+	log_err("cfg: cannot enable directpath, "
+		"please recompile with directpath support");
+	return -EINVAL;
+#endif
+}
+
 /*
  * Parsing Infrastructure
  */
@@ -256,6 +280,8 @@ static const struct cfg_handler cfg_handlers[] = {
 	{ "log_level", parse_log_level, false },
 	{ "disable_watchdog", parse_watchdog_flag, false },
 	{ "preferred_socket", parse_preferred_socket, false },
+	{ "enable_storage", parse_enable_storage, false },
+	{ "enable_directpath", parse_enable_directpath, false },
 };
 
 /**

@@ -18,18 +18,17 @@ static void tcp_tx_release_mbuf(struct mbuf *m)
 		net_tx_release_mbuf(m);
 }
 
-#ifndef DIRECTPATH
 static inline uint16_t tcp_hdr_chksum(uint32_t local_ip, uint32_t remote_ip, uint16_t len)
 {
+
+#ifdef DIRECTPATH
+	if (cfg_directpath_enabled)
+		return 0;
+#endif
+
 	return ipv4_phdr_cksum(IPPROTO_TCP, local_ip, remote_ip,
 				      sizeof(struct tcp_hdr) + len);
 }
-#else
-static inline uint16_t tcp_hdr_chksum(uint32_t local_ip, uint32_t remote_ip, uint16_t len)
-{
-	return 0;
-}
-#endif
 
 static struct tcp_hdr *
 tcp_push_tcphdr(struct mbuf *m, tcpconn_t *c, uint8_t flags, uint16_t l4len)

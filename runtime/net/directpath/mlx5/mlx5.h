@@ -57,7 +57,7 @@ struct mlx5_txq {
 extern struct mlx5_rxq rxqs[NCPU];
 extern struct ibv_context *context;
 
-extern int mlx5_transmit_one(struct direct_txq *t, struct mbuf *m);
+extern int mlx5_transmit_one(struct mbuf *m);
 extern int mlx5_gather_rx(struct hardware_q *rxq, struct mbuf **ms, unsigned int budget);
 extern int mlx5_steer_flows(unsigned int *new_fg_assignment);
 extern int mlx5_register_flow(unsigned int affinity, struct trans_entry *e, void **handle_out);

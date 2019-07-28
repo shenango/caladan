@@ -171,6 +171,9 @@ done:
 
 static void flows_notify_waking(void)
 {
+	if (!cfg_directpath_enabled)
+		return;
+
 	bitmap_atomic_set(kthread_awake, myk()->kthread_idx);
 	atomic64_inc(&kthread_gen);
 	flows_update();
@@ -178,6 +181,10 @@ static void flows_notify_waking(void)
 
 static void flows_notify_parking(bool voluntary)
 {
+
+	if (!cfg_directpath_enabled)
+		return;
+
 	bitmap_atomic_clear(kthread_awake, myk()->kthread_idx);
 	atomic64_inc(&kthread_gen);
 	if (voluntary)
