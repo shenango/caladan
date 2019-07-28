@@ -26,7 +26,12 @@ for n in /sys/devices/system/node/node[2-9]; do
 done
 
 # reserve LLC to iokernel
-modprobe msr
-pqos -R l3cdp-any
-pqos -e "llc:1=0x00003;llc:0=0xffffc;"
-pqos -a "llc:1=0"
+cat=`lscpu | grep cat`
+if [[ ! -z "$cat" ]]; then
+       modprobe msr
+       pqos -R l3cdp-any
+       pqos -e "llc:1=0x00003;llc:0=0xffffc;"
+       pqos -a "llc:1=0"
+else
+       echo "Machine does not support CAT, skip..."
+fi
