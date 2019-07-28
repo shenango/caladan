@@ -402,7 +402,7 @@ void sched_poll(void)
 	 */
 
 	now = microtime();
-	if (now - last_time > IOKERNEL_POLL_INTERVAL) {
+	if (now - last_time >= IOKERNEL_POLL_INTERVAL) {
 		int i;
 
 		last_time = now;

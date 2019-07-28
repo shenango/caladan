@@ -25,14 +25,14 @@ static DEFINE_BITMAP(mis_idle_cores, NCPU);
 static DEFINE_BITMAP(mis_sampled_cores, NCPU);
 
 /* poll the global (system-wide) memory bandwidth over this time interval */
-#define MIS_BW_MEASURE_INTERVAL	25
+#define MIS_BW_MEASURE_INTERVAL	30
 /* wait for performance counter results over this time interval */
 #define MIS_BW_PUNISH_INTERVAL	10
 /* FIXME: should not be hard coded */
-#define MIS_BW_HIGH_WATERMARK	0.105 
+#define MIS_BW_HIGH_WATERMARK	0.100
 /* FIXME: should not be hard coded */
 #define MIS_BW_LOW_WATERMARK	(0.8 * MIS_BW_HIGH_WATERMARK)
-#define MIS_UNDER_LOW_WATERMARK_CNT_THRESHOLD 3
+#define MIS_UNDER_LOW_WATERMARK_CNT_THRESHOLD 2
 
 struct mis_data {
 	struct proc		*p;
@@ -372,7 +372,6 @@ static int mis_add_kthread_on_core(unsigned int core)
 	if (unlikely(ret))
 		return ret;
 
-	mis_unmark_congested(sd);
 	return 0;
 }
 
@@ -535,8 +534,11 @@ done:
 		if (!sd)
 			return;
 
-		if (sd->threads_limit <= sd->threads_active)
+		if (sd->threads_limit <= sd->threads_active) {
+			bw_okay_cnt = 0;
 			sd->threads_limit++;
+		}
+
 		if (sd->threads_limit >= sd->threads_max)
 			sd->is_bwlimited = false;
 		else

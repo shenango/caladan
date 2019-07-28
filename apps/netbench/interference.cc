@@ -28,7 +28,7 @@ constexpr double kPacketHandleUS = 5.0;
 // interrupt coalescing time */
 constexpr double kIntrCoalesceUS = 20.0;
 // the size of each queue in entries
-constexpr uint64_t kQueueSize = 64;
+constexpr uint64_t kQueueSize = 4096;
 // number of measurement steps to take
 constexpr double kSteps = 30.0;
 // measurement duration in us
@@ -167,8 +167,8 @@ std::vector<work_unit> RunExperiment(std::vector<work_unit> wq, int workers,
   t.Reset();
 
   // generate load
+  int i = 0;
   for (auto w : wq) {
-    int i = 0;
     t.SpinUntil(w.start_us);
     qs[i++ % qs.size()]->Enqueue(w);
   }
