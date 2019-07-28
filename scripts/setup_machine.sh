@@ -25,7 +25,7 @@ for n in /sys/devices/system/node/node[2-9]; do
 	echo 0 > $n/hugepages/hugepages-2048kB/nr_hugepages
 done
 
-# reserve the first LLC to iokernel
+# reserve LLC to iokernel
 modprobe msr
 pqos -R l3cdp-any
 pqos -e "llc:1=0x00003;llc:0=0xffffc;"
