@@ -133,7 +133,7 @@ static void stat_tcp_worker(void *arg)
 
 	while (true) {
 		ret = tcp_read(c, resp.buf, sizeof(resp.buf));
-		if (ret < 0)
+		if (ret <= 0)
 			return;
 
 		len = stat_write_buf(resp.buf, sizeof(resp.buf));

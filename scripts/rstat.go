@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 	"encoding/binary"
+	"io"
 )
 
 func prettyPrint(m, lastm map[string]uint64, interval int) {
@@ -75,12 +76,12 @@ func main() {
 		if err != nil {
 			os.Exit(1)
 		}
-		n, err := c.Read(buf[0:8])
+		n, err := io.ReadFull(c, buf[0:8])
 		if err != nil {
 			os.Exit(1)
 		}
 		datalen := binary.LittleEndian.Uint64(buf[0:8])
-		n, err = c.ReadFull(buf[0:datalen])
+		n, err = io.ReadFull(c, buf[0:datalen])
 		if err != nil {
 			os.Exit(1)
 		}
