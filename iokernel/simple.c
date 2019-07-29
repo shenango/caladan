@@ -249,8 +249,14 @@ static void simple_notify_congested(struct proc *p, bitmap_ptr_t threads,
 		goto done;
 	}
 
+    /* if there is no more core to allocate,
+     * no need to try simple_add_kthread */
+    if (sd->threads_active >= sd->threads_max) {
+        simple_mark_congested(sd);
+    }
+
 	/* do nothing if already marked as congested */
-	if (sd->is_congested || sd->threads_active >= sd->threads_max)
+	if (sd->is_congested)
 		goto done;
 
 	/* try to add an additional core right away */
