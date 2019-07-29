@@ -507,7 +507,7 @@ static void mis_bandwidth_state_machine(uint64_t now)
 
 done:
 	/* check if it's time to sample bandwidth */
-	if (!bw_congested &&
+	if ((!bw_congested || bw_punish_triggered) &&
 	    now - last_bw_measure_ts < MIS_BW_MEASURE_INTERVAL)
 		return;
 
@@ -521,24 +521,24 @@ done:
 	last_cas = cur_cas;
 	last_tsc = tsc;
 
-	/* check if the bandwidth limit has been exceeded */
 	if (bw_congested) {
 		if (bw_estimate < MIS_PUNISH_LOW_WATERMARK) {
+			/* we can stop punishing kthreads now */
 			under_punish_low_watermark_cnt++;
 			if (under_punish_low_watermark_cnt >=
 			    MIS_UNDER_PUNISH_LOW_WATERMARK_CNT_THRESHOLD) {
 				bw_congested = false;
 				under_punish_low_watermark_cnt = 0;
-				/* log_ratelimited(LOG_INFO, "start punishing"); */
 			}
 		}
 	} else {
 		if (bw_estimate > MIS_PUNISH_HIGH_WATERMARK) {
+			/* exceeds the bandwidth limit, start punishing */
 			bw_congested = true;
 			under_punish_low_watermark_cnt = 0;
 			under_add_back_watermark_cnt = 0;
-			/* log_ratelimited(LOG_INFO, "stop punishing"); */
 		} else if (bw_estimate < MIS_ADD_BACK_WATERMARK) {
+			/* safe to add back kthreads now */
 			under_add_back_watermark_cnt++;
 			if (under_add_back_watermark_cnt >=
 			    MIS_UNDER_ADD_BACK_WATERMARK_CNT_THRESHOLD) {
@@ -552,7 +552,6 @@ done:
 				if (sd->threads_limit <= sd->threads_active) {
 					under_punish_low_watermark_cnt = 0;
 					sd->threads_limit++;
-					/* log_ratelimited(LOG_INFO, "add back pid = %d", sd->p->pid); */
 				}
 
 				if (sd->threads_limit >= sd->threads_max)
@@ -564,11 +563,11 @@ done:
 	}
 	
 	if (bw_congested && bw_estimate >= MIS_PUNISH_LOW_WATERMARK) {
-		bw_punish_triggered = true;
-		mis_sample_pmc(PMC_LLC_MISSES);
-		last_bw_punish_ts = microtime();
-	} else {
-		bw_punish_triggered = false;
+		if (!bw_punish_triggered) {
+			bw_punish_triggered = true;
+			mis_sample_pmc(PMC_LLC_MISSES);
+			last_bw_punish_ts = microtime();
+		}
 	}
 
 #ifdef DEBUG
