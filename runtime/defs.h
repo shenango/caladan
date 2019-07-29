@@ -281,6 +281,11 @@ static inline bool storage_available_completions(struct storage_q *q)
 	return cfg_storage_enabled && hardware_q_pending(&q->hq);
 }
 
+static inline bool storage_pending_completions(struct storage_q *q)
+{
+	return cfg_storage_enabled && q->outstanding_reqs > 0;
+}
+
 extern int storage_proc_completions(struct storage_q *q,
 	    unsigned int budget, struct thread **wakeable_threads);
 #else
@@ -291,6 +296,12 @@ static inline bool storage_available_completions(struct storage_q *q)
 {
 	return false;
 }
+
+static inline bool storage_pending_completions(struct storage_q *q)
+{
+	return false;
+}
+
 
 static inline int storage_proc_completions(struct storage_q *q,
 	    unsigned int budget, struct thread **wakeable_threads)
@@ -573,6 +584,25 @@ static inline bool softirq_work_available(struct kthread *k)
 	work_available |= storage_available_completions(&k->storage_q);
 
 	return work_available;
+}
+
+static inline bool timer_available_soon(struct kthread *k, uint64_t now)
+{
+	return k->timern > 0 &&
+		(k->timers[0].deadline_us - 10) * cycles_per_us + start_tsc <= now;
+}
+
+/**
+ * softirq_work_soon - returns true if a softirq is likely
+ * to be ready in the next 10us
+ *
+ * @k: the kthread to check
+ * @now: current timestamp
+ */
+static inline bool softirq_work_soon(struct kthread *k, uint64_t now)
+{
+	return storage_pending_completions(&k->storage_q) ||
+		timer_available_soon(k, now);
 }
 
 /*

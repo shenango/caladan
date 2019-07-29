@@ -340,7 +340,8 @@ again:
 	/* keep trying to find work until the polling timeout expires */
 	if (!preempt_needed() &&
 	    (++iters < RUNTIME_SCHED_POLL_ITERS ||
-	     rdtsc() - start_tsc < cycles_per_us * RUNTIME_SCHED_MIN_POLL_US))
+	     rdtsc() - start_tsc < cycles_per_us * RUNTIME_SCHED_MIN_POLL_US ||
+	     softirq_work_soon(l, start_tsc)))
 		goto again;
 
 	l->parked = true;
