@@ -237,7 +237,8 @@ static uint32_t hwq_find_head(struct hwq *h, uint32_t cur_tail, uint32_t last_he
 	return i + start_idx;
 }
 
-static bool hardware_queue_congested(struct thread *th, struct hwq *h)
+static bool hardware_queue_congested(struct thread *th, struct hwq *h,
+				bool update_pointers)
 {
 	uint32_t cur_tail, cur_head, last_head;
 
@@ -249,8 +250,10 @@ static bool hardware_queue_congested(struct thread *th, struct hwq *h)
 	cur_tail = ACCESS_ONCE(*h->consumer_idx);
 	cur_head = hwq_find_head(h, cur_tail, last_head);
 
-	h->last_tail = cur_tail;
-	h->last_head = cur_head;
+	if (update_pointers) {
+		h->last_tail = cur_tail;
+		h->last_head = cur_head;
+	}
 
 	return th->active ? wraps_lt(cur_tail, last_head) :
 				 cur_head != cur_tail;
@@ -293,10 +296,10 @@ static void sched_detect_congestion(struct proc *p)
 			bitmap_set(ios, i);
 		}
 
-		if (hardware_queue_congested(th, &th->directpath_hwq))
+		if (hardware_queue_congested(th, &th->directpath_hwq, true))
 			bitmap_set(ios, i);
 
-		if (hardware_queue_congested(th, &th->storage_hwq))
+		if (hardware_queue_congested(th, &th->storage_hwq, true))
 			bitmap_set(ios, i);
 	}
 
@@ -315,6 +318,28 @@ static void sched_detect_congestion(struct proc *p)
 
 	/* notify the scheduler policy of the current congestion */
 	sched_ops->notify_congested(p, threads, ios);
+}
+
+/*
+ * Checks if there are any queued I/Os for a proc p which has no active
+ * kthreads. Attempts to add a core if so.
+ */
+static void sched_detect_io_for_idle_runtime(struct proc *p)
+{
+	struct thread *th;
+	int i;
+
+	for (i = 0; i < p->thread_count; i++) {
+		th = &p->threads[i];
+
+		if (hardware_queue_congested(th, &th->directpath_hwq, false)) {
+			sched_add_core(p);
+			return;
+		}
+
+		/* no need to check storage queues because kthreads with pending
+		   storage I/Os don't park */
+	}
 }
 
 static int sched_try_fast_rewake(struct thread *th)
@@ -354,6 +379,7 @@ void sched_poll(void)
 	struct core_state *s;
 	uint64_t now;
 	int i, core, idle_cnt = 0;
+	struct proc *p;
 
 	/*
 	 * fast pass --- runs every poll loop
@@ -408,6 +434,13 @@ void sched_poll(void)
 		last_time = now;
 		for (i = 0; i < dp.nr_clients; i++)
 			sched_detect_congestion(dp.clients[i]);
+	} else {
+		/* check if any idle directpath runtimes have received I/Os */
+		for (i = 0; i < dp.nr_clients; i++) {
+			p = dp.clients[i];
+			if (p->has_directpath && sched_threads_active(p) == 0)
+				sched_detect_io_for_idle_runtime(p);
+		}
 	}
 
 	/*
