@@ -539,11 +539,18 @@ static inline bool rx_pending(struct hardware_q *rxq)
 	return cfg_directpath_enabled && hardware_q_pending(rxq);
 }
 
+extern size_t directpath_rx_buf_pool_sz(unsigned int nrqs);
+
 #else
 
 static inline bool rx_pending(struct hardware_q *rxq)
 {
 	return false;
+}
+
+static inline size_t directpath_rx_buf_pool_sz(unsigned int nrqs)
+{
+	return 0;
 }
 
 #endif

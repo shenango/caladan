@@ -16,6 +16,12 @@ DEFINE_PERTHREAD(struct tcache_perthread, directpath_buf_pt);
 
 bool cfg_directpath_enabled;
 
+size_t directpath_rx_buf_pool_sz(unsigned int nrqs)
+{
+	return align_up(nrqs * (32 * RQ_NUM_DESC) * 16UL * MBUF_DEFAULT_LEN,
+			PGSIZE_2MB);
+}
+
 void directpath_rx_completion(struct mbuf *m)
 {
 	preempt_disable();
@@ -29,7 +35,7 @@ static int rx_memory_init(void)
 	size_t rx_len;
 	void *rx_buf;
 
-	rx_len = RX_BUF_BOOL_SZ(maxks);
+	rx_len = directpath_rx_buf_pool_sz(maxks);
 	rx_buf = mem_map_anom(NULL, rx_len, PGSIZE_2MB, 0);
 	if (rx_buf == MAP_FAILED)
 		return -ENOMEM;

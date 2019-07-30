@@ -14,8 +14,6 @@
 #define SQ_CLEAN_THRESH			RUNTIME_SOFTIRQ_LOCAL_BUDGET
 #define SQ_CLEAN_MAX			SQ_CLEAN_THRESH
 
-#define RX_BUF_BOOL_SZ(nrqs) \
- (align_up(nrqs * (32 * RQ_NUM_DESC) * 16UL * MBUF_DEFAULT_LEN, PGSIZE_2MB))
 #define RX_BUF_RESERVED \
  (align_up(sizeof(struct mbuf), 2 * CACHE_LINE_SIZE))
 
