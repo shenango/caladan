@@ -20,6 +20,7 @@
 #define MAX_CORES 64
 #define UDP_MAX_PAYLOAD 1472
 #define MAX_SAMPLES (100*1000*1000)
+#define RANDOM_US 10
 
 static const struct rte_eth_conf port_conf_default = {
 	.rxmode = {
@@ -82,6 +83,7 @@ struct ether_addr broadcast_mac = {
 uint16_t next_port = 50000;
 static uint64_t snd_times[MAX_SAMPLES];
 static uint64_t rcv_times[MAX_SAMPLES];
+char *output_filename = NULL;
 
 /* dpdk_netperf.c: simple implementation of netperf on DPDK */
 
@@ -293,6 +295,7 @@ static void do_client(uint8_t port)
 	struct nbench_resp *control_resp;
 	bool setup_port = false;
 	uint64_t interval_cycles, time_received;
+	uint32_t max_random_cycles;
 
 	/* Verify that we have enough space for all the datapoints */
 	uint32_t samples = seconds / ((float) interval_us / (1000*1000));
@@ -344,6 +347,10 @@ static void do_client(uint8_t port)
 		}
 	}
 got_mac:
+
+	/* randomize inter-arrival times by up to RANDOM_US */
+	srand(rte_get_timer_cycles());
+	max_random_cycles = (float) RANDOM_US / (1000 * 1000) * rte_get_timer_hz();
 
 	/* run for specified amount of time */
 	start_time = rte_get_timer_cycles();
@@ -457,24 +464,40 @@ got_mac:
 		}
 	found_match:
 		rcv_times[reqs++] = time_received;
-		next_send_time += interval_cycles;
+		next_send_time += (interval_cycles + (rand() % max_random_cycles) -
+				   max_random_cycles * 0.5);
 		while (rte_get_timer_cycles() < next_send_time) {
 		  /* spin until time for next packet */
 		}
 	}
 	end_time = rte_get_timer_cycles();
 
-	/* add up total cycles across all RTTs */
+	/* add up total cycles across all RTTs, skip first and last 10% */
 	uint64_t total_cycles = 0;
-	for (i = 0; i < reqs; i++)
+	uint64_t included_samples = 0;
+	for (i = reqs * 0.1; i < reqs * 0.9; i++) {
 		total_cycles += rcv_times[i] - snd_times[i];
+		included_samples++;
+	}
 
 	printf("ran for %f seconds, sent %"PRIu64" packets\n",
 			(float) (end_time - start_time) / rte_get_timer_hz(), reqs);
 	printf("client reqs/s: %f\n",
 			(float) (reqs * rte_get_timer_hz()) / (end_time - start_time));
 	printf("mean latency (us): %f\n", (float) total_cycles *
-			1000 * 1000 / (reqs * rte_get_timer_hz()));
+		1000 * 1000 / (included_samples * rte_get_timer_hz()));
+
+	if (output_filename != NULL) {
+		/* print all samples to output file */
+		FILE *outfile = fopen(output_filename, "w");
+		fprintf(outfile, "index,time_us\n");
+		for (i = reqs * 0.1; i < reqs * 0.9; i++) {
+			float time_us = ((float) (rcv_times[i] - snd_times[i]) * 1000 * 1000) /
+				rte_get_timer_hz();
+			fprintf(outfile, "%d,%f\n", i, time_us);
+		}
+		fclose(outfile);
+	}
 }
 
 /*
@@ -670,6 +693,10 @@ static int parse_netperf_args(int argc, char *argv[])
 		payload_len = tmp;
 		str_to_long(argv[8], &tmp);
 		interval_us = tmp;
+		if (argc >= 7) {
+			/* long output file name */
+			output_filename = argv[9];
+		}
 	} else if (!strcmp(argv[1], "UDP_SERVER")) {
 		mode = MODE_UDP_SERVER;
 		argc -= 3;
