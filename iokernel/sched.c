@@ -382,6 +382,26 @@ void sched_poll(void)
 	struct proc *p;
 
 	/*
+	 * slow pass --- runs every IOKERNEL_POLL_INTERVAL
+	 */
+
+	now = microtime();
+	if (now - last_time >= IOKERNEL_POLL_INTERVAL) {
+		int i;
+
+		last_time = now;
+		for (i = 0; i < dp.nr_clients; i++)
+			sched_detect_congestion(dp.clients[i]);
+	} else {
+		/* check if any idle directpath runtimes have received I/Os */
+		for (i = 0; i < dp.nr_clients; i++) {
+			p = dp.clients[i];
+			if (p->has_directpath && sched_threads_active(p) == 0)
+				sched_detect_io_for_idle_runtime(p);
+		}
+	}
+
+	/*
 	 * fast pass --- runs every poll loop
 	 */
 
@@ -420,26 +440,6 @@ void sched_poll(void)
 			s->idle = true;
 			bitmap_set(idle, core);
 			idle_cnt++;
-		}
-	}
-
-	/*
-	 * slow pass --- runs every IOKERNEL_POLL_INTERVAL
-	 */
-
-	now = microtime();
-	if (now - last_time >= IOKERNEL_POLL_INTERVAL) {
-		int i;
-
-		last_time = now;
-		for (i = 0; i < dp.nr_clients; i++)
-			sched_detect_congestion(dp.clients[i]);
-	} else {
-		/* check if any idle directpath runtimes have received I/Os */
-		for (i = 0; i < dp.nr_clients; i++) {
-			p = dp.clients[i];
-			if (p->has_directpath && sched_threads_active(p) == 0)
-				sched_detect_io_for_idle_runtime(p);
 		}
 	}
 
