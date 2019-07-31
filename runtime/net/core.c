@@ -317,7 +317,7 @@ static int net_tx_iokernel(struct mbuf *m)
 	shmptr_t shm = ptr_to_shmptr(&netcfg.tx_region, hdr, len + sizeof(*hdr));
 
 	if (unlikely(!lrpc_send(&k->txpktq, TXPKT_NET_XMIT, shm))) {
-		mbuf_pull_hdr(m, hdr);
+		mbuf_pull_hdr(m, *hdr);
 		return -1;
 	}
 
