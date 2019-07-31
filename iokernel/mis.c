@@ -395,8 +395,26 @@ static void mis_sample_pmc(uint64_t sel)
 
 		if (!sd1 && !sd2)
 			continue;
-		if (sd1 && (!sd2 ||
-			    sd1->threads_monitored <= sd2->threads_monitored)) {
+		bool sd1_no_kick_out = sd1 &&
+			(sd1->threads_limit <= sd1->threads_guaranteed);
+		bool sd2_no_kick_out = sd2 &&
+			(sd2->threads_limit <= sd2->threads_guaranteed);
+		/* don't let PMC req hurts the kthread that cannot be kicked out */
+		if (sd1_no_kick_out && sd2_no_kick_out)
+			continue;
+		bool perfer_sample_sd2 = false;
+		if (!sd2) {
+			perfer_sample_sd2 = true;
+		} else if (!sd1) {
+			perfer_sample_sd2 = false;
+		} else if (sd1_no_kick_out && !sd2_no_kick_out) {
+			perfer_sample_sd2 = true;
+		} else if (!sd1_no_kick_out && sd2_no_kick_out) {
+			perfer_sample_sd2 = false;
+		} else if (sd1->threads_monitored <= sd2->threads_monitored) {
+			perfer_sample_sd2 = true;
+		}
+		if (perfer_sample_sd2) {
 			sd1->threads_monitored++;
 			ksched_enqueue_pmc(sib, sel);
 			bitmap_set(mis_sampled_cores, sib);
@@ -440,8 +458,8 @@ static struct mis_data *mis_choose_bandwidth_victim(void)
 
 	list_for_each(&all_procs, sd, all_link) {
 		if (!sd->threads_monitored) {
-		  // pmc not ready, pass
-		  continue;
+			// pmc not ready, pass
+			continue;
 		}
 		float estimated_l3miss = (float)sd->llc_misses /
 					 (float)sd->threads_monitored *
