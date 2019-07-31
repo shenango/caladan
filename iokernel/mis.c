@@ -476,10 +476,10 @@ static void mis_bandwidth_state_machine(uint64_t now)
 	    now - last_bw_punish_ts >= MIS_BW_PUNISH_INTERVAL) {
 		struct mis_data *sd;
 
-		bw_punish_triggered = false;
 		sd = mis_choose_bandwidth_victim();
 		if (!sd)
 			goto done;
+		bw_punish_triggered = false;
 		sd->threads_limit = MIN(sd->threads_limit - 1,
 					sd->threads_active - 1);
 		mis_unmark_congested(sd);
