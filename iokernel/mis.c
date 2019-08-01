@@ -426,21 +426,21 @@ static void mis_sample_pmc(uint64_t sel)
 	}
 }
 
-static struct mis_data *mis_choose_bandwidth_victim(void)
+static struct mis_data *mis_choose_bandwidth_victim(bool *has_not_ready)
 {
 	struct mis_data *sd, *victim = NULL;
 	float highest_l3miss;
 	uint64_t pmc;
 	int i;
-	int has_not_ready = 0;
 	static int invoked_cnt = 0;
 	static int not_ready_cnt = 0;
 
+	*has_not_ready = false;
 	bitmap_for_each_set(mis_sampled_cores, NCPU, i) {
 		sd = cores[sched_siblings[i]];
 		if (unlikely(!ksched_poll_pmc(i, &pmc))) {
 			if (sd) {
-				has_not_ready = 1;
+				*has_not_ready = true;
 				sd->threads_monitored--;
 			}
 			continue;
@@ -449,7 +449,7 @@ static struct mis_data *mis_choose_bandwidth_victim(void)
 			sd->llc_misses += pmc;
 	}
 
-	not_ready_cnt += has_not_ready;
+	not_ready_cnt += *has_not_ready;
 	invoked_cnt++;
 #ifdef DEBUG
 	log_ratelimited(LOG_INFO, "not ready ratio = %f",
@@ -493,11 +493,14 @@ static void mis_bandwidth_state_machine(uint64_t now)
 	if (bw_punish_triggered &&
 	    now - last_bw_punish_ts >= MIS_BW_PUNISH_INTERVAL) {
 		struct mis_data *sd;
-
-		sd = mis_choose_bandwidth_victim();
-		if (!sd)
+		bool has_not_ready;
+		sd = mis_choose_bandwidth_victim(&has_not_ready);
+		if (!sd) {
+			if (!has_not_ready) {
+				bw_punish_triggered = false;
+			}
 			goto done;
-		bw_punish_triggered = false;
+		}
 		sd->threads_limit = MIN(sd->threads_limit - 1,
 					sd->threads_active - 1);
 		mis_unmark_congested(sd);
@@ -589,7 +592,8 @@ done:
 	}
 
 #ifdef DEBUG
-	log_ratelimited(LOG_INFO, "bw_estimate = %f", bw_estimate);
+	log_ratelimited(LOG_INFO, "bw_estimate = %f, bw_punish_triggered = %d",
+			bw_estimate, bw_punish_triggered);
 #endif
 }
 
