@@ -376,6 +376,11 @@ static int mis_add_kthread_on_core(unsigned int core)
 	return 0;
 }
 
+static bool mis_can_be_punished(struct mis_data *sd) {
+	return sd && (sd->threads_limit > sd->threads_guaranteed) &&
+		(sd->threads_limit > 0);
+}
+
 static void mis_sample_pmc(uint64_t sel)
 {
 	struct mis_data *sd;
@@ -395,10 +400,8 @@ static void mis_sample_pmc(uint64_t sel)
 
 		if (!sd1 && !sd2)
 			continue;
-		bool sd1_no_kick_out = sd1 &&
-			(sd1->threads_limit <= sd1->threads_guaranteed);
-		bool sd2_no_kick_out = sd2 &&
-			(sd2->threads_limit <= sd2->threads_guaranteed);
+		bool sd1_no_kick_out = !mis_can_be_punished(sd1);
+		bool sd2_no_kick_out = !mis_can_be_punished(sd2);
 		/* don't let PMC req hurts the kthread that cannot be kicked out */
 		if (sd1_no_kick_out && sd2_no_kick_out)
 			continue;
@@ -472,7 +475,11 @@ static struct mis_data *mis_choose_bandwidth_victim(bool *has_not_ready)
 			victim = sd;
 		}
 	}
-
+#ifdef DEBUG
+	if (!has_not_ready) {
+		log_info_ratelimited("highest_l3mis = %f", highest_l3miss);
+	}
+#endif
 	return victim;
 }
 
