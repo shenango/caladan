@@ -405,19 +405,19 @@ static void mis_sample_pmc(uint64_t sel)
 		/* don't let PMC req hurts the kthread that cannot be kicked out */
 		if (sd1_no_kick_out && sd2_no_kick_out)
 			continue;
-		bool perfer_sample_sd2 = false;
+		bool prefer_sample_sd2 = false;
 		if (!sd2) {
-			perfer_sample_sd2 = true;
+			prefer_sample_sd2 = true;
 		} else if (!sd1) {
-			perfer_sample_sd2 = false;
+			prefer_sample_sd2 = false;
 		} else if (sd1_no_kick_out && !sd2_no_kick_out) {
-			perfer_sample_sd2 = true;
+			prefer_sample_sd2 = true;
 		} else if (!sd1_no_kick_out && sd2_no_kick_out) {
-			perfer_sample_sd2 = false;
+			prefer_sample_sd2 = false;
 		} else if (sd1->threads_monitored <= sd2->threads_monitored) {
-			perfer_sample_sd2 = true;
+			prefer_sample_sd2 = true;
 		}
-		if (perfer_sample_sd2) {
+		if (prefer_sample_sd2) {
 			sd1->threads_monitored++;
 			ksched_enqueue_pmc(sib, sel);
 			bitmap_set(mis_sampled_cores, sib);
