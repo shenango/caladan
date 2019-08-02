@@ -35,6 +35,8 @@ static DEFINE_BITMAP(mis_sampled_cores, NCPU);
 #define MIS_UNDER_PUNISH_LOW_WATERMARK_CNT_THRESHOLD 20
 #define MIS_UNDER_ADD_BACK_WATERMARK_CNT_THRESHOLD   3
 
+// #define DEBUG
+
 struct mis_data {
 	struct proc		*p;
 	unsigned int		is_congested:1;
@@ -376,15 +378,32 @@ static int mis_add_kthread_on_core(unsigned int core)
 	return 0;
 }
 
+#ifdef DEBUG
+static void mis_print_debug_info(void)
+{
+	struct mis_data *sd;
+
+	list_for_each(&all_procs, sd, all_link) {
+		log_info("pid %d: %s%s active %d, limit %d, max %d, load %f",
+			 sd->p->pid,
+			 sd->is_congested ? "C" : "_",
+			 sd->is_bwlimited ? "B" : "_",
+			 sd->threads_active, sd->threads_limit, sd->threads_max,
+			 sd->load);
+	}
+}
+#endif
+
 static bool mis_can_be_punished(struct mis_data *sd) {
 	return sd && (sd->threads_limit > sd->threads_guaranteed) &&
-		(sd->threads_limit > 0);
+		(sd->threads_limit > 0) && (sd->threads_active > 0);
 }
 
-static void mis_sample_pmc(uint64_t sel)
+static int mis_sample_pmc(uint64_t sel)
 {
 	struct mis_data *sd;
 	int core, sib, tmp;
+	int sampled_num = 0;
 
 	bitmap_clear(mis_sampled_cores, NCPU);
 	list_for_each(&all_procs, sd, all_link) {
@@ -402,7 +421,7 @@ static void mis_sample_pmc(uint64_t sel)
 			continue;
 		bool sd1_no_kick_out = !mis_can_be_punished(sd1);
 		bool sd2_no_kick_out = !mis_can_be_punished(sd2);
-		/* don't let PMC req hurts the kthread that cannot be kicked out */
+		/* don't issue unneccesarry PMC peek requests */
 		if (sd1_no_kick_out && sd2_no_kick_out)
 			continue;
 		bool prefer_sample_sd2 = false;
@@ -410,9 +429,9 @@ static void mis_sample_pmc(uint64_t sel)
 			prefer_sample_sd2 = true;
 		} else if (!sd1) {
 			prefer_sample_sd2 = false;
-		} else if (sd1_no_kick_out && !sd2_no_kick_out) {
-			prefer_sample_sd2 = true;
 		} else if (!sd1_no_kick_out && sd2_no_kick_out) {
+			prefer_sample_sd2 = true;
+		} else if (sd1_no_kick_out && !sd2_no_kick_out) {
 			prefer_sample_sd2 = false;
 		} else if (sd1->threads_monitored <= sd2->threads_monitored) {
 			prefer_sample_sd2 = true;
@@ -426,7 +445,9 @@ static void mis_sample_pmc(uint64_t sel)
 			ksched_enqueue_pmc(core, sel);
 			bitmap_set(mis_sampled_cores, core);
 		}
+		sampled_num++;
 	}
+	return sampled_num;
 }
 
 static struct mis_data *mis_choose_bandwidth_victim(bool *has_not_ready)
@@ -438,6 +459,17 @@ static struct mis_data *mis_choose_bandwidth_victim(bool *has_not_ready)
 	static int invoked_cnt = 0;
 	static int not_ready_cnt = 0;
 
+#ifdef DEBUG
+	bool debug = false;
+	uint64_t now = microtime();
+	static uint64_t last_debug_ts = 0;
+	if (now - last_debug_ts > 2000000) {
+		last_debug_ts = now;
+		mis_print_debug_info();
+		debug = true;
+	}
+#endif
+	
 	*has_not_ready = false;
 	bitmap_for_each_set(mis_sampled_cores, NCPU, i) {
 		sd = cores[sched_siblings[i]];
@@ -467,17 +499,23 @@ static struct mis_data *mis_choose_bandwidth_victim(bool *has_not_ready)
 		float estimated_l3miss = (float)sd->llc_misses /
 					 (float)sd->threads_monitored *
 					 (float)sd->threads_active;
-		if (sd->threads_limit == 0 ||
+		if (sd->threads_limit == 0 || sd->threads_active == 0 ||
 		    sd->threads_limit <= sd->threads_guaranteed)
 			continue;
+#ifdef DEBUG
+		if (debug) {
+			log_info("sd pid = %d, estimated_l3miss = %f",
+				 sd->p->pid, estimated_l3miss);
+		}
+#endif
 		if (!victim || estimated_l3miss > highest_l3miss) {
 			highest_l3miss = estimated_l3miss;
 			victim = sd;
 		}
 	}
 #ifdef DEBUG
-	if (!has_not_ready) {
-		log_info_ratelimited("highest_l3mis = %f", highest_l3miss);
+	if (debug && victim) {
+		log_info("highest_l3miss = %f", highest_l3miss);
 	}
 #endif
 	return victim;
@@ -558,6 +596,8 @@ done:
 				bw_congested = false;
 				under_punish_low_watermark_cnt = 0;
 			}
+		} else {
+			under_punish_low_watermark_cnt = 0;
 		}
 	} else {
 		if (bw_estimate > MIS_PUNISH_HIGH_WATERMARK) {
@@ -572,13 +612,13 @@ done:
 			    MIS_UNDER_ADD_BACK_WATERMARK_CNT_THRESHOLD) {
 				struct mis_data *sd;
 
+				under_add_back_watermark_cnt = 0;
 				sd = list_pop(&bwlimited_procs, struct mis_data,
 					      bwlimited_link);
 				if (!sd)
 					return;
 
 				if (sd->threads_limit <= sd->threads_active) {
-					under_punish_low_watermark_cnt = 0;
 					sd->threads_limit++;
 				}
 
@@ -587,51 +627,39 @@ done:
 				else
 					list_add_tail(&bwlimited_procs, &sd->bwlimited_link);
 			}
+		} else {
+			under_add_back_watermark_cnt = 0;
 		}
 	}
 	
 	if (bw_congested && bw_estimate >= MIS_PUNISH_LOW_WATERMARK) {
 		if (!bw_punish_triggered) {
-			bw_punish_triggered = true;
-			mis_sample_pmc(PMC_LLC_MISSES);
-			last_bw_punish_ts = microtime();
+			if (mis_sample_pmc(PMC_LLC_MISSES)) {
+				bw_punish_triggered = true;
+				last_bw_punish_ts = microtime();
+			}
 		}
 	}
-
-#ifdef DEBUG
-	log_ratelimited(LOG_INFO, "bw_estimate = %f, bw_punish_triggered = %d",
-			bw_estimate, bw_punish_triggered);
-#endif
-}
-
-#ifdef DEBUG
-static void mis_print_debug_info(void)
-{
-	struct mis_data *sd;
-
-	list_for_each(&all_procs, sd, all_link) {
-		log_info("pid %d: %s%s active %d, limit %d, max %d, load %f",
-			 sd->p->pid,
-			 sd->is_congested ? "C" : "_",
-			 sd->is_bwlimited ? "B" : "_",
-			 sd->threads_active, sd->threads_limit, sd->threads_max,
-			 sd->load);
-	}
-}
-#endif
-
-static void mis_sched_poll(uint64_t now, int idle_cnt, bitmap_ptr_t idle)
-{
-	unsigned int core;
-	int ret;
-
+	
 #ifdef DEBUG
 	static uint64_t last_debug_ts = 0;
 	if (now - last_debug_ts > 2000000) {
 		last_debug_ts = now;
 		mis_print_debug_info();
+		log_info("bw_estimate = %f, bw_punish_triggered = %d, "
+			 "bw_congested = %d, under_punish_low_watermark_cnt = %d, "
+			 "under_add_back_watermark_cnt = %d",
+			 bw_estimate, bw_punish_triggered,
+			 bw_congested, under_punish_low_watermark_cnt,
+			 under_add_back_watermark_cnt);
 	}
 #endif
+}
+
+static void mis_sched_poll(uint64_t now, int idle_cnt, bitmap_ptr_t idle)
+{
+	unsigned int core;
+	int ret;       
 
 	mis_bandwidth_state_machine(now);
 	if (idle_cnt == 0)
