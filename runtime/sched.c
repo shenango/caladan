@@ -392,7 +392,6 @@ done:
 
 static __always_inline void enter_schedule(thread_t *myth, bool is_exit)
 {
-	uint64_t now;
 	struct kthread *k = myk();
 	thread_t *th;
 
@@ -417,9 +416,11 @@ static __always_inline void enter_schedule(thread_t *myth, bool is_exit)
 	}
 
 	/* fast path: switch directly to the next uthread */
-	now = rdtsc();
+#ifdef DEBUG
+	uint64_t now = rdtsc();
 	STAT(PROGRAM_CYCLES) += now - last_tsc;
 	last_tsc = now;
+#endif
 
 	/* pop the next runnable thread from the queue */
 	k->rq_tail++;
