@@ -6,6 +6,7 @@
 
 #include <sys/types.h>
 
+#include <base/bitmap.h>
 #include <base/limits.h>
 #include <iokernel/shm.h>
 #include <net/ethernet.h>
@@ -102,4 +103,10 @@ struct control_hdr {
 	struct eth_addr		mac;
 	struct sched_spec	sched_cfg;
 	shmptr_t		thread_specs;
+};
+
+/* information shared from iokernel to all runtimes */
+struct iokernel_info {
+	DEFINE_BITMAP(managed_cores, NCPU);
+	unsigned char rss_key[40];
 };

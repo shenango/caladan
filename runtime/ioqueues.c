@@ -181,13 +181,14 @@ int ioqueues_init(void)
 
 	/* map ingress memory */
 	netcfg.rx_region.base =
-	    mem_map_shm(INGRESS_MBUF_SHM_KEY, NULL, INGRESS_MBUF_SHM_SIZE,
-			PGSIZE_2MB, false);
+	    mem_map_shm_rdonly(INGRESS_MBUF_SHM_KEY, NULL, INGRESS_MBUF_SHM_SIZE,
+			PGSIZE_2MB);
 	if (netcfg.rx_region.base == MAP_FAILED) {
 		log_err("control_setup: failed to map ingress region");
 		return -1;
 	}
 	netcfg.rx_region.len = INGRESS_MBUF_SHM_SIZE;
+	iok.iok_info = (struct iokernel_info *)netcfg.rx_region.base;
 
 	/* set up queues in shared memory */
 	iok.hdr = iok_shm_alloc(sizeof(*iok.hdr), 0, NULL);

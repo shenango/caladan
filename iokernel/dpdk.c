@@ -82,6 +82,7 @@ static inline int dpdk_port_init(uint8_t port, struct rte_mempool *mbuf_pool)
 	int retval;
 	uint16_t q;
 	struct rte_eth_dev_info dev_info;
+	struct rte_eth_rss_conf rss_conf;
 	struct rte_eth_txconf *txconf;
 	struct rte_eth_rxconf *rxconf;
 
@@ -146,6 +147,15 @@ static inline int dpdk_port_init(uint8_t port, struct rte_mempool *mbuf_pool)
 
 	/* Enable RX in promiscuous mode for the Ethernet device. */
 	rte_eth_promiscuous_enable(port);
+
+	/* record the RSS hash key */
+	rss_conf.rss_key = iok_info->rss_key;
+	rss_conf.rss_key_len = ARRAY_SIZE(iok_info->rss_key);
+	retval = rte_eth_dev_rss_hash_conf_get(port, &rss_conf);
+	if (retval < 0)
+		return retval;
+	if (rss_conf.rss_key_len != ARRAY_SIZE(iok_info->rss_key))
+		return -EINVAL;
 
 	return 0;
 }

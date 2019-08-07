@@ -220,6 +220,7 @@ struct iokernel_control {
 	mem_key_t key;
 	struct control_hdr *hdr;
 	struct thread_spec *threads;
+	const struct iokernel_info *iok_info;
 	void *tx_buf;
 	size_t tx_len;
 };

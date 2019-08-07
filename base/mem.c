@@ -133,6 +133,10 @@ void *mem_map_file(void *base, size_t len, int fd, off_t offset)
 	return mmap(base, len, PROT_READ | PROT_WRITE, MAP_PRIVATE, fd, offset);
 }
 
+
+static void *__mem_map_shm(mem_key_t key, void *base, size_t len,
+		  size_t pgsize, bool exclusive, bool rdonly);
+
 /**
  * mem_map_shm - maps a System V shared memory segment
  * @key: the unique key that identifies the shared region (e.g. use ftok())
@@ -146,8 +150,20 @@ void *mem_map_file(void *base, size_t len, int fd, off_t offset)
 void *mem_map_shm(mem_key_t key, void *base, size_t len, size_t pgsize,
 		  bool exclusive)
 {
+	return __mem_map_shm(key, base, len, pgsize, exclusive, false);
+}
+
+void *mem_map_shm_rdonly(mem_key_t key, void *base, size_t len,
+		  size_t pgsize)
+{
+	return __mem_map_shm(key, base, len, pgsize, false, true);
+}
+
+static void *__mem_map_shm(mem_key_t key, void *base, size_t len,
+		  size_t pgsize, bool exclusive, bool rdonly)
+{
 	void *addr;
-	int shmid, flags = IPC_CREAT | 0777;
+	int shmid, flags = rdonly ? 0 : (IPC_CREAT | 0744);
 
 	BUILD_ASSERT(sizeof(mem_key_t) == sizeof(key_t));
 
@@ -178,7 +194,8 @@ void *mem_map_shm(mem_key_t key, void *base, size_t len, size_t pgsize,
 	if (shmid == -1)
 		return MAP_FAILED;
 
-	addr = shmat(shmid, base, 0);
+	flags = rdonly ? SHM_RDONLY : 0;
+	addr = shmat(shmid, base, flags);
 	if (addr == MAP_FAILED)
 		return MAP_FAILED;
 

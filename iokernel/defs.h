@@ -242,12 +242,16 @@ struct dataplane {
 	bool			is_mlx;
 	struct rte_mempool	*rx_mbuf_pool;
 
+	struct shm_region		ingress_mbuf_region;
+
 	struct proc		*clients[IOKERNEL_MAX_PROC];
 	int			nr_clients;
 	struct rte_hash		*mac_to_proc;
 };
 
 extern struct dataplane dp;
+extern struct iokernel_info *iok_info;
+
 
 /*
  * Logical cores assigned to linux and the control and dataplane threads

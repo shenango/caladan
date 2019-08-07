@@ -19,7 +19,6 @@
 #define MBUF_CACHE_SIZE 250
 #define RX_PREFETCH_STRIDE 2
 
-static struct shm_region ingress_mbuf_region;
 
 /*
  * Prepend rx_net_hdr preamble to ingress packets.
@@ -84,7 +83,7 @@ static bool rx_send_pkt_to_runtime(struct proc *p, struct rx_net_hdr *hdr)
 {
 	shmptr_t shmptr;
 
-	shmptr = ptr_to_shmptr(&ingress_mbuf_region, hdr, sizeof(*hdr));
+	shmptr = ptr_to_shmptr(&dp.ingress_mbuf_region, hdr, sizeof(*hdr));
 	return rx_send_to_runtime(p, hdr->rss_hash, RX_NET_RECV, shmptr);
 }
 
@@ -237,19 +236,14 @@ static struct rte_mempool *rx_pktmbuf_pool_create_in_shm(const char *name,
 	pg_size = PGSIZE_2MB;
 	pg_shift = rte_bsf32(pg_size);
 	len = rte_mempool_ops_calc_mem_size(mp, n, pg_shift, &min_chunk_size, &align);
-	if (len > INGRESS_MBUF_SHM_SIZE) {
+	/* reserve 4KB for iokernel information */
+	BUILD_ASSERT(sizeof(struct iokernel_info) <= PGSIZE_4KB);
+	if (len > INGRESS_MBUF_SHM_SIZE - PGSIZE_4KB) {
 		log_err("rx: shared memory is too small for number of mbufs");
 		goto fail_free_mempool;
 	}
 
-	shbuf = mem_map_shm(INGRESS_MBUF_SHM_KEY, NULL, INGRESS_MBUF_SHM_SIZE,
-			pg_size, true);
-	if (shbuf == MAP_FAILED) {
-		log_err("rx: mem_map_shm failed");
-		goto fail_free_mempool;
-	}
-	ingress_mbuf_region.base = shbuf;
-	ingress_mbuf_region.len = len;
+	shbuf = dp.ingress_mbuf_region.base + PGSIZE_4KB;
 
 	/* hack to make sure that this memory area is registered in DPDK */
 	/* use rte_extmem_* and rte_dev_dma_map in the future */
@@ -259,7 +253,7 @@ static struct rte_mempool *rx_pktmbuf_pool_create_in_shm(const char *name,
 	if (ret < 0)
 		goto fail_unmap_memory;
 
-	ret = rte_malloc_heap_memory_add("rx_buf_heap", shbuf, INGRESS_MBUF_SHM_SIZE, NULL, 0, PGSIZE_2MB);
+	ret = rte_malloc_heap_memory_add("rx_buf_heap", shbuf, INGRESS_MBUF_SHM_SIZE - PGSIZE_4KB, NULL, 0, PGSIZE_2MB);
 	if (ret < 0)
 		goto fail_unmap_memory;
 

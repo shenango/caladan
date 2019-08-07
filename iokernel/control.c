@@ -38,6 +38,8 @@ static struct lrpc_chan_out lrpc_control_to_data;
 static struct lrpc_chan_in lrpc_data_to_control;
 static int nr_guaranteed;
 
+struct iokernel_info *iok_info;
+
 static void *copy_shm_data(struct shm_region *r, shmptr_t ptr, size_t len)
 {
 	void *in, *out;
@@ -581,8 +583,22 @@ int control_init(void)
 	struct sockaddr_un addr;
 	pthread_t tid;
 	int sfd, ret;
+	void *shbuf;
 
 	BUILD_ASSERT(strlen(CONTROL_SOCK_PATH) <= sizeof(addr.sun_path) - 1);
+
+	shbuf = mem_map_shm(INGRESS_MBUF_SHM_KEY, NULL, INGRESS_MBUF_SHM_SIZE,
+			PGSIZE_2MB, true);
+	if (shbuf == MAP_FAILED) {
+		log_err("control: failed to map rx buffer area");
+		return -1;
+	}
+
+	dp.ingress_mbuf_region.base = shbuf;
+	dp.ingress_mbuf_region.len = INGRESS_MBUF_SHM_SIZE;
+	iok_info = (struct iokernel_info *)shbuf;
+	memcpy(iok_info->managed_cores, sched_allowed_cores, sizeof(sched_allowed_cores));
+
 
 	memset(&addr, 0x0, sizeof(struct sockaddr_un));
 	addr.sun_family = AF_UNIX;
