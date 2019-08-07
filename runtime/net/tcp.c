@@ -591,6 +591,47 @@ int tcp_dial(struct netaddr laddr, struct netaddr raddr, tcpconn_t **c_out)
 }
 
 /**
+ * tcp_dial_affinity - opens a TCP connection with matching
+ * kthread affinity to another socket
+ * @in: the connection to match to
+ * @raddr: the remote address
+ * @c_out: a pointer to store the new connection
+ *
+ * Returns 0 if successful, otherwise fail.
+ *
+ * Note: in the future this can be better integrated with tcp_dial.
+ * for now, it simply wraps it.
+ */
+int tcp_dial_affinity(tcpconn_t *in, struct netaddr raddr, tcpconn_t **c_out)
+{
+	int ret;
+	uint32_t out_aff, in_aff = net_ops.get_flow_affinity(
+			  IPPROTO_TCP, in->e.laddr.port, in->e.raddr);
+	uint16_t base_port, start_port;
+	struct netaddr laddr = {0};
+	tcpconn_t *c;
+
+	base_port = start_port = rand_crc32c((uintptr_t)in);
+
+	while (true) {
+		do {
+			out_aff = net_ops.get_flow_affinity(IPPROTO_TCP, ++base_port, raddr);
+			if (base_port == start_port)
+				return -EAGAIN;
+		} while (out_aff != in_aff);
+
+		laddr.port = base_port;
+		ret = tcp_dial(laddr, raddr, &c);
+		if (ret != -EINVAL) {
+			if (!ret)
+				*c_out = c;
+			return ret;
+		}
+	}
+}
+
+
+/**
  * tcp_local_addr - gets the local address of a TCP connection
  * @c: the TCP connection
  */

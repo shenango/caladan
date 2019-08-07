@@ -7,6 +7,7 @@
 #include "mlx5_ifc.h"
 
 #define PORT_MATCH_BITS 10
+#define PORT_MASK ((1 << PORT_MATCH_BITS) - 1)
 
 static struct mlx5dv_dr_domain		*dmn;
 static unsigned int		nr_rxq;
@@ -31,6 +32,9 @@ struct port_matcher_tbl {
 	size_t match_bit_sz;
 	struct mlx5dv_dr_rule		*rules[];
 };
+
+static DEFINE_BITMAP(tcp_listen_ports, 65536);
+static DEFINE_BITMAP(udp_listen_ports, 65536);
 
 /* level 0 flow table (root) */
 static struct mlx5dv_dr_table		*root_tbl;
@@ -278,7 +282,7 @@ int mlx5_register_flow(unsigned int affinity, struct trans_entry *e, void **hand
 	union match key = {0};
 
 	struct port_matcher_tbl *dst_tbl;
-
+	bitmap_ptr_t map;
 	struct mlx5dv_dr_matcher *match;
 	struct mlx5dv_dr_action *action[1];
 	void *rule;
@@ -291,11 +295,13 @@ int mlx5_register_flow(unsigned int affinity, struct trans_entry *e, void **hand
 
 	switch (e->proto) {
 		case IPPROTO_TCP:
+			map = tcp_listen_ports;
 			match = tcp_tbl_dport_match;
 			dst_tbl = tcp_sport_tbl;
 			DEVX_SET(fte_match_param, key.buf, outer_headers.tcp_dport, e->laddr.port);
 			break;
 		case IPPROTO_UDP:
+			map = udp_listen_ports;
 			match = udp_tbl_dport_match;
 			dst_tbl = udp_sport_tbl;
 			DEVX_SET(fte_match_param, key.buf, outer_headers.udp_dport, e->laddr.port);
@@ -304,23 +310,36 @@ int mlx5_register_flow(unsigned int affinity, struct trans_entry *e, void **hand
 			return -EINVAL;
 	}
 
+	if (!bitmap_atomic_test_and_set(map, e->laddr.port))
+		return -EINVAL;
+
 	action[0] = dst_tbl->tbl.ingress_action;
 
 	spin_lock_np(&direct_rule_lock);
 	rule = mlx5dv_dr_rule_create(match, &key.params, 1, action);
 	spin_unlock_np(&direct_rule_lock);
 
-	if (!rule)
+
+	if (!rule) {
+		bitmap_atomic_clear(map, e->laddr.port);
 		return -errno;
+	}
 
 	*handle_out = rule;
 
 	return 0;
 }
 
-int mlx5_deregister_flow(void *handle)
+int mlx5_deregister_flow(struct trans_entry *e, void *handle)
 {
 	int ret;
+
+	if (e->proto == IPPROTO_TCP)
+		bitmap_atomic_clear(tcp_listen_ports, e->laddr.port);
+	else if (e->proto == IPPROTO_UDP)
+		bitmap_atomic_clear(udp_listen_ports, e->laddr.port);
+	else
+		return -EINVAL;
 
 	spin_lock_np(&direct_rule_lock);
 	ret = mlx5dv_dr_rule_destroy(handle);
@@ -358,6 +377,17 @@ int mlx5_steer_flows(unsigned int *new_fg_assignment)
 
 	return ret;
 
+}
+
+uint32_t mlx5_get_flow_affinity(uint8_t ipproto, uint16_t local_port, struct netaddr remote)
+{
+	bitmap_ptr_t map = ipproto == IPPROTO_TCP ? tcp_listen_ports :
+			  udp_listen_ports;
+
+	if (bitmap_atomic_test(map, local_port))
+		return (remote.port & PORT_MASK) % maxks;
+	else
+		return (local_port & PORT_MASK) % maxks;
 }
 
 int mlx5_init_flows(int rxq_count)

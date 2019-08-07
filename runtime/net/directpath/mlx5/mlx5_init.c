@@ -315,6 +315,7 @@ static struct net_driver_ops mlx5_net_ops = {
 	.steer_flows = mlx5_steer_flows,
 	.register_flow = mlx5_register_flow,
 	.deregister_flow = mlx5_deregister_flow,
+	.get_flow_affinity = mlx5_get_flow_affinity,
 };
 
 /*

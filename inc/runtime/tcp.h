@@ -15,6 +15,8 @@ typedef struct tcpconn tcpconn_t;
 
 extern int tcp_dial(struct netaddr laddr, struct netaddr raddr,
 		    tcpconn_t **c_out);
+extern int tcp_dial_affinity(tcpconn_t *in, struct netaddr raddr,
+		    tcpconn_t **c_out)
 extern int tcp_listen(struct netaddr laddr, int backlog, tcpqueue_t **q_out);
 extern int tcp_accept(tcpqueue_t *q, tcpconn_t **c_out);
 extern void tcp_qshutdown(tcpqueue_t *q);

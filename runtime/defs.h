@@ -525,7 +525,8 @@ struct net_driver_ops {
 	int (*tx_single)(struct mbuf *m);
 	int (*steer_flows)(unsigned int *new_fg_assignment);
 	int (*register_flow)(unsigned int affininty, struct trans_entry *e, void **handle_out);
-	int (*deregister_flow)(void *handle);
+	int (*deregister_flow)(struct trans_entry *e, void *handle);
+	uint32_t (*get_flow_affinity)(uint8_t ipproto, uint16_t local_port, struct netaddr remote);
 };
 
 extern struct net_driver_ops net_ops;

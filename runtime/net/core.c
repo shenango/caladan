@@ -34,6 +34,35 @@ static DEFINE_PERTHREAD(struct tcache_perthread, net_tx_buf_pt);
  * RX Networking Functions
  */
 
+/**
+ * compute_flow_affinity - compute rss hash for incoming packets
+ * @local_port: the local port number
+ * @remote: the remote network address
+ *
+ * Returns the 32 bit hash mod maxks
+ *
+ * copied from dpdk/lib/librte_hash/rte_thash.h
+ */
+static uint32_t compute_flow_affinity(uint8_t ipproto, uint16_t local_port, struct netaddr remote)
+{
+	const uint8_t *rss_key = iok.iok_info->rss_key;
+
+	uint32_t i, j, map, ret = 0, input_tuple[] = {
+		remote.ip, netcfg.addr, local_port | remote.port << 16
+	};
+
+	for (j = 0; j < ARRAY_SIZE(input_tuple); j++) {
+		for (map = input_tuple[j]; map;	map &= (map - 1)) {
+			i = (uint32_t)__builtin_ctz(map);
+			ret ^= hton32(((const uint32_t *)rss_key)[j]) << (31 - i) |
+					(uint32_t)((uint64_t)(hton32(((const uint32_t *)rss_key)[j + 1])) >>
+					(i + 1));
+		}
+	}
+
+	return ret % (uint32_t)maxks;
+}
+
 static void net_rx_send_completion(unsigned long completion_data)
 {
 	struct kthread *k;
@@ -574,7 +603,7 @@ static int register_flow_iokernel(unsigned int affininty, struct trans_entry *e,
 	return 0;
 }
 
-static int deregister_flow_iokernel(void *handle)
+static int deregister_flow_iokernel(struct trans_entry *e, void *handle)
 {
 	return 0;
 }
@@ -585,6 +614,7 @@ static struct net_driver_ops iokernel_ops = {
 	.steer_flows = steer_flows_iokernel,
 	.register_flow =  register_flow_iokernel,
 	.deregister_flow = deregister_flow_iokernel,
+	.get_flow_affinity = compute_flow_affinity,
 };
 
 /**

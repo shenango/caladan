@@ -61,7 +61,9 @@ extern int mlx5_transmit_one(struct mbuf *m);
 extern int mlx5_gather_rx(struct hardware_q *rxq, struct mbuf **ms, unsigned int budget);
 extern int mlx5_steer_flows(unsigned int *new_fg_assignment);
 extern int mlx5_register_flow(unsigned int affinity, struct trans_entry *e, void **handle_out);
-extern int mlx5_deregister_flow(void *handle);
+extern int mlx5_deregister_flow(struct trans_entry *e, void *handle);
+extern uint32_t mlx5_get_flow_affinity(uint8_t ipproto,
+			 uint16_t local_port, struct netaddr remote);
 
 static inline unsigned int nr_inflight_tx(struct mlx5_txq *v)
 {
