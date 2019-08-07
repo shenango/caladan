@@ -536,8 +536,11 @@ static void __exit ksched_cpuidle_unhijack(void)
 static void __init ksched_init_pmc(void *arg)
 {
         wrmsrl(MSR_P6_EVNTSEL0, PMC_LLC_MISSES);
-        wrmsrl(MSR_CORE_PERF_GLOBAL_CTRL, CORE_PERF_GLOBAL_CTRL_ENABLE_PMC_0 |
-                                          CORE_PERF_GLOBAL_CTRL_ENABLE_PMC_1);
+	wrmsrl(MSR_CORE_PERF_FIXED_CTR_CTRL, 0x333);
+        wrmsrl(MSR_CORE_PERF_GLOBAL_CTRL,
+	       CORE_PERF_GLOBAL_CTRL_ENABLE_PMC_0 |
+	       CORE_PERF_GLOBAL_CTRL_ENABLE_PMC_1 |
+	       (1UL << 32) | (1UL << 33) | (1UL << 34));
 }
 
 static int __init ksched_init(void)

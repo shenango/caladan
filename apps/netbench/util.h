@@ -13,26 +13,27 @@ using namespace std::chrono;
 
 struct work_unit {
   double start_us, work_us, duration_us;
+  int cpu;
 };
 
 template <class Arrival, class Service>
 std::vector<work_unit> GenerateWork(Arrival a, Service s, double cur_us,
-                                    double last_us) {
+                                    double last_us, int cpu) {
   std::vector<work_unit> w;
   while (cur_us < last_us) {
     cur_us += a();
-    w.emplace_back(work_unit{cur_us, s(), 0});
+    w.emplace_back(work_unit{cur_us, s(), 0, cpu});
   }
   return w;
 }
 
 template <class Arrival, class Service>
 std::vector<work_unit> GenerateWork(Arrival a, Service *s, double cur_us,
-                                    double last_us) {
+                                    double last_us, int cpu) {
   std::vector<work_unit> w;
   while (cur_us < last_us) {
     cur_us += a();
-    w.emplace_back(work_unit{cur_us, (*s)(), 0});
+    w.emplace_back(work_unit{cur_us, (*s)(), 0, cpu});
   }
   return w;
 }

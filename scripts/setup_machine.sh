@@ -35,3 +35,6 @@ if [[ ! -z "$cat" ]]; then
 else
        echo "Machine does not support CAT, skip..."
 fi
+
+# enable RDPMC instruction from userspace
+echo 2 > /sys/devices/cpu/rdpmc

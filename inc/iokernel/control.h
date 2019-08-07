@@ -28,6 +28,8 @@ struct q_ptrs {
 	uint32_t		directpath_rx_tail;
 	uint64_t		next_timer_tsc;
 	uint32_t		storage_tail;
+	uint64_t		instr;
+	uint64_t		tsc;
 };
 
 struct congestion_info {
