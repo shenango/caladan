@@ -14,6 +14,7 @@
 
 class SyntheticWorker {
  public:
+  virtual ~SyntheticWorker() {}
   // Perform n iterations of fake work.
   virtual void Work(uint64_t n) = 0;
 };
