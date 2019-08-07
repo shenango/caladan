@@ -11,6 +11,9 @@ netbench_obj = $(netbench_src:.cc=.o)
 stress_src = stress.cc
 stress_obj = $(stress_src:.cc=.o)
 
+stress_linux_src = stress_linux.cc
+stress_linux_obj = $(stress_linux_src:.cc=.o)
+
 interference_src = interference.cc
 interference_obj = $(interference_src:.cc=.o)
 
@@ -20,7 +23,7 @@ INC += -I$(ROOT_PATH)/bindings/cc
 RUNTIME_LIBS := $(RUNTIME_LIBS) -lnuma
 
 # must be first
-all: netbench stress interference
+all: netbench stress interference stress_linux
 
 netbench: $(lib_obj) $(netbench_obj) $(librt_libs) $(RUNTIME_DEPS)
 	$(LDXX) -o $@ $(LDFLAGS) $(lib_obj) $(netbench_obj) \
@@ -30,12 +33,15 @@ stress: $(lib_obj) $(stress_obj) $(librt_libs) $(RUNTIME_DEPS)
 	$(LDXX) -o $@ $(LDFLAGS) $(lib_obj) $(stress_obj) \
 	$(librt_libs) $(RUNTIME_LIBS)
 
+stress_linux: $(lib_obj) $(stress_linux_obj) $(RUNTIME_DEPS)
+	$(LDXX) -o $@ $(LDFLAGS) $(lib_obj) $(stress_linux_obj) $(RUNTIME_LIBS)
+
 interference: $(lib_obj) $(interference_obj) $(librt_libs) $(RUNTIME_DEPS)
 	$(LDXX) -o $@ $(LDFLAGS) $(lib_obj) $(interference_obj) \
 	$(librt_libs) $(RUNTIME_LIBS)
 
 # general build rules for all targets
-src = $(lib_src) $(netbench_src) $(stress_src) $(interference_src)
+src = $(lib_src) $(netbench_src) $(stress_src) $(interference_src) $(stress_linux_src)
 obj = $(src:.cc=.o)
 dep = $(obj:.o=.d)
 
@@ -52,4 +58,4 @@ endif
 
 .PHONY: clean
 clean:
-	rm -f $(obj) $(dep) netbench stress interference
+	rm -f $(obj) $(dep) netbench stress interference stress_linux
