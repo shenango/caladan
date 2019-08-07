@@ -10,8 +10,6 @@
 #include "defs.h"
 #include "sched.h"
 
-/* a list of all processes */
-static LIST_HEAD(all_procs);
 /* a list of processes that are waiting for more cores */
 static LIST_HEAD(congested_procs);
 /* a bitmap of all available cores that are currently idle */
