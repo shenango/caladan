@@ -110,8 +110,8 @@ void dp_clients_rx_control_lrpcs(void)
 	uint16_t n_rx = 0;
 	struct proc *p;
 
-	while (lrpc_recv(&lrpc_control_to_data, &cmd, &payload)
-			&& n_rx < IOKERNEL_CONTROL_BURST_SIZE) {
+	while (n_rx < IOKERNEL_CONTROL_BURST_SIZE &&
+			lrpc_recv(&lrpc_control_to_data, &cmd, &payload)) {
 		p = (struct proc *) payload;
 
 		switch (cmd)
