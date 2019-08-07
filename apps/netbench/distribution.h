@@ -6,6 +6,8 @@
 
 class Distribution {
  public:
+  virtual ~Distribution() {}
+
   // Generate the next sample.
   virtual double operator()() = 0;
   virtual double Mean() const = 0;
@@ -29,7 +31,7 @@ class BimodalDistribution : public Distribution {
       : frac_(fraction), low_(low), high_(high), rand_(seed), dist_(0.0, 1.0) {}
 
   double operator()() { return dist_(rand_) > frac_ ? high_ : low_; }
-  double Mean() const { return low_ * (1 - frac_) + high_ * frac_; }
+  double Mean() const { return high_ * (1 - frac_) + low_ * frac_; }
 
  private:
   const double frac_;

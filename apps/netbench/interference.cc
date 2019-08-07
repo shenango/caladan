@@ -129,9 +129,8 @@ std::vector<work_unit> RunExperiment(double offered_rps, Distribution *sd,
   // create a thread per worker
   for (int i = 0; i < workers; ++i) {
     Queue *q = dfcfs ? qs[i].get() : qs[0].get();
-    threads[i] = rt::Thread([&, q, i]() {
-      samples[i] = RtcWorker(q, &t, &wg, max_work);
-    });
+    threads[i] = rt::Thread(
+        [&, q, i]() { samples[i] = RtcWorker(q, &t, &wg, max_work); });
   }
 
   // try to get a clean start time
@@ -223,8 +222,7 @@ int MainHandler(int argc, char *argv[]) {
 
 int main(int argc, char *argv[]) {
   if (argc != 4) {
-    std::cerr << "usage: [cfg_file] [dFCFS|cFCFS] [work_dist]"
-              << std::endl;
+    std::cerr << "usage: [cfg_file] [dFCFS|cFCFS] [work_dist]" << std::endl;
     return -EINVAL;
   }
 

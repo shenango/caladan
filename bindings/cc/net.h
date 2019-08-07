@@ -12,6 +12,7 @@ namespace rt {
 
 class NetConn {
  public:
+  virtual ~NetConn() {};
   virtual ssize_t Read(void *buf, size_t len) = 0;
   virtual ssize_t Write(const void *buf, size_t len) = 0;
 };

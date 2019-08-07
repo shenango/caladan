@@ -8,8 +8,8 @@ extern "C" {
 #include <sys/mman.h>
 }
 
-#include "util.h"
 #include "synthetic_worker.h"
+#include "util.h"
 
 #include <algorithm>
 #include <cmath>
