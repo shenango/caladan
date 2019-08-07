@@ -17,6 +17,8 @@
 
 /* a bitmap of cores available to be allocated by the scheduler */
 DEFINE_BITMAP(sched_allowed_cores, NCPU);
+/* a bitmap of all idle cores */
+DEFINE_BITMAP(idle, NCPU);
 
 /* maps each cpu number to the cpu number of its hyperthread buddy */
 unsigned int sched_siblings[NCPU];
@@ -375,7 +377,6 @@ rewake:
 void sched_poll(void)
 {
 	static uint64_t last_time = 0;
-	DEFINE_BITMAP(idle, NCPU);
 	struct core_state *s;
 	uint64_t now;
 	int i, core, idle_cnt = 0;
@@ -404,8 +405,6 @@ void sched_poll(void)
 	/*
 	 * fast pass --- runs every poll loop
 	 */
-
-	bitmap_init(idle, NCPU, false);
 	sched_for_each_allowed_core(core, i) {
 		s = &state[core];
 
@@ -533,6 +532,7 @@ int sched_init(void)
 	bool valid = true;
 
 	bitmap_init(sched_allowed_cores, cpu_count, false);
+	bitmap_init(idle, NCPU, false);
 
 	/*
 	 * first pass: scan and log CPUs
