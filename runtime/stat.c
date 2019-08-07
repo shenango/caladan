@@ -134,7 +134,7 @@ static void stat_tcp_worker(void *arg)
 	while (true) {
 		ret = tcp_read(c, resp.buf, sizeof(resp.buf));
 		if (ret <= 0)
-			return;
+			goto done;
 
 		len = stat_write_buf(resp.buf, sizeof(resp.buf));
 		if (len < 0) {
@@ -150,11 +150,15 @@ static void stat_tcp_worker(void *arg)
 			ret = tcp_write(c, (char *)&resp + done, sizeof(size_t) + len - done);
 			if (ret < 0) {
 				WARN_ON(ret != -EPIPE && ret != -ECONNRESET);
-				return;
+				goto done;
 			}
 			done += ret;
 		} while (done < sizeof(size_t) + len);
 	}
+
+done:
+	tcp_close(c);
+	return;
 }
 
 static void stat_tcp_server(void *arg)
