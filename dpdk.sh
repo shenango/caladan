@@ -10,7 +10,7 @@ git submodule update --recursive
 patch -p 1 -d dpdk/ < ixgbe_18_11.patch
 
 
-if lspci | grep -q 'ConnectX-5'; then
+if lspci | grep -q 'ConnectX-[4,5]'; then
    patch -p 1 -d dpdk/ < mlx5_18_11.patch
 elif lspci | grep -q 'ConnectX-3'; then
     patch -p 1 -d dpdk/ < mlx4_18_11.patch
