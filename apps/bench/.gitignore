@@ -10,3 +10,4 @@ netbench_udp
 netbench_linux
 netperf
 linux_mech_bench
+memcached_router

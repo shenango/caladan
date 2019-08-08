@@ -11,7 +11,7 @@
 
 #define BITS_PER_LONG	(sizeof(long) * 8)
 #define BITMAP_LONG_SIZE(nbits) \
-	div_up(nbits, BITS_PER_LONG)
+	div_up(nbits, (typeof(nbits))BITS_PER_LONG)
 
 #define DEFINE_BITMAP(name, nbits) \
 	unsigned long name[BITMAP_LONG_SIZE(nbits)]

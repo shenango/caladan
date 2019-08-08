@@ -23,6 +23,12 @@ efficiency_obj = $(efficiency_src:.cc=.o)
 efficiency_linux_src = efficiency_linux.cc
 efficiency_linux_obj = $(efficiency_linux_src:.cc=.o)
 
+rpclib_src = RpcManager.cc
+rpclib_obj = $(rpclib_src:.cc=.o)
+
+memcached_router_src = memcached_router.cc
+memcached_router_obj = $(memcached_router_src:.cc=.o)
+
 netbench_src = netbench.cc
 netbench_obj = $(netbench_src:.cc=.o)
 
@@ -71,6 +77,10 @@ efficiency_linux: $(fake_worker_obj) $(efficiency_linux_obj)
 	$(LDXX) -o $@ $(LDFLAGS) $(fake_worker_obj) $(efficiency_linux_obj) \
 	-lpthread
 
+memcached_router: $(rpclib_obj) $(memcached_router_obj) $(librt_libs) $(RUNTIME_DEPS)
+	$(LDXX)  -o $@ $(LDFLAGS) $(rpclib_obj) $(memcached_router_obj) \
+	$(librt_libs) $(RUNTIME_LIBS)
+
 netbench: $(netbench_obj) $(fake_worker_obj) $(librt_libs) $(RUNTIME_DEPS)
 	$(LDXX) -o $@ $(LDFLAGS) $(fake_worker_obj) $(netbench_obj) \
 	$(librt_libs) $(RUNTIME_LIBS)
@@ -94,7 +104,7 @@ linux_mech_bench: $(linux_mech_bench_obj) $(librt_libs)
 	$(RUNTIME_LIBS) -lpthread
 
 # general build rules for all targets
-src = $(fake_worker_src) $(tbench_src) $(callibrate_src)
+src = $(fake_worker_src) $(tbench_src) $(callibrate_src) $(memcached_router_src) $(rpclib_src)
 src += $(stress_src) $(efficiency_src) $(efficiency_linux_src) $(netbench_src)
 src += $(netbench2_src) $(netbench_udp_src) $(netbench_linux_src) $(netperf_src)
 src += $(linux_mech_bench_src)
@@ -116,4 +126,4 @@ endif
 clean:
 	rm -f $(obj) $(dep) tbench callibrate stress efficiency \
 	efficiency_linux netbench netbench2 netbench_udp netbench_linux \
-	netperf linux_mech_bench stress_linux
+	netperf linux_mech_bench stress_linux memcached_router
