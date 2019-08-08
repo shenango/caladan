@@ -310,7 +310,7 @@ int mlx5_register_flow(unsigned int affinity, struct trans_entry *e, void **hand
 			return -EINVAL;
 	}
 
-	if (!bitmap_atomic_test_and_set(map, e->laddr.port))
+	if (bitmap_atomic_test_and_set(map, e->laddr.port))
 		return -EINVAL;
 
 	action[0] = dst_tbl->tbl.ingress_action;
