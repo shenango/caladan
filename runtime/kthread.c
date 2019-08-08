@@ -37,6 +37,7 @@ static atomic_t runningks;
 struct kthread *ks[NCPU];
 /* kernel thread-local data */
 __thread struct kthread *mykthread;
+__thread unsigned int kthread_idx;
 /* Map of cpu to kthread */
 struct cpu_record cpu_map[NCPU] __attribute__((aligned(CACHE_LINE_SIZE)));
 /* the file descriptor for the ksched module */
@@ -77,6 +78,8 @@ int kthread_init_thread(void)
 	ks[nrks++] = mykthread;
 	assert(nrks <= maxks);
 	spin_unlock_np(&klock);
+
+	kthread_idx = mykthread->kthread_idx;
 
 	return 0;
 }
@@ -237,10 +240,14 @@ void kthread_park(bool voluntary)
  */
 void kthread_wait_to_attach(void)
 {
+	struct kthread *k = myk();
 	int s;
 
 	s = ioctl(ksched_fd, KSCHED_IOC_START, 0);
-	BUG_ON(s != 0);
+	BUG_ON(s < 0);
+
+	k->curr_cpu = s;
+	store_release(&cpu_map[s].recent_kthread, k);
 
 	/* attach the kthread for the first time */
 	atomic_inc(&runningks);

@@ -226,7 +226,7 @@ static long ksched_park(void)
 		local_set(&p->busy, true);
 		smp_store_release(&s->last_gen, gen);
 		put_cpu();
-		return 0;
+		return smp_processor_id();
 	}
 
 	/* if the tid is zero, then simply idle this core */
@@ -254,7 +254,7 @@ static long ksched_start(void)
 	__set_current_state(TASK_INTERRUPTIBLE);
 	schedule();
 	__set_current_state(TASK_RUNNING);
-	return 0;
+	return smp_processor_id();
 }
 
 static void ksched_deliver_signal(struct ksched_percpu *p, unsigned int signum)

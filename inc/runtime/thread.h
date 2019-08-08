@@ -25,6 +25,12 @@ extern thread_t *thread_create(thread_fn_t fn, void *arg);
 extern thread_t *thread_create_with_buf(thread_fn_t fn, void **buf, size_t len);
 
 extern __thread thread_t *__self;
+extern __thread unsigned int kthread_idx;
+
+static inline unsigned int get_current_affinity(void)
+{
+	return kthread_idx;
+}
 
 /**
  * thread_self - gets the currently running thread
