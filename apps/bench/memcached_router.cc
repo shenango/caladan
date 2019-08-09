@@ -4,8 +4,8 @@ extern "C" {
 #include <base/log.h>
 #include <net/ip.h>
 #include <runtime/runtime.h>
+#include <runtime/smalloc.h>
 #include <runtime/storage.h>
-#include <stdint.h>
 }
 
 #include "net.h"
@@ -16,6 +16,8 @@ extern "C" {
 #include <vector>
 
 #include "RpcManager.h"
+
+#define MAX_REQUEST_BODY 1024
 
 static netaddr listenaddr;
 static std::vector<netaddr> memcached_addrs;
@@ -34,80 +36,98 @@ static int StringToAddr(const char *str, netaddr *addr) {
   return 0;
 }
 
-int setup() {
-  for (auto &w : memcached_addrs) {
-    auto ep = RpcEndpoint<MemcachedHdr>::Create(w);
-    if (ep == nullptr)
-      BUG();
-    memcached_endpoints.push_back(ep);
+class RequestContext {
+ public:
+  RequestContext(std::shared_ptr<SharedTcpStream> c) : conn(c) {
+    r.req_body = request_body;
+    r.rsp_body = request_body;
+    r.rsp_body_len = sizeof(request_body);
   }
-  return 0;
-}
+  Rpc<MemcachedHdr> r;
+  unsigned char request_body[MAX_REQUEST_BODY];
+  std::shared_ptr<SharedTcpStream> conn;
+  void *operator new(size_t size) {
+    void *p = smalloc(size);
+    if (unlikely(p == nullptr)) throw std::bad_alloc();
+    return p;
+  }
+  void operator delete(void *p) { sfree(p); }
+};
 
 inline unsigned int route(unsigned char *key, size_t keylen) {
   return jenkins_hash(key, keylen) % memcached_endpoints.size();
 }
 
-void ClientHandler(std::shared_ptr<rt::TcpConn> conn) {
-  unsigned char buf[4096];
-  Rpc<MemcachedHdr> r;
-  r.req_body = buf;
-  r.rsp_body = buf;
-  r.rsp_body_len = sizeof(buf);
+void HandleRequest(RequestContext *ctx) {
+  unsigned char *key = ctx->request_body + ctx->r.req.extras_length;
+  int server_idx = route(key, ntoh16(ctx->r.req.key_length));
+
+  memcached_endpoints[server_idx]->SubmitRequestBlocking(&ctx->r);
 
   struct iovec out_vec[2];
-  out_vec[0].iov_base = &r.rsp;
-  out_vec[0].iov_len = sizeof(r.rsp);
-  out_vec[1].iov_base = buf;
+  out_vec[0].iov_base = &ctx->r.rsp;
+  out_vec[0].iov_len = sizeof(ctx->r.rsp);
+  out_vec[1].iov_base = ctx->request_body;
+  out_vec[1].iov_len = ntoh32(ctx->r.rsp.total_body_length);
+
+  ssize_t wret = ctx->conn->WritevFull(out_vec, 2);
+  if (wret != static_cast<ssize_t>(sizeof(ctx->r.rsp) + out_vec[1].iov_len)) {
+    BUG_ON(wret != -EPIPE && wret != -ECONNRESET);
+  }
+}
+
+void ClientHandler(std::shared_ptr<rt::TcpConn> conn) {
+  auto resp = std::make_shared<SharedTcpStream>(conn);
 
   while (true) {
+    auto ctx = new RequestContext(resp);
+    MemcachedHdr *h = &ctx->r.req;
 
-    ssize_t rret = conn->ReadFull(&r.req, sizeof(r.req));
-    if (rret != static_cast<ssize_t>(sizeof(r.req))) {
-      if (rret == 0 || rret == -ECONNRESET)
-        return;
-      BUG();
+    ssize_t rret = conn->ReadFull(h, sizeof(*h));
+    if (rret != static_cast<ssize_t>(sizeof(*h))) {
+      BUG_ON(rret != 0 && rret != -ECONNRESET);
+      delete ctx;
+      return;
     }
 
-    r.req_body_len = ntoh32(r.req.total_body_length);
-    BUG_ON(!r.req_body_len);
+    ctx->r.req_body_len = ntoh32(h->total_body_length);
+    BUG_ON(!ctx->r.req_body_len);
 
-    rret = conn->ReadFull(buf, r.req_body_len);
-    if (rret != static_cast<ssize_t>(r.req_body_len)) {
-      if (rret == 0 || rret == -ECONNRESET)
-        return;
-      log_err("rret %ld", rret);
-      BUG();
+    if (ctx->r.req_body_len > sizeof(ctx->request_body)) {
+      log_err("request too large, destroying connection");
+      delete ctx;
+      return;
     }
 
-    unsigned char *key_start = buf + r.req.extras_length;
-    int server_idx = route(key_start, ntoh16(r.req.key_length));
-
-    memcached_endpoints[server_idx]->SubmitRequestBlocking(&r);
-    out_vec[1].iov_len = ntoh32(r.rsp.total_body_length);
-
-    ssize_t wret =
-        WritevFull(conn.get(), out_vec, r.rsp.total_body_length ? 2 : 1);
-    if (wret != static_cast<ssize_t>(sizeof(r.rsp) + out_vec[1].iov_len)) {
-      if (wret == -EPIPE || wret == -ECONNRESET)
-        return;
-      log_err("wret %ld", wret);
-      BUG();
+    rret = conn->ReadFull(ctx->request_body, ctx->r.req_body_len);
+    if (rret != static_cast<ssize_t>(ctx->r.req_body_len)) {
+      BUG_ON(rret != 0 && rret != -ECONNRESET);
+      delete ctx;
+      return;
     }
+
+    rt::Thread([=] {
+      HandleRequest(ctx);
+      delete ctx;
+    })
+        .Detach();
   }
 }
 
 void ServerHandler(void *arg) {
-  setup();
+  /* dial memcached connections */
+  for (auto &w : memcached_addrs) {
+    auto ep = RpcEndpoint<MemcachedHdr>::Create(w);
+    if (ep == nullptr) BUG();
+    memcached_endpoints.push_back(ep);
+  }
 
   std::unique_ptr<rt::TcpQueue> q(rt::TcpQueue::Listen(listenaddr, 4096));
-  if (q == nullptr)
-    panic("couldn't listen for connections");
+  if (q == nullptr) panic("couldn't listen for connections");
 
   while (true) {
     rt::TcpConn *c = q->Accept();
-    if (c == nullptr)
-      panic("couldn't accept a connection");
+    if (c == nullptr) panic("couldn't accept a connection");
     rt::Thread([=] { ClientHandler(std::shared_ptr<rt::TcpConn>(c)); })
         .Detach();
   }
@@ -138,8 +158,7 @@ int main(int argc, char *argv[]) {
   }
 
   int ret = runtime_init(argv[1], ServerHandler, NULL);
-  if (ret)
-    printf("failed to start runtime\n");
+  if (ret) printf("failed to start runtime\n");
 
   return ret;
 }

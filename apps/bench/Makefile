@@ -53,7 +53,7 @@ INC += -I$(ROOT_PATH)/bindings/cc
 # must be first
 all: tbench callibrate stress efficiency efficiency_linux \
      netbench netbench2 netbench_udp netbench_linux netperf linux_mech_bench \
-     stress_linux
+     stress_linux memcached_router
 
 tbench: $(tbench_obj) $(librt_libs) $(RUNTIME_DEPS)
 	$(LDXX) -o $@ $(LDFLAGS) $(tbench_obj) $(librt_libs) $(RUNTIME_LIBS)

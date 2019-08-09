@@ -1,6 +1,7 @@
 #pragma once
 
-template <class ProtoHdr> struct Rpc {
+template <class ProtoHdr>
+struct Rpc {
   ProtoHdr req;
   void *req_body;
   size_t req_body_len;
@@ -10,20 +11,22 @@ template <class ProtoHdr> struct Rpc {
   size_t rsp_body_len;
 };
 
-template <class T> class RpcEndpointConnection;
-template <class T> class RpcEndpoint {
-public:
+template <class T>
+class RpcEndpointConnection;
+template <class T>
+class RpcEndpoint {
+ public:
   int SubmitRequestBlocking(Rpc<T> *r);
   int SubmitRequestAsync(rt::WaitGroup *wg, Rpc<T> *r);
   static RpcEndpoint *Create(netaddr remote);
 
-private:
+ private:
   RpcEndpoint(std::vector<RpcEndpointConnection<T> *> connections)
       : connections_(std::move(connections)) {}
   std::vector<RpcEndpointConnection<T> *> connections_;
 };
 
-ssize_t WritevFull(rt::TcpConn *c, const struct iovec *iov, int iovcnt);
+ssize_t WritevFull_(rt::TcpConn *c, const struct iovec *iov, int iovcnt);
 
 /* Reflex protocol */
 #define CMD_GET 0x00
@@ -37,7 +40,10 @@ struct ReflexHdr {
   unsigned int lba_count;
   uint32_t get_reqid() { return req_handle; }
   void set_reqid(uint32_t reqid) { req_handle = reqid; }
-  size_t get_body_len() { return 512 * lba_count; }
+  size_t get_body_len() {
+    BUG();
+    return 512 * lba_count;
+  }
 } __packed;
 static_assert(sizeof(ReflexHdr) == 24);
 template class RpcEndpoint<ReflexHdr>;
@@ -59,3 +65,20 @@ struct MemcachedHdr {
 } __packed;
 static_assert(sizeof(MemcachedHdr) == 24);
 template class RpcEndpoint<MemcachedHdr>;
+
+class SharedTcpStream {
+ public:
+  SharedTcpStream(std::shared_ptr<rt::TcpConn> c) : c_(c) {}
+  ssize_t WriteFull(const void *buf, size_t len) {
+    rt::ScopedLock<rt::Mutex> lock(&sendMutex_);
+    return c_->WriteFull(buf, len);
+  }
+  ssize_t WritevFull(const struct iovec *iov, int iovcnt) {
+    rt::ScopedLock<rt::Mutex> lock(&sendMutex_);
+    return WritevFull_(c_.get(), iov, iovcnt);
+  }
+
+ private:
+  std::shared_ptr<rt::TcpConn> c_;
+  rt::Mutex sendMutex_;
+};

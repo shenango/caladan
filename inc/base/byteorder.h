@@ -3,7 +3,7 @@
  */
 
 #pragma once
-
+#include <stdint.h>
 #include <asm/cpu.h>
 #include <base/compiler.h>
 

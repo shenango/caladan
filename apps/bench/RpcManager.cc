@@ -19,18 +19,20 @@ extern "C" {
 
 #include "RpcManager.h"
 
-template <class T> struct RequestTracker {
+template <class T>
+struct RequestTracker {
   rt::WaitGroup *wg;
   uint32_t prev_reqid;
   Rpc<T> *rpc;
 };
 
-template <class T> class RpcEndpointConnection {
-public:
+template <class T>
+class RpcEndpointConnection {
+ public:
   RpcEndpointConnection(std::unique_ptr<rt::TcpConn> conn);
   int SubmitRequest(rt::WaitGroup *wg, Rpc<T> *rpc);
 
-private:
+ private:
   std::unique_ptr<rt::TcpConn> conn_;
   rt::Mutex lock_;
   std::unordered_map<uint64_t, RequestTracker<T>> reqs_;
@@ -45,8 +47,7 @@ RpcEndpointConnection<T>::RpcEndpointConnection(
     while (true) {
       T hdr;
       ssize_t rret = conn_->ReadFull(&hdr, sizeof(hdr));
-      if (rret != static_cast<ssize_t>(sizeof(hdr)))
-        BUG();
+      if (rret != static_cast<ssize_t>(sizeof(hdr))) BUG();
 
       uint32_t reqid = hdr.get_reqid();
       lock_.Lock();
@@ -61,8 +62,7 @@ RpcEndpointConnection<T>::RpcEndpointConnection(
       BUG_ON(hdr.get_body_len() > req.rpc->rsp_body_len);
       if (hdr.get_body_len() > 0) {
         rret = conn_->ReadFull(req.rpc->rsp_body, hdr.get_body_len());
-        if (rret <= 0)
-          BUG();
+        if (rret <= 0) BUG();
       }
 
       req.wg->Done();
@@ -71,12 +71,12 @@ RpcEndpointConnection<T>::RpcEndpointConnection(
       .Detach();
 }
 
-template <class T> RpcEndpoint<T> *RpcEndpoint<T>::Create(netaddr remote) {
+template <class T>
+RpcEndpoint<T> *RpcEndpoint<T>::Create(netaddr remote) {
   std::vector<std::unique_ptr<rt::TcpConn>> conns;
   for (int i = 0; i < runtime_max_cores(); i++) {
     rt::TcpConn *c = rt::TcpConn::DialAffinity(i, remote);
-    if (!c)
-      return nullptr;
+    if (!c) return nullptr;
     conns.emplace_back(c);
   }
 
@@ -87,12 +87,12 @@ template <class T> RpcEndpoint<T> *RpcEndpoint<T>::Create(netaddr remote) {
   return new RpcEndpoint<T>(epcs);
 }
 
-template <class T> int RpcEndpoint<T>::SubmitRequestBlocking(Rpc<T> *req) {
+template <class T>
+int RpcEndpoint<T>::SubmitRequestBlocking(Rpc<T> *req) {
   rt::WaitGroup wg(1);
 
   int ret = SubmitRequestAsync(&wg, req);
-  if (ret)
-    return ret;
+  if (ret) return ret;
 
   wg.Wait();
   return 0;
@@ -117,14 +117,13 @@ int RpcEndpointConnection<T>::SubmitRequest(rt::WaitGroup *wg, Rpc<T> *r) {
   r->req.set_reqid(req_id_ctr_);
   reqs_[req_id_ctr_++] = {wg, prev_reqid, r};
 
-  ssize_t wret = WritevFull(conn_.get(), iov, 2);
-  if (wret != static_cast<ssize_t>(sizeof(T) + r->req_body_len))
-    BUG();
+  ssize_t wret = WritevFull_(conn_.get(), iov, 2);
+  if (wret != static_cast<ssize_t>(sizeof(T) + r->req_body_len)) BUG();
 
   return 0;
 }
 
-ssize_t WritevFull(rt::TcpConn *c, const struct iovec *iov, int iovcnt) {
+ssize_t WritevFull_(rt::TcpConn *c, const struct iovec *iov, int iovcnt) {
   int i = 0;
   ssize_t sent = 0;
   struct iovec vs[iovcnt];
@@ -132,8 +131,7 @@ ssize_t WritevFull(rt::TcpConn *c, const struct iovec *iov, int iovcnt) {
 
   do {
     ssize_t ret = c->Writev(&vs[i], iovcnt);
-    if (ret <= 0)
-      return ret;
+    if (ret <= 0) return ret;
     sent += ret;
     while (iovcnt && ret >= static_cast<ssize_t>(vs[i].iov_len)) {
       ret -= vs[i].iov_len;
