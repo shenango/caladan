@@ -29,7 +29,7 @@ static DEFINE_BITMAP(mis_sampled_cores, NCPU);
 /* wait for performance counter results over this time interval */
 #define MIS_BW_PUNISH_INTERVAL	10
 /* FIXME: should not be hard coded */
-#define MIS_PUNISH_HIGH_WATERMARK	0.10
+#define MIS_PUNISH_HIGH_WATERMARK	0.09
 #define MIS_PUNISH_LOW_WATERMARK	(0.9 * MIS_PUNISH_HIGH_WATERMARK)
 #define MIS_ADD_BACK_WATERMARK	        (0.8 * MIS_PUNISH_HIGH_WATERMARK)
 #define MIS_UNDER_PUNISH_LOW_WATERMARK_CNT_THRESHOLD 20
