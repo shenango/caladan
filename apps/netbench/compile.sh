@@ -1,5 +1,0 @@
-#!/bin/bash
-
-g++ -O3 -I/home/zain/shenango/bindings/cc synthetic_worker.cc stress_linux.cc  -Wl,--wrap=main -march=native -no-pie -L/home/zain/shenango -T /home/zain/shenango/base/base.ld -L /home/zain/shenango/rdma-core/build/lib -Wl,-rpath=/home/zain/shenango/rdma-core/build/lib/ -I/home/zain/shenango/inc -T/home/zain/shenango/base/base.ld -no-pie -L/home/zain/shenango/shim -lshim -L/home/zain/shenango/bindings/cc -lrt++ -L/home/zain/shenango -lruntime -lnet -lbase -ldl -lpthread -lruntime -lnet -lbase -libverbs -lmlx5 -lmlx4 -o stress_linux -lnuma /home/zain/shenango/bindings/cc/librt++.a
-
-#g++ -O3 -I/home/zain/shenango/bindings/cc synthetic_worker.cc stress_linux.cc  -L/home/zain/shenango -T /home/zain/shenango/base/base.ld -L /home/zain/shenango/rdma-core/build/lib -Wl,-rpath=/home/zain/shenango/rdma-core/build/lib/ -I/home/zain/shenango/inc -T/home/zain/shenango/base/base.ld -no-pie -L/home/zain/shenango/bindings/cc -lrt++ -L/home/zain/shenango -lruntime -lnet -lbase -ldl -lpthread -lruntime -lnet -lbase -libverbs -lmlx5 -lmlx4 -o stress_linux -lnuma /home/zain/shenango/bindings/cc/librt++.a
