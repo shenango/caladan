@@ -151,11 +151,14 @@ static inline int dpdk_port_init(uint8_t port, struct rte_mempool *mbuf_pool)
 	/* record the RSS hash key */
 	rss_conf.rss_key = iok_info->rss_key;
 	rss_conf.rss_key_len = ARRAY_SIZE(iok_info->rss_key);
-	retval = rte_eth_dev_rss_hash_conf_get(port, &rss_conf);
-	if (retval < 0)
-		return retval;
-	if (rss_conf.rss_key_len != ARRAY_SIZE(iok_info->rss_key))
-		return -EINVAL;
+	if (strncmp(dev_info.driver_name, "net_mlx4", 8)) {
+		retval = rte_eth_dev_rss_hash_conf_get(port, &rss_conf);
+		if (retval < 0)
+			return retval;
+
+		if (rss_conf.rss_key_len != ARRAY_SIZE(iok_info->rss_key))
+			return -EINVAL;
+	}
 
 	return 0;
 }
