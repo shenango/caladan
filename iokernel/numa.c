@@ -209,16 +209,18 @@ static unsigned int numa_choose_core(struct proc *p)
 	unsigned int core, tmp;
 	DEFINE_BITMAP(core_subset, NCPU);
 
-        /* first try to find a matching active hyperthread */
-        sched_for_each_allowed_core(core, tmp) {
-		unsigned int sib = sched_siblings[core];
-		if (cores[core] != sd)
-			continue;
-		if (cores[sib] == sd || (cores[sib] != NULL &&
-		    !numa_proc_is_preemptible(cores[sib], sd)))
-			continue;
+	/* first try to find a matching active hyperthread */
+	if (!cfg.noht) {
+		sched_for_each_allowed_core(core, tmp) {
+			unsigned int sib = sched_siblings[core];
+			if (cores[core] != sd)
+				continue;
+			if (cores[sib] == sd || (cores[sib] != NULL &&
+				!numa_proc_is_preemptible(cores[sib], sd)))
+				continue;
 
-		return sib;
+			return sib;
+		}
 	}
 
 	/* then try to find a core on the preferred socket */
