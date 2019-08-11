@@ -120,38 +120,9 @@ pub enum Transport {
     Tcp,
 }}
 
-arg_enum! {
-#[derive(Copy, Clone)]
-enum Protocol {
-    Synthetic,
-    Memcached,
-    Dns,
-    Reflex,
-}}
-
-impl Protocol {
-    fn gen_request(&self, i: usize, p: &Packet, buf: &mut Vec<u8>, tport: Transport) {
-        match *self {
-            Protocol::Memcached => MemcachedProtocol::gen_request(i, p, buf, tport),
-            Protocol::Synthetic => SyntheticProtocol::gen_request(i, p, buf, tport),
-            Protocol::Dns => DnsProtocol::gen_request(i, p, buf, tport),
-            Protocol::Reflex => ReflexProtocol::gen_request(i, p, buf, tport),
-        }
-    }
-
-    fn read_response(
-        &self,
-        sock: &Connection,
-        tport: Transport,
-        scratch: &mut [u8],
-    ) -> io::Result<usize> {
-        match *self {
-            Protocol::Synthetic => SyntheticProtocol::read_response(sock, tport, scratch),
-            Protocol::Memcached => MemcachedProtocol::read_response(sock, tport, scratch),
-            Protocol::Dns => DnsProtocol::read_response(sock, tport, scratch),
-            Protocol::Reflex => ReflexProtocol::read_response(sock, tport, scratch),
-        }
-    }
+trait LoadgenProtocol: Send + Sync {
+    fn gen_req(&self, i: usize, p: &Packet, buf: &mut Vec<u8>);
+    fn read_response(&self, sock: &Connection, scratch: &mut [u8]) -> io::Result<usize>;
 }
 
 arg_enum! {
@@ -254,14 +225,16 @@ fn run_spawner_server(addr: SocketAddrV4, worker: FakeWorker) {
 }
 
 fn run_memcached_preload(
+    proto: MemcachedProtocol,
     backend: Backend,
     tport: Transport,
     addr: SocketAddrV4,
     nthreads: usize,
 ) -> bool {
-    let perthread = (memcached::NVALUES as usize + nthreads - 1) / nthreads;
+    let perthread = (proto.nvalues as usize + nthreads - 1) / nthreads;
     let join_handles: Vec<JoinHandle<_>> = (0..nthreads)
         .map(|i| {
+            let proto = proto.clone();
             backend.spawn_thread(move || {
                 let sock1 = Arc::new(match tport {
                     Transport::Tcp => backend.create_tcp_connection(None, addr).unwrap(),
@@ -282,20 +255,14 @@ fn run_memcached_preload(
                 let mut vec_r: Vec<u8> = vec![0; 4096];
                 for n in 0..perthread {
                     vec_s.clear();
-                    MemcachedProtocol::set_request(
-                        (i * perthread + n) as u64,
-                        0,
-                        &mut vec_s,
-                        tport,
-                    );
+                    proto.set_request((i * perthread + n) as u64, 0, &mut vec_s);
 
                     if let Err(e) = (&*sock1).write_all(&vec_s[..]) {
                         println!("Preload send ({}/{}): {}", n, perthread, e);
                         return false;
                     }
 
-                    if let Err(e) = MemcachedProtocol::read_response(&sock1, tport, &mut vec_r[..])
-                    {
+                    if let Err(e) = proto.read_response(&sock1, &mut vec_r[..]) {
                         println!("preload receive ({}/{}): {}", n, perthread, e);
                         return false;
                     }
@@ -488,10 +455,10 @@ fn process_result(sched: &RequestSchedule, packets: &mut [Packet], wct_start: Sy
 }
 
 fn run_client(
+    proto: Arc<Box<dyn LoadgenProtocol>>,
     backend: Backend,
     addr: SocketAddrV4,
     nthreads: usize,
-    protocol: Protocol,
     tport: Transport,
     barrier_group: &mut Option<lockstep::Group>,
     schedules: &Vec<RequestSchedule>,
@@ -544,11 +511,13 @@ fn run_client(
     for (mut packets, mut receive_times, socket) in packet_schedules {
         let socket = Arc::new(socket);
         let socket2 = socket.clone();
+        let rproto = proto.clone();
+        let sproto = proto.clone();
 
         receive_threads.push(backend.spawn_thread(move || {
             let mut recv_buf = vec![0; 4096];
             for _ in 0..receive_times.len() {
-                match protocol.read_response(&socket, tport, &mut recv_buf[..]) {
+                match rproto.read_response(&socket, &mut recv_buf[..]) {
                     Ok(idx) => receive_times[idx] = Some(start.elapsed()),
                     Err(e) => {
                         match e.raw_os_error() {
@@ -579,7 +548,7 @@ fn run_client(
             let mut payload = Vec::with_capacity(4096);
             for (i, packet) in packets.iter_mut().enumerate() {
                 payload.clear();
-                protocol.gen_request(i, packet, &mut payload, tport);
+                sproto.gen_req(i, packet, &mut payload);
 
                 let mut t = start.elapsed();
                 while t + Duration::from_micros(1) < packet.target_start {
@@ -594,10 +563,6 @@ fn run_client(
                 if let Err(e) = (&*socket2).write_all(&payload[..]) {
                     packet.actual_start = None;
                     match e.raw_os_error() {
-                        Some(-105) => {
-                            backend.thread_yield();
-                            continue;
-                        }
                         Some(-32) | Some(-103) | Some(-104) => {}
                         _ => println!("Send thread ({}/{}): {}", i, packets.len(), e),
                     }
@@ -895,6 +860,10 @@ fn main() {
                 .default_value("")
                 .help("loadshift spec"),
         )
+        .args(&SyntheticProtocol::args())
+        .args(&MemcachedProtocol::args())
+        .args(&DnsProtocol::args())
+        .args(&ReflexProtocol::args())
         .get_matches();
 
     let addr: SocketAddrV4 = FromStr::from_str(matches.value_of("ADDR").unwrap()).unwrap();
@@ -905,9 +874,17 @@ fn main() {
     assert!(start_packets_per_second <= packets_per_second);
     let config = matches.value_of("config");
     let dowarmup = matches.is_present("warmup");
-    let proto = value_t_or_exit!(matches, "protocol", Protocol);
-    let output = value_t_or_exit!(matches, "output", OutputMode);
+
     let tport = value_t_or_exit!(matches, "transport", Transport);
+    let proto: Arc<Box<dyn LoadgenProtocol>> = match matches.value_of("protocol").unwrap() {
+        "synthetic" => Arc::new(Box::new(SyntheticProtocol::with_args(&matches, tport))),
+        "memcached" => Arc::new(Box::new(MemcachedProtocol::with_args(&matches, tport))),
+        "dns" => Arc::new(Box::new(DnsProtocol::with_args(&matches, tport))),
+        "reflex" => Arc::new(Box::new(ReflexProtocol::with_args(&matches, tport))),
+        _ => unreachable!(),
+    };
+
+    let output = value_t_or_exit!(matches, "output", OutputMode);
     let mean = value_t_or_exit!(matches, "mean", f64);
     let distribution = match matches.value_of("distribution").unwrap() {
         "zero" => Distribution::Zero,
@@ -1004,12 +981,14 @@ fn main() {
             });
         }
         "linux-client" | "runtime-client" => {
+            let matches = matches.clone();
             backend.init_and_run(config, move || {
                 println!("Distribution, Target, Actual, Dropped, Never Sent, Median, 90th, 99th, 99.9th, 99.99th, Start");
-                match (proto, &barrier_group) {
+                match (matches.value_of("protocol").unwrap(), &barrier_group) {
                     (_, Some(lockstep::Group::Client(ref _c))) => (),
-                    (Protocol::Memcached, _) => {
-                        if !run_memcached_preload(backend, Transport::Tcp, addr, nthreads) {
+                    ("memcached", _) => {
+                        let proto = MemcachedProtocol::with_args(&matches, Transport::Tcp);
+                        if !run_memcached_preload(proto, backend, Transport::Tcp, addr, nthreads) {
                             panic!("Could not preload memcached");
                         }
                     },
@@ -1019,10 +998,10 @@ fn main() {
                 if !loadshift_spec.is_empty() {
                     let sched = gen_loadshift_experiment(&loadshift_spec, distribution, nthreads);
                     run_client(
+                        proto,
                         backend,
                         addr,
                         nthreads,
-                        proto,
                         tport,
                         &mut barrier_group,
                         &sched,
@@ -1044,10 +1023,10 @@ fn main() {
 
                     for _ in 0..3 {
                         run_client(
+                            proto.clone(),
                             backend,
                             addr,
                             nthreads,
-                            proto,
                             tport,
                             &mut barrier_group,
                             &sched,
@@ -1067,10 +1046,10 @@ fn main() {
                         nthreads,
                     );
                     run_client(
+                        proto.clone(),
                         backend,
                         addr,
                         nthreads,
-                        proto,
                         tport,
                         &mut barrier_group,
                         &sched,

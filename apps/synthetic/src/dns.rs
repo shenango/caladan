@@ -1,5 +1,6 @@
 use Connection;
 use Packet;
+use LoadgenProtocol;
 use Transport;
 
 use byteorder::{BigEndian, WriteBytesExt};
@@ -36,12 +37,21 @@ fn pull_usize(buf: &[u8]) -> usize {
 }
 
 impl DnsProtocol {
-    pub fn gen_request(i: usize, p: &Packet, buf: &mut Vec<u8>, tport: Transport) {
+    pub fn with_args(_matches: &clap::ArgMatches, tport: Transport) -> Self {
         match tport {
             Transport::Udp => (),
             _ => assert!(false),
         }
+        DnsProtocol {}
+    }
 
+    pub fn args<'a, 'b>() -> Vec<clap::Arg<'a, 'b>> {
+        vec![]
+    }
+}
+
+impl LoadgenProtocol for DnsProtocol {
+    fn gen_req(&self, i: usize, p: &Packet, buf: &mut Vec<u8>) {
         let h = Header {
             id: i as u16,
             query: true,
@@ -80,16 +90,7 @@ impl DnsProtocol {
             .unwrap();
     }
 
-    pub fn read_response(
-        mut sock: &Connection,
-        tport: Transport,
-        scratch: &mut [u8],
-    ) -> io::Result<usize> {
-        match tport {
-            Transport::Udp => (),
-            _ => assert!(false),
-        }
-
+    fn read_response(&self, mut sock: &Connection, scratch: &mut [u8]) -> io::Result<usize> {
         let len = sock.read(&mut scratch[..])?;
         if len == 0 {
             return Err(Error::new(ErrorKind::UnexpectedEof, "eof"));

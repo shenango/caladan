@@ -1,9 +1,11 @@
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
+use clap::Arg;
 use std::io;
 use std::io::{Error, ErrorKind, Read};
 
 use Connection;
 use Packet;
+use LoadgenProtocol;
 use Transport;
 
 /** Packet code from https://github.com/aisk/rust-memcache **/
@@ -90,13 +92,8 @@ impl PacketHeader {
     }
 }
 
-pub static NVALUES: u64 = 1000000;
-static PCT_SET: u64 = 2; // out of 1000
-static VALUE_SIZE: usize = 2;
-static KEY_SIZE: usize = 20;
-
 #[inline(always)]
-fn write_key(buf: &mut Vec<u8>, key: u64) {
+fn write_key(buf: &mut Vec<u8>, key: u64, key_size: usize) {
     let mut pushed = 0;
     let mut k = key;
     loop {
@@ -107,28 +104,69 @@ fn write_key(buf: &mut Vec<u8>, key: u64) {
             break;
         }
     }
-    for _ in pushed..KEY_SIZE {
+    for _ in pushed..key_size {
         buf.push('A' as u8);
     }
 }
 
 static UDP_HEADER: &'static [u8] = &[0, 0, 0, 0, 0, 1, 0, 0];
 
-#[derive(Copy, Clone, Debug)]
-pub struct MemcachedProtocol;
+#[derive(Copy, Clone)]
+pub struct MemcachedProtocol {
+    tport: Transport,
+    pub nvalues: u64,
+    pct_set: u64,
+    value_size: usize,
+    key_size: usize,
+}
 
 impl MemcachedProtocol {
-    pub fn set_request(key: u64, opaque: u32, buf: &mut Vec<u8>, tport: Transport) {
-        if let Transport::Udp = tport {
+    pub fn with_args(matches: &clap::ArgMatches, tport: Transport) -> Self {
+        MemcachedProtocol {
+            tport: tport,
+            nvalues: value_t!(matches, "nvalues", u64).unwrap(),
+            pct_set: value_t!(matches, "pctset", u64).unwrap(),
+            value_size: value_t!(matches, "value_size", usize).unwrap(),
+            key_size: value_t!(matches, "key_size", usize).unwrap(),
+        }
+    }
+
+    pub fn args<'a, 'b>() -> Vec<clap::Arg<'a, 'b>> {
+        vec![
+            Arg::with_name("nvalues")
+                .long("nvalues")
+                .takes_value(true)
+                .default_value("1000000")
+                .help("Memcached: number of key value pairs"),
+            Arg::with_name("pctset")
+                .long("pctset")
+                .takes_value(true)
+                .default_value("2")
+                .help("Memcached: set requsts per 1000 requests"),
+            Arg::with_name("value_size")
+                .long("value_size")
+                .takes_value(true)
+                .default_value("2")
+                .help("Memcached: value size"),
+            Arg::with_name("key_size")
+                .long("key_size")
+                .takes_value(true)
+                .default_value("20")
+                .help("Memcached: key size"),
+        ]
+    }
+
+    pub fn set_request(&self, key: u64, opaque: u32, buf: &mut Vec<u8>) {
+        if let Transport::Udp = self.tport {
             buf.extend_from_slice(UDP_HEADER);
         }
 
         PacketHeader {
             magic: Magic::Request as u8,
             opcode: Opcode::Set as u8,
-            key_length: KEY_SIZE as u16,
+            key_length: self.key_size as u16,
             extras_length: 8,
-            total_body_length: (8 + KEY_SIZE + VALUE_SIZE) as u32,
+            total_body_length: (8 + self.key_size + self.value_size) as u32,
             opaque: opaque,
             ..Default::default()
         }
@@ -137,47 +175,45 @@ impl MemcachedProtocol {
 
         buf.write_u64::<BigEndian>(0).unwrap();
 
-        write_key(buf, key);
+        write_key(buf, key, self.key_size);
 
-        for i in 0..VALUE_SIZE {
+        for i in 0..self.value_size {
             buf.push((((key * i as u64) >> (i % 4)) & 0xff) as u8);
         }
     }
+}
 
-    pub fn gen_request(i: usize, p: &Packet, buf: &mut Vec<u8>, tport: Transport) {
+impl LoadgenProtocol for MemcachedProtocol {
+    fn gen_req(&self, i: usize, p: &Packet, buf: &mut Vec<u8>) {
         // Use first 32 bits of randomness to determine if this is a SET or GET req
         let low32 = p.randomness & 0xffffffff;
-        let key = (p.randomness >> 32) % NVALUES;
+        let key = (p.randomness >> 32) % self.nvalues;
 
-        if low32 % 1000 < PCT_SET {
-            MemcachedProtocol::set_request(key, i as u32, buf, tport);
+        if low32 % 1000 < self.pct_set {
+            self.set_request(key, i as u32, buf);
             return;
         }
 
-        if let Transport::Udp = tport {
+        if let Transport::Udp = self.tport {
             buf.extend_from_slice(UDP_HEADER);
         }
 
         PacketHeader {
             magic: Magic::Request as u8,
             opcode: Opcode::Get as u8,
-            key_length: KEY_SIZE as u16,
-            total_body_length: KEY_SIZE as u32,
+            key_length: self.key_size as u16,
+            total_body_length: self.key_size as u32,
             opaque: i as u32,
             ..Default::default()
         }
         .write(buf)
         .unwrap();
 
-        write_key(buf, key);
+        write_key(buf, key, self.key_size);
     }
 
-    pub fn read_response(
-        mut sock: &Connection,
-        tport: Transport,
-        scratch: &mut [u8],
-    ) -> io::Result<usize> {
-        let hdr = match tport {
+    fn read_response(&self, mut sock: &Connection, scratch: &mut [u8]) -> io::Result<usize> {
+        let hdr = match self.tport {
             Transport::Udp => {
                 let len = sock.read(&mut scratch[..32])?;
                 if len == 0 {

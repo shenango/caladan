@@ -10,13 +10,14 @@ pub struct Payload {
 }
 
 use Connection;
+use LoadgenProtocol;
 use Transport;
 
 #[derive(Clone, Copy)]
-pub struct SyntheticProtocol;
+pub struct SyntheticProtocol {}
 
-impl SyntheticProtocol {
-    pub fn gen_request(i: usize, p: &Packet, buf: &mut Vec<u8>, _tport: Transport) {
+impl LoadgenProtocol for SyntheticProtocol {
+    fn gen_req(&self, i: usize, p: &Packet, buf: &mut Vec<u8>) {
         Payload {
             work_iterations: p.work_iterations,
             index: i as u64,
@@ -25,14 +26,20 @@ impl SyntheticProtocol {
         .unwrap();
     }
 
-    pub fn read_response(
-        mut sock: &Connection,
-        _tport: Transport,
-        scratch: &mut [u8],
-    ) -> io::Result<usize> {
+    fn read_response(&self, mut sock: &Connection, scratch: &mut [u8]) -> io::Result<usize> {
         sock.read_exact(&mut scratch[..16])?;
         let payload = Payload::deserialize(&mut &scratch[..])?;
         Ok(payload.index as usize)
+    }
+}
+
+impl SyntheticProtocol {
+    pub fn with_args(_matches: &clap::ArgMatches, _tport: Transport) -> Self {
+        SyntheticProtocol {}
+    }
+
+    pub fn args<'a, 'b>() -> Vec<clap::Arg<'a, 'b>> {
+        vec![]
     }
 }
 
