@@ -185,6 +185,13 @@ void PrintResults(double offered_rps, double duration,
   double min = w[0].duration_us;
   double max = w[w.size() - 1].duration_us;
 
+  static bool first = true;
+  if (first) {
+	  first = false;
+	  std::cout << "offered_rps,achieved_rps,count,min,mean,p90,p99,"
+		  "p999,p9999,max" << std::endl;
+  }
+
   // print out the results
   std::cout << std::setprecision(4) << std::fixed << offered_rps << ","
             << achieved_rps << "," << count << "," << min << "," << mean << ","
