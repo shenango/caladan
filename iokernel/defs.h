@@ -115,7 +115,6 @@ struct proc {
 	unsigned int		kill:1;       /* the proc is being torn down */
 	struct congestion_info	*congestion_info;
 	unsigned long		policy_data;
-	bool			waking;
 
 	/* scheduler data */
 	struct sched_spec	sched_cfg;

@@ -22,6 +22,7 @@ struct numa_data {
 	struct proc		*p;
 	unsigned int		is_congested:1;
 	struct list_node	congested_link;
+	bool			waking;
 
 	/* thread usage limits */
 	int			threads_guaranteed;
@@ -101,6 +102,7 @@ static int numa_attach(struct proc *p, struct sched_spec *cfg)
 	sd->threads_guaranteed = cfg->guaranteed_cores;
 	sd->threads_max = cfg->max_cores;
 	sd->threads_active = 0;
+	sd->waking = false;
 	sd->preferred_socket = cfg->preferred_socket;
 	for (i = 0; i < NRECENT; i++)
 		sd->recent_cores[i] = sched_cores_tbl[0];
@@ -265,6 +267,12 @@ static void numa_notify_congested(struct proc *p, bitmap_ptr_t threads,
 {
 	struct numa_data *sd = (struct numa_data *)p->policy_data;
 	int ret;
+
+	/* do nothing if we woke up a core during the last interval */
+	if (sd->waking) {
+		sd->waking = false;
+		return;
+	}
 
 	/* check if congested */
 	if (bitmap_popcount(threads, NCPU) +

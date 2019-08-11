@@ -28,6 +28,7 @@ struct simple_data {
 	/* congestion info */
 	float			load;
 	uint64_t		standing_queue_us;
+	bool			waking;
 };
 
 static bool simple_proc_is_preemptible(struct simple_data *cursd,
@@ -91,6 +92,7 @@ static int simple_attach(struct proc *p, struct sched_spec *cfg)
 	sd->threads_guaranteed = cfg->guaranteed_cores;
 	sd->threads_max = cfg->max_cores;
 	sd->threads_active = 0;
+	sd->waking = false;
 	p->policy_data = (unsigned long)sd;
 	return 0;
 }
@@ -137,6 +139,7 @@ static int simple_run_kthread_on_core(struct proc *p, unsigned int core)
 	cores[core] = sd;
 	bitmap_clear(simple_idle_cores, core);
 	sd->threads_active++;
+	sd->waking = true;
 	return 0;
 }
 
@@ -241,6 +244,12 @@ static void simple_notify_congested(struct proc *p, bitmap_ptr_t threads,
 {
 	struct simple_data *sd = (struct simple_data *)p->policy_data;
 	int ret;
+
+	/* do nothing if we woke up a core during the last interval */
+	if (sd->waking) {
+		sd->waking = false;
+		goto done;
+	}
 
 	/* check if congested */
 	if (bitmap_popcount(threads, NCPU) +

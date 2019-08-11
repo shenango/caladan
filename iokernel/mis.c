@@ -54,6 +54,7 @@ struct mis_data {
 	/* congestion info */
 	float			load;
 	uint64_t		standing_queue_us;
+	bool			waking;
 
 	/* bandwidth monitoring */
 	int			threads_monitored;
@@ -144,6 +145,7 @@ static int mis_attach(struct proc *p, struct sched_spec *cfg)
 	sd->threads_max = cfg->max_cores;
 	sd->threads_limit = cfg->max_cores;
 	sd->threads_active = 0;
+	sd->waking = false;
 	p->policy_data = (unsigned long)sd;
 	list_add(&all_procs, &sd->all_link);
 	return 0;
@@ -193,6 +195,7 @@ static int mis_run_kthread_on_core(struct proc *p, unsigned int core)
 	cores[core] = sd;
 	bitmap_clear(mis_idle_cores, core);
 	sd->threads_active++;
+	sd->waking = true;
 	return 0;
 }
 
@@ -312,6 +315,12 @@ static void mis_notify_congested(struct proc *p, bitmap_ptr_t threads,
 {
 	struct mis_data *sd = (struct mis_data *)p->policy_data;
 	int ret;
+
+	/* do nothing if we woke up a core during the last interval */
+	if (sd->waking) {
+		sd->waking = false;
+		goto done;
+	}
 
 	/* check if congested */
 	if (bitmap_popcount(threads, NCPU) +

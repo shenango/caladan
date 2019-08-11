@@ -191,7 +191,6 @@ int sched_run_on_core(struct proc *p, unsigned int core)
 		return -ENOENT;
 	proc_get(th->p);
 	sched_enable_kthread(th, core);
-	p->waking = true;
 
 	/* issue the command to run the thread */
 	return __sched_run(s, th, core);
@@ -316,12 +315,6 @@ static void sched_detect_congestion(struct proc *p)
 		if (!th->active || timer_tsc + IOKERNEL_POLL_INTERVAL * cycles_per_us < now)
 			bitmap_set(ios, i);
 	}
-
-	if (p->waking) {
-		bitmap_init(threads, NCPU, false);
-		bitmap_init(ios, NCPU, false);
-	}
-	p->waking = false;
 
 	/* notify the scheduler policy of the current congestion */
 	sched_ops->notify_congested(p, threads, ios);

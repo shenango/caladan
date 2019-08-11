@@ -200,7 +200,6 @@ static struct proc *control_create_proc(mem_key_t key, size_t len, pid_t pid,
 			goto fail;
 
 		p->has_directpath |= th->directpath_hwq.enabled;
-		p->waking = false;
 	}
 
 	/* initialize the table of physical page addresses */
