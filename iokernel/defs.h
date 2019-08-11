@@ -42,7 +42,7 @@ extern struct iokernel_cfg cfg;
 #define IOKERNEL_CMD_BURST_SIZE		64
 #define IOKERNEL_RX_BURST_SIZE		64
 #define IOKERNEL_CONTROL_BURST_SIZE	4
-#define IOKERNEL_POLL_INTERVAL		10
+#define IOKERNEL_POLL_INTERVAL		5
 
 /*
  * Process Support
@@ -115,6 +115,7 @@ struct proc {
 	unsigned int		kill:1;       /* the proc is being torn down */
 	struct congestion_info	*congestion_info;
 	unsigned long		policy_data;
+	bool			waking;
 
 	/* scheduler data */
 	struct sched_spec	sched_cfg;
