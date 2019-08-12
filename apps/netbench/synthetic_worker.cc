@@ -112,7 +112,8 @@ void CacheAntagonistWorker::Work(uint64_t n) {
     memcpy_ermsb(&buf_[0], &buf_[size_ / 2], size_ / 2);
 }
 
-MemBWAntagonistWorker *MemBWAntagonistWorker::Create(std::size_t size) {
+MemBWAntagonistWorker *MemBWAntagonistWorker::Create(
+  std::size_t size, int nop_period, int nop_num) {
   // non-temporal store won't bypass cache when accessing the remote memory.
   char *buf = reinterpret_cast<char *>(numa_alloc_local(size));
   // numa_alloc_* will allocate memory in pages, therefore it must be cacheline
@@ -127,13 +128,20 @@ MemBWAntagonistWorker *MemBWAntagonistWorker::Create(std::size_t size) {
   for (std::size_t i = 0; i < size; i += CACHELINE_SIZE) {
     clflush(reinterpret_cast<volatile void *>(buf + i));
   }
-  return new MemBWAntagonistWorker(buf, size);
+  return new MemBWAntagonistWorker(buf, size, nop_period, nop_num);
 }
 
 void MemBWAntagonistWorker::Work(uint64_t n) {
+  int cnt = 0;
   for (uint64_t k = 0; k < n; k++) {
     for (std::size_t i = 0; i < size_; i += CACHELINE_SIZE) {
       nt_cacheline_store(buf_ + i, 0);
+      if (cnt++ == nop_period_) {
+        cnt = 0;
+	for (int j = 0; j < nop_num_; j++) {
+  	  asm("");
+	}
+      }
     }
   }
 }
@@ -167,9 +175,11 @@ SyntheticWorker *SyntheticWorkerFactory(std::string s) {
     unsigned long size = std::stoul(tokens[1], nullptr, 0);
     return CacheAntagonistWorker::Create(size);
   } else if (tokens[0] == "membwantagonist") {
-    if (tokens.size() != 2) return nullptr;
+    if (tokens.size() != 4) return nullptr;
     unsigned long size = std::stoul(tokens[1], nullptr, 0);
-    return MemBWAntagonistWorker::Create(size);
+    unsigned long nop_period = std::stoul(tokens[2], nullptr, 0);
+    unsigned long nop_num = std::stoul(tokens[3], nullptr, 0);
+    return MemBWAntagonistWorker::Create(size, nop_period, nop_num);
   }
 
   // invalid type of worker
