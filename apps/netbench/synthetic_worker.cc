@@ -146,6 +146,28 @@ void MemBWAntagonistWorker::Work(uint64_t n) {
   }
 }
 
+DynamicCacheAntagonistWorker *DynamicCacheAntagonistWorker::Create(
+  std::size_t size, int period, int nop_num) {
+  char *buf = new char[size]();
+  return new DynamicCacheAntagonistWorker(buf, size, period, nop_num);
+}
+
+void DynamicCacheAntagonistWorker::Work(uint64_t n) {
+  double *ptr = reinterpret_cast<double *>(buf_);
+  size_t offset = size_ / 2 / sizeof(double);
+  for (uint64_t i = 0; i < n; ++i) {
+    for (size_t j = 0; j < offset; j++) {
+      ptr[j + offset] = ptr[j];
+      if (cnt_++ == period_) {
+        cnt_ = 0;
+	for (int k = 0; k < nop_num_; k++) {
+	  asm("");
+	}
+      }
+    }
+  }
+}
+
 SyntheticWorker *SyntheticWorkerFactory(std::string s) {
   std::vector<std::string> tokens = split(s, ':');
 
@@ -180,6 +202,12 @@ SyntheticWorker *SyntheticWorkerFactory(std::string s) {
     unsigned long nop_period = std::stoul(tokens[2], nullptr, 0);
     unsigned long nop_num = std::stoul(tokens[3], nullptr, 0);
     return MemBWAntagonistWorker::Create(size, nop_period, nop_num);
+  } else if (tokens[0] == "dynamiccacheantagonist") {
+    if (tokens.size() != 4) return nullptr;
+    unsigned long size = std::stoul(tokens[1], nullptr, 0);
+    unsigned long period = std::stoul(tokens[2], nullptr, 0);
+    unsigned long long nop_num = std::stoul(tokens[3], nullptr, 0);
+    return DynamicCacheAntagonistWorker::Create(size, period, nop_num);
   }
 
   // invalid type of worker

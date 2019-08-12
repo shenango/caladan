@@ -121,5 +121,27 @@ class MemBWAntagonistWorker : public SyntheticWorker {
   int nop_num_;
 };
 
+class DynamicCacheAntagonistWorker : public SyntheticWorker {
+ public:
+  ~DynamicCacheAntagonistWorker() { delete buf_; }
+
+  // Creates a cache antagonist worker.
+  static DynamicCacheAntagonistWorker *Create(std::size_t size,
+					      int period, int nop_num);
+
+  // Perform n cache accesses.
+  void Work(uint64_t n);
+
+ private:
+ DynamicCacheAntagonistWorker(char *buf, std::size_t size, int period, int nop_num) :
+   buf_(buf), size_(size), period_(period), nop_num_(nop_num) {}
+
+  char *buf_;
+  std::size_t size_;
+  int period_;
+  int nop_num_;
+  int cnt_;
+};
+
 // Parses a string to generate one of the above fake workers.
 SyntheticWorker *SyntheticWorkerFactory(std::string s);
