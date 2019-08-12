@@ -177,6 +177,30 @@ static void drain_overflow(struct kthread *l)
 	}
 }
 
+static unsigned int drain_runnable(struct kthread *k, struct list_head *ths)
+{
+	unsigned int drained = 0;
+	thread_t *th;
+
+	assert_spin_lock_held(&k->lock);
+
+	for (; k->rq_tail < k->rq_head; k->rq_tail++) {
+		list_add_tail(ths, &k->rq[k->rq_tail % RUNTIME_RQ_SIZE]->link);
+		drained++;
+	}
+
+	while (true) {
+		th = list_pop(&k->rq_overflow, thread_t, link);
+		if (!th)
+			break;
+		list_add_tail(ths, &th->link);
+		drained++;
+	}
+
+	ACCESS_ONCE(k->q_ptrs->rq_tail) += drained;
+	return drained;
+}
+
 static bool work_available(struct kthread *k)
 {
 	return ACCESS_ONCE(k->rq_tail) != ACCESS_ONCE(k->rq_head) ||
@@ -186,7 +210,7 @@ static bool work_available(struct kthread *k)
 static bool steal_work(struct kthread *l, struct kthread *r)
 {
 	thread_t *th;
-	uint32_t i, avail, rq_tail;
+	uint32_t i, avail, rq_tail, drained = 0;
 
 	assert_spin_lock_held(&l->lock);
 	assert(l->rq_head == 0 && l->rq_tail == 0);
@@ -207,18 +231,25 @@ static bool steal_work(struct kthread *l, struct kthread *r)
 			l->rq[i] = r->rq[rq_tail++ % RUNTIME_RQ_SIZE];
 		store_release(&r->rq_tail, rq_tail);
 		ACCESS_ONCE(r->q_ptrs->rq_tail) += avail;
+
+		if (ACCESS_ONCE(r->parked))
+			drained = drain_runnable(r, &l->rq_overflow);
+
 		spin_unlock(&r->lock);
 
 		l->rq_head = avail;
-		ACCESS_ONCE(l->q_ptrs->rq_head) += avail;
-		STAT(THREADS_STOLEN) += avail;
+		ACCESS_ONCE(l->q_ptrs->rq_head) += avail + drained;
+		STAT(THREADS_STOLEN) += avail + drained;
 		return true;
 	}
 
 	/* check for overflow tasks */
 	th = list_pop(&r->rq_overflow, thread_t, link);
 	if (th) {
-		ACCESS_ONCE(r->q_ptrs->rq_tail)++;
+		if (ACCESS_ONCE(r->parked))
+			drained = drain_runnable(r, &l->rq_overflow);
+		STAT(THREADS_STOLEN) += drained + 1;
+		ACCESS_ONCE(r->q_ptrs->rq_tail) += drained + 1;
 		goto done;
 	}
 
@@ -387,6 +418,46 @@ done:
 
 	/* and jump into the next thread */
 	jmp_thread(th);
+}
+
+/**
+ * join_kthread - drains the runqueue of a parked kthread
+ * @k: the kthread to detach
+ *
+ * Can and must be called from thread context.
+ */
+void join_kthread(struct kthread *k)
+{
+	thread_t *waketh;
+	struct list_head tmp;
+
+	list_head_init(&tmp);
+
+	if (!ACCESS_ONCE(k->parked))
+		return;
+
+	timer_merge(k);
+
+	if (!work_available(k))
+		return;
+
+	/* if the lock can't be acquired, the kthread is unparking */
+	if (!spin_try_lock_np(&k->lock))
+		return;
+
+	drain_runnable(k, &tmp);
+
+	spin_unlock_np(&k->lock);
+
+	/* re-wake all the runnable threads belonging to the detached kthread */
+	while (true) {
+		waketh = list_pop(&tmp, thread_t, link);
+		if (!waketh)
+			break;
+		waketh->state = THREAD_STATE_SLEEPING;
+		thread_ready(waketh);
+	}
+
 }
 
 

@@ -11,12 +11,13 @@
 
 struct softirq_work {
 	unsigned int recv_cnt, compl_cnt, timer_budget, storage_cnt,
-		direct_rx_cnt;
+		direct_rx_cnt, join_cnt;
 	struct kthread *k;
 	struct mbuf *direct_reqs[SOFTIRQ_MAX_BUDGET];
 	struct rx_net_hdr *recv_reqs[SOFTIRQ_MAX_BUDGET];
 	struct mbuf *compl_reqs[SOFTIRQ_MAX_BUDGET];
 	struct thread *storage_threads[SOFTIRQ_MAX_BUDGET];
+	struct kthread *join_reqs[SOFTIRQ_MAX_BUDGET];
 };
 
 static void softirq_fn(void *arg)
@@ -43,12 +44,15 @@ static void softirq_fn(void *arg)
 	/* handle any pending timeouts */
 	if (timer_needed(w->k))
 		timer_softirq(w->k, w->timer_budget);
+
+	for (i = 0; i < w->join_cnt; i++)
+		join_kthread(w->join_reqs[i]);
 }
 
 static void softirq_gather_work(struct softirq_work *w, struct kthread *k,
 				unsigned int budget)
 {
-	unsigned int recv_cnt = 0, compl_cnt = 0, real_budget;
+	unsigned int recv_cnt = 0, compl_cnt = 0, join_cnt = 0, real_budget;
 
 	assert_spin_lock_held(&k->lock);
 
@@ -75,11 +79,17 @@ static void softirq_gather_work(struct softirq_work *w, struct kthread *k,
 			w->compl_reqs[compl_cnt++] = (struct mbuf *)payload;
 			break;
 
+		case RX_JOIN:
+			BUG_ON(payload >= maxks);
+			w->join_reqs[join_cnt++] = ks[payload];
+			break;
+
 		default:
 			log_err_ratelimited("net: invalid RXQ cmd '%ld'", cmd);
 		}
 
-		if (recv_cnt >= real_budget || compl_cnt >= SOFTIRQ_MAX_BUDGET)
+		if (recv_cnt >= real_budget || compl_cnt >= SOFTIRQ_MAX_BUDGET ||
+			  join_cnt >= SOFTIRQ_MAX_BUDGET)
 			break;
 	}
 
@@ -96,6 +106,7 @@ static void softirq_gather_work(struct softirq_work *w, struct kthread *k,
 	w->k = k;
 	w->recv_cnt = recv_cnt;
 	w->compl_cnt = compl_cnt;
+	w->join_cnt = join_cnt;
 	w->timer_budget = budget;
 }
 
