@@ -555,6 +555,7 @@ static void mis_bandwidth_state_machine(uint64_t now)
 			}
 			goto done;
 		}
+		bw_punish_triggered = false;
 		sd->threads_limit = MIN(sd->threads_limit - 1,
 					sd->threads_active - 1);
 		mis_unmark_congested(sd);
