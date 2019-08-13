@@ -310,8 +310,6 @@ extern void print_stats(void);
 
 extern bool rx_send_to_runtime(struct proc *p, uint32_t hash, uint64_t cmd,
 			       unsigned long payload);
-extern void rx_notify_preempted(struct thread *th);
-
 
 /*
  * Initialization

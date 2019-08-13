@@ -78,16 +78,6 @@ bool rx_send_to_runtime(struct proc *p, uint32_t hash, uint64_t cmd,
 	return lrpc_send(&th->rxq, cmd, payload);
 }
 
-void rx_notify_preempted(struct thread *th)
-{
-	struct proc *p = th->p;
-
-	if (sched_threads_active(p) == 0)
-		return;
-
-	rx_send_to_runtime(p, 0, RX_JOIN, th - p->threads);
-}
-
 
 static bool rx_send_pkt_to_runtime(struct proc *p, struct rx_net_hdr *hdr)
 {

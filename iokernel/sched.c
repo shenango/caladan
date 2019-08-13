@@ -35,7 +35,6 @@ int sched_siblings_nr;
 struct core_state {
 	struct thread	*pending_th;  /* a thread waiting run */
 	struct thread	*cur_th;      /* the currently running thread */
-	struct thread	*prev_th;     /* preempted thread */
 	unsigned int	idle:1;	      /* is the core idle? */
 	unsigned int	pending:1;    /* the next run is waiting */
 	unsigned int	wait:1;       /* waiting for run to finish */
@@ -157,7 +156,7 @@ int __sched_run(struct core_state *s, struct thread *th, unsigned int core)
 	ksched_run(core, th ? th->tid : 0);
 	if (s->cur_th) {
 		sched_disable_kthread(s->cur_th);
-		s->prev_th = s->cur_th;
+		proc_put(s->cur_th->p);
 	}
 	s->cur_th = th;
 	s->wait = true;
@@ -412,14 +411,6 @@ void sched_poll(void)
 
 		/* check if a pending context switch finished */
 		if (s->wait && ksched_poll_run_done(core)) {
-
-			/* mark previous preemption as complete */
-			if (s->prev_th) {
-				rx_notify_preempted(s->prev_th);
-				proc_put(s->prev_th->p);
-				s->prev_th = NULL;
-			}
-
 			if (s->pending) {
 				struct thread *th = s->pending_th;
 
@@ -429,7 +420,7 @@ void sched_poll(void)
 				ksched_run(core, th ? th->tid : 0);
 				if (s->cur_th) {
 					sched_disable_kthread(s->cur_th);
-					s->prev_th = s->cur_th;
+					proc_put(s->cur_th->p);
 				}
 				s->cur_th = th;
 			} else {

@@ -111,12 +111,13 @@ void timer_merge(struct kthread *r)
 	struct kthread *k = myk();
 	int i;
 
-	if (ACCESS_ONCE(r->timern) == 0)
-		return;
-
-	preempt_disable();
 	spin_lock(&k->timer_lock);
 	spin_lock(&r->timer_lock);
+
+	if (r->timern == 0) {
+		spin_unlock(&r->timer_lock);
+		goto done;
+	}
 
 	/* move all timers from r to the end of our array */
 	for (i = 0; i < r->timern; i++) {
@@ -140,9 +141,9 @@ void timer_merge(struct kthread *r)
 	for (i = k->timern / D; i >= 0; i--)
 		sift_down(k->timers, i, k->timern);
 
+done:
 	update_q_ptrs(k);
 	spin_unlock(&k->timer_lock);
-	preempt_enable();
 }
 
 /**
