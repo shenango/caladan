@@ -186,10 +186,9 @@ static bool work_available(struct kthread *k)
 static bool steal_work(struct kthread *l, struct kthread *r)
 {
 	thread_t *th;
-	uint32_t i, avail, rq_tail;
+	uint32_t i, avail, rq_tail, lrq_head, lrq_tail;
 
 	assert_spin_lock_held(&l->lock);
-	assert(l->rq_head == 0 && l->rq_tail == 0);
 
 	if (!work_available(r))
 		return false;
@@ -201,15 +200,18 @@ static bool steal_work(struct kthread *l, struct kthread *r)
 	if (avail) {
 		/* steal half the tasks */
 		avail = div_up(avail, 2);
-		assert(avail <= div_up(RUNTIME_RQ_SIZE, 2));
 		rq_tail = r->rq_tail;
-		for (i = 0; i < avail; i++)
-			l->rq[i] = r->rq[rq_tail++ % RUNTIME_RQ_SIZE];
+		lrq_tail = l->rq_tail;
+		lrq_head = l->rq_head;
+		for (i = 0; i < avail && lrq_head - lrq_tail < RUNTIME_RQ_SIZE; i++)
+			l->rq[lrq_head++ % RUNTIME_RQ_SIZE] = r->rq[rq_tail++ % RUNTIME_RQ_SIZE];
+		for (; i < avail; i++)
+			list_add_tail(&l->rq_overflow, &r->rq[rq_tail++ % RUNTIME_RQ_SIZE]->link);
 		store_release(&r->rq_tail, rq_tail);
 		ACCESS_ONCE(r->q_ptrs->rq_tail) += avail;
 		spin_unlock(&r->lock);
 
-		l->rq_head = avail;
+		l->rq_head = lrq_head;
 		ACCESS_ONCE(l->q_ptrs->rq_head) += avail;
 		STAT(THREADS_STOLEN) += avail;
 		return true;
@@ -231,7 +233,10 @@ static bool steal_work(struct kthread *l, struct kthread *r)
 
 done:
 	if (th) {
-		l->rq[l->rq_head++] = th;
+		if (likely(l->rq_head - l->rq_tail < RUNTIME_RQ_SIZE))
+			l->rq[l->rq_head++ % RUNTIME_RQ_SIZE] = th;
+		else
+			list_add_tail(&l->rq_overflow, &th->link);
 		ACCESS_ONCE(l->q_ptrs->rq_head)++;
 		STAT(THREADS_STOLEN)++;
 	}
@@ -502,12 +507,23 @@ void thread_park_and_unlock_np(spinlock_t *l)
  */
 void thread_yield(void)
 {
+	struct kthread *r, *k;
 	thread_t *myth = thread_self();
 
 	/* check for softirqs */
 	softirq_run(RUNTIME_SOFTIRQ_LOCAL_BUDGET);
 
-	preempt_disable();
+	k = getk();
+
+	/* try to drain parked kthreads for fairness */
+	r = ks[rand_crc32c((uintptr_t)k) % maxks];
+	if (ACCESS_ONCE(r->parked)) {
+		spin_lock(&k->lock);
+		if (likely(ACCESS_ONCE(r->parked)))
+			steal_work(k, r);
+		spin_unlock(&k->lock);
+	}
+
 	assert(myth->state == THREAD_STATE_RUNNING);
 	myth->state = THREAD_STATE_SLEEPING;
 	myth->last_cpu = myk()->curr_cpu;
