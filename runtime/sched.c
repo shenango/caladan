@@ -507,6 +507,7 @@ void thread_park_and_unlock_np(spinlock_t *l)
  */
 void thread_yield(void)
 {
+	static __thread unsigned long nextk;
 	struct kthread *r, *k;
 	thread_t *myth = thread_self();
 
@@ -516,7 +517,7 @@ void thread_yield(void)
 	k = getk();
 
 	/* try to drain parked kthreads for fairness */
-	r = ks[rand_crc32c((uintptr_t)k) % maxks];
+	r = ks[nextk++ % maxks];
 	if (ACCESS_ONCE(r->parked)) {
 		spin_lock(&k->lock);
 		if (likely(ACCESS_ONCE(r->parked)))
