@@ -16,25 +16,58 @@
  */
 
 struct mutex {
-	bool			held;
+	atomic_t		held;
 	spinlock_t		waiter_lock;
 	struct list_head	waiters;
 };
 
 typedef struct mutex mutex_t;
 
-extern bool mutex_try_lock(mutex_t *m);
-extern void mutex_lock(mutex_t *m);
-extern void mutex_unlock(mutex_t *m);
+extern void __mutex_lock(mutex_t *m);
+extern void __mutex_unlock(mutex_t *m);
 extern void mutex_init(mutex_t *m);
 
+/**
+ * mutex_try_lock - attempts to acquire a mutex
+ * @m: the mutex to acquire
+ *
+ * Returns true if the acquire was successful.
+ */
+static inline bool mutex_try_lock(mutex_t *m)
+{
+	return atomic_cmpxchg(&m->held, 0, 1);
+}
+
+/**
+ * mutex_lock - acquires a mutex
+ * @m: the mutex to acquire
+ */
+static inline void mutex_lock(mutex_t *m)
+{
+	if (likely(atomic_cmpxchg(&m->held, 0, 1)))
+		return;
+
+	__mutex_lock(m);
+}
+
+/**
+ * mutex_unlock - releases a mutex
+ * @m: the mutex to release
+ */
+static inline void mutex_unlock(mutex_t *m)
+{
+	if (likely(atomic_cmpxchg(&m->held, 1, 0)))
+		return;
+
+	__mutex_unlock(m);
+}
 /**
  * mutex_held - is the mutex currently held?
  * @m: the mutex to check
  */
 static inline bool mutex_held(mutex_t *m)
 {
-	return m->held;
+	return atomic_read(&m->held);
 }
 
 /**

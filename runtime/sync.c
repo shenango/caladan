@@ -14,55 +14,36 @@
  * Mutex support
  */
 
-/**
- * mutex_try_lock - attempts to acquire a mutex
- * @m: the mutex to acquire
- *
- * Returns true if the acquire was successful.
- */
-bool mutex_try_lock(mutex_t *m)
-{
-	spin_lock_np(&m->waiter_lock);
-	if (m->held) {
-		spin_unlock_np(&m->waiter_lock);
-		return false;
-	}
-	m->held = true;
-	spin_unlock_np(&m->waiter_lock);
-	return true;
-}
+#define WAITER_FLAG (1 << 31)
 
-/**
- * mutex_lock - acquires a mutex
- * @m: the mutex to acquire
- */
-void mutex_lock(mutex_t *m)
+void __mutex_lock(mutex_t *m)
 {
 	thread_t *myth;
 
 	spin_lock_np(&m->waiter_lock);
-	myth = thread_self();
-	if (!m->held) {
-		m->held = true;
+
+	/* did we race with mutex_unlock? */
+	if (atomic_fetch_and_or(&m->held, WAITER_FLAG) == 0) {
+		atomic_write(&m->held, 1);
 		spin_unlock_np(&m->waiter_lock);
 		return;
 	}
+
+	myth = thread_self();
 	list_add_tail(&m->waiters, &myth->link);
 	thread_park_and_unlock_np(&m->waiter_lock);
 }
 
-/**
- * mutex_unlock - releases a mutex
- * @m: the mutex to release
- */
-void mutex_unlock(mutex_t *m)
+
+void __mutex_unlock(mutex_t *m)
 {
 	thread_t *waketh;
 
 	spin_lock_np(&m->waiter_lock);
+
 	waketh = list_pop(&m->waiters, thread_t, link);
 	if (!waketh) {
-		m->held = false;
+		atomic_write(&m->held, 0);
 		spin_unlock_np(&m->waiter_lock);
 		return;
 	}
@@ -76,7 +57,7 @@ void mutex_unlock(mutex_t *m)
  */
 void mutex_init(mutex_t *m)
 {
-	m->held = false;
+	atomic_write(&m->held, 0);
 	spin_lock_init(&m->waiter_lock);
 	list_head_init(&m->waiters);
 }
