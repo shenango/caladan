@@ -32,7 +32,7 @@ unsigned int spinks;
  * must be >= 1) */
 unsigned int guaranteedks = 1;
 /* the number of active kthreads */
-static atomic_t runningks;
+atomic_t runningks;
 /* an array of attached kthreads (@nrks in total) */
 struct kthread *ks[NCPU];
 /* kernel thread-local data */

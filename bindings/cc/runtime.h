@@ -24,6 +24,11 @@ inline float RuntimeLoad() {
   return runtime_load();
 }
 
+// Gets the current number of active cores
+inline unsigned int RuntimeActiveCores() {
+  return runtime_active_cores();
+}
+
 // Gets the maximum number of cores the runtime could run on.
 inline unsigned int RuntimeMaxCores() {
   return runtime_max_cores();

@@ -37,6 +37,17 @@ static inline float runtime_load(void)
 
 extern unsigned int maxks;
 extern unsigned int guaranteedks;
+extern atomic_t runningks;
+
+
+/**
+ * runtime_active_cores - returns the number of currently active cores
+ *
+ */
+static inline int runtime_active_cores(void)
+{
+	return atomic_read(&runningks);
+}
 
 /**
  * runtime_max_cores - returns the maximum number of cores
