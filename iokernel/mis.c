@@ -25,13 +25,13 @@ static DEFINE_BITMAP(mis_idle_cores, NCPU);
 static DEFINE_BITMAP(mis_sampled_cores, NCPU);
 
 /* poll the global (system-wide) memory bandwidth over this time interval */
-#define MIS_BW_MEASURE_INTERVAL	        10
+#define MIS_BW_MEASURE_INTERVAL	        5
 /* wait for performance counter results over this time interval */
 #define MIS_BW_PUNISH_INTERVAL	        10
 /* FIXME: should not be hard coded */
 #define MIS_PUNISH_HIGH_WATERMARK	0.09
 #define MIS_PUNISH_LOW_WATERMARK	0.08
-#define MIS_UNDER_PUNISH_LOW_WATERMARK_CNT_THRESHOLD 3
+#define MIS_ADD_BACK_COUNTER_FACTOR     0.07
 
 // #define DEBUG
 
@@ -532,12 +532,18 @@ static void mis_bandwidth_state_machine(uint64_t now)
 {
 	static int under_punish_low_watermark_cnt = 0;
 	static bool bw_punish_triggered = false;
-	static uint64_t last_tsc = 0, last_bw_measure_ts = 0, last_bw_punish_ts;
+	static uint64_t last_tsc = 0, last_bw_measure_ts = 0, last_bw_punish_ts = 0;
 	static uint32_t last_cas = 0;
 	uint64_t tsc;
 	uint32_t cur_cas;
 	float bw_estimate;
 	unsigned int core, tmp;
+	bool just_preempted = false;
+
+#ifdef DEBUG
+	static int kick_out_cnt = 0;
+	static int add_back_cnt = 0;
+#endif
 
 	/* punish a process that is using too much bandwidth */
 	if (bw_punish_triggered &&
@@ -551,6 +557,7 @@ static void mis_bandwidth_state_machine(uint64_t now)
 			}
 			goto done;
 		}
+		just_preempted = true;
 		bw_punish_triggered = false;
 		sd->threads_limit = MIN(sd->threads_limit - 1,
 					sd->threads_active - 1);
@@ -579,7 +586,7 @@ static void mis_bandwidth_state_machine(uint64_t now)
 
  done:
 	/* check if it's time to sample bandwidth */
-	if (now - last_bw_measure_ts < MIS_BW_MEASURE_INTERVAL)
+	if (now - last_bw_measure_ts < MIS_BW_MEASURE_INTERVAL || just_preempted)
 		return;
 
 	/* update the bandwidth estimate */
@@ -596,14 +603,18 @@ static void mis_bandwidth_state_machine(uint64_t now)
 		/* safe to add back kthreads now */
 		under_punish_low_watermark_cnt++;
 		if (under_punish_low_watermark_cnt >=
-		    MIS_UNDER_PUNISH_LOW_WATERMARK_CNT_THRESHOLD) {
+		    MIS_ADD_BACK_COUNTER_FACTOR / (MIS_PUNISH_LOW_WATERMARK - bw_estimate)) {
 			struct mis_data *sd;
-
+			
 			under_punish_low_watermark_cnt = 0;
 			sd = list_pop(&bwlimited_procs, struct mis_data,
 				      bwlimited_link);
 			if (!sd)
 				return;
+
+#ifdef DEBUG			
+			add_back_cnt++;
+#endif
 
 			if (sd->threads_limit <= sd->threads_active) {
 				sd->threads_limit++;
@@ -620,6 +631,9 @@ static void mis_bandwidth_state_machine(uint64_t now)
 			/* exceeds the bandwidth limit, start punishing */
 			if (!bw_punish_triggered) {
 				if (mis_sample_pmc(PMC_LLC_MISSES)) {
+#ifdef DEBUG
+					kick_out_cnt++;
+#endif
 					bw_punish_triggered = true;
 					last_bw_punish_ts = microtime();
 				}
@@ -633,9 +647,10 @@ static void mis_bandwidth_state_machine(uint64_t now)
 		last_debug_ts = now;
 		mis_print_debug_info();
 		log_info("bw_estimate = %f, bw_punish_triggered = %d, "
-			 "under_punish_low_watermark_cnt = %d, ",
+			 "under_punish_low_watermark_cnt = %d, kick_out_cnt = %d,"
+			 "add_back_cnt = %d",
 			 bw_estimate, bw_punish_triggered,
-			 under_punish_low_watermark_cnt);
+			 under_punish_low_watermark_cnt, kick_out_cnt, add_back_cnt);
 	}
 #endif
 }
