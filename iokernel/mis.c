@@ -528,7 +528,12 @@ static struct mis_data *mis_choose_bandwidth_victim(bool *has_not_ready)
 	return victim;
 }
 
-static inline void mis_kick_core(int core) {
+static inline void mis_kick_core(int core)
+{
+	struct mis_data *sd = cores[core];
+	sd->threads_limit =
+		MIN(sd->threads_limit - 1,
+		    sd->threads_active - 1);
 	if (mis_add_kthread_on_core(core))
 		mis_idle_on_core(core);
 }
@@ -565,8 +570,6 @@ static void mis_bandwidth_state_machine(uint64_t now)
 		}
 		just_preempted = true;
 		bw_punish_triggered = false;
-		sd->threads_limit = MIN(sd->threads_limit - 1,
-					sd->threads_active - 1);
 		mis_unmark_congested(sd);
 		mis_mark_bwlimited(sd);
 
