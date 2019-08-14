@@ -528,6 +528,11 @@ static struct mis_data *mis_choose_bandwidth_victim(bool *has_not_ready)
 	return victim;
 }
 
+static inline void mis_kick_core(int core) {
+	if (mis_add_kthread_on_core(core))
+		mis_idle_on_core(core);
+}
+
 static void mis_bandwidth_state_machine(uint64_t now)
 {
 	static int under_punish_low_watermark_cnt = 0;
@@ -539,6 +544,7 @@ static void mis_bandwidth_state_machine(uint64_t now)
 	float bw_estimate;
 	unsigned int core, tmp;
 	bool just_preempted = false;
+	int sibling;
 
 #ifdef DEBUG
 	static int kick_out_cnt = 0;
@@ -568,8 +574,18 @@ static void mis_bandwidth_state_machine(uint64_t now)
 		sched_for_each_allowed_core(core, tmp) {
 			if (cores[core] == sd &&
 			    cores[sched_siblings[core]] != sd) {
-				if (mis_add_kthread_on_core(core))
-					mis_idle_on_core(core);
+				mis_kick_core(core);
+				goto done;
+			}
+		}
+
+		/* next prefer two packed hyperthreads */
+		sched_for_each_allowed_core(core, tmp) {
+			sibling = sched_siblings[core];
+			if (cores[core] == sd &&
+			    cores[sibling] != sd) {
+				mis_kick_core(core);
+				mis_kick_core(sibling);
 				goto done;
 			}
 		}
@@ -577,8 +593,7 @@ static void mis_bandwidth_state_machine(uint64_t now)
 		/* then try any core */
 		sched_for_each_allowed_core(core, tmp) {
 			if (cores[core] == sd) {
-				if (mis_add_kthread_on_core(core))
-					mis_idle_on_core(core);
+				mis_kick_core(core);
 				goto done;
 			}
 		}
