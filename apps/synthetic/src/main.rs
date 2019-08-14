@@ -138,7 +138,12 @@ fn duration_to_ns(duration: Duration) -> u64 {
     (duration.as_secs() * 1000_000_000 + duration.subsec_nanos() as u64)
 }
 
-fn run_linux_udp_server(backend: Backend, addr: SocketAddrV4, nthreads: usize, worker: FakeWorker) {
+fn run_linux_udp_server(
+    backend: Backend,
+    addr: SocketAddrV4,
+    nthreads: usize,
+    worker: Arc<FakeWorker>,
+) {
     let join_handles: Vec<_> = (0..nthreads)
         .map(|_| {
             let worker = worker.clone();
@@ -161,7 +166,7 @@ fn run_linux_udp_server(backend: Backend, addr: SocketAddrV4, nthreads: usize, w
     }
 }
 
-fn socket_worker(socket: &mut Connection, worker: FakeWorker) {
+fn socket_worker(socket: &mut Connection, worker: Arc<FakeWorker>) {
     let mut v = vec![0; 16];
     let mut r = || {
         socket.read_exact(&mut v[..16])?;
@@ -185,7 +190,7 @@ fn socket_worker(socket: &mut Connection, worker: FakeWorker) {
     }
 }
 
-fn run_tcp_server(backend: Backend, addr: SocketAddrV4, worker: FakeWorker) {
+fn run_tcp_server(backend: Backend, addr: SocketAddrV4, worker: Arc<FakeWorker>) {
     let tcpq = backend.create_tcp_listener(addr).unwrap();
     println!("Bound to address {}", addr);
     loop {
@@ -201,10 +206,10 @@ fn run_tcp_server(backend: Backend, addr: SocketAddrV4, worker: FakeWorker) {
     }
 }
 
-fn run_spawner_server(addr: SocketAddrV4, worker: FakeWorker) {
+fn run_spawner_server(addr: SocketAddrV4, workerspec: &str) {
     static mut SPAWNER_WORKER: Option<FakeWorker> = None;
     unsafe {
-        SPAWNER_WORKER = Some(worker);
+        SPAWNER_WORKER = Some(FakeWorker::create(workerspec).unwrap());
     }
     extern "C" fn echo(d: *mut shenango::ffi::udp_spawn_data) {
         unsafe {
@@ -612,7 +617,7 @@ fn run_client(
 fn run_local(
     backend: Backend,
     nthreads: usize,
-    worker: FakeWorker,
+    worker: Arc<FakeWorker>,
     schedules: &Vec<RequestSchedule>,
 ) -> bool {
     let mut rng = rand::thread_rng();
@@ -912,7 +917,8 @@ fn main() {
     });
 
     let loadshift_spec = value_t_or_exit!(matches, "loadshift", String);
-    let fakeworker = FakeWorker::create(matches.value_of("fakework").unwrap()).unwrap();
+    let fwspec = value_t_or_exit!(matches, "fakework", String);
+    let fakeworker = Arc::new(FakeWorker::create(&fwspec).unwrap());
 
     match mode {
         "work-bench" => {
@@ -925,7 +931,7 @@ fn main() {
         }
         "spawner-server" => match tport {
             Transport::Udp => {
-                backend.init_and_run(config, move || run_spawner_server(addr, fakeworker))
+                backend.init_and_run(config, move || run_spawner_server(addr, &fwspec))
             }
             Transport::Tcp => {
                 backend.init_and_run(config, move || run_tcp_server(backend, addr, fakeworker))

@@ -1,6 +1,6 @@
 use Connection;
-use Packet;
 use LoadgenProtocol;
+use Packet;
 use Transport;
 
 use byteorder::{BigEndian, WriteBytesExt};

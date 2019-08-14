@@ -1,19 +1,17 @@
 extern crate test;
 
 use std::result::Result;
-use std::sync::Arc;
 
 extern crate mersenne_twister;
 extern crate rand;
 use mersenne_twister::MersenneTwister;
 use rand::{Rng, SeedableRng};
 
-#[derive(Clone)]
 pub enum FakeWorker {
     Sqrt,
-    StridedMem(Arc<Vec<u8>>, usize),
-    RandomMem(Arc<Vec<u8>>, Arc<Vec<usize>>),
-    StreamingMem(Arc<Vec<u8>>),
+    StridedMem(Vec<u8>, usize),
+    RandomMem(Vec<u8>, Vec<usize>),
+    StreamingMem(Vec<u8>),
 }
 
 impl FakeWorker {
@@ -34,13 +32,13 @@ impl FakeWorker {
                     "stridedmem" => {
                         assert!(tokens.len() > 2);
                         let stride: usize = tokens[2].parse().unwrap();
-                        Ok(FakeWorker::StridedMem(Arc::new(buf), stride))
+                        Ok(FakeWorker::StridedMem(buf, stride))
                     }
                     "randmem" => {
                         let sched = (0..size).map(|_| rng.gen::<usize>() % size).collect();
-                        Ok(FakeWorker::RandomMem(Arc::new(buf), Arc::new(sched)))
+                        Ok(FakeWorker::RandomMem(buf, sched))
                     }
-                    "memstream" => Ok(FakeWorker::StreamingMem(Arc::new(buf))),
+                    "memstream" => Ok(FakeWorker::StreamingMem(buf)),
                     _ => unreachable!(),
                 }
             }

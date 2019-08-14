@@ -4,8 +4,8 @@ use std::io;
 use std::io::{Error, ErrorKind, Read};
 
 use Connection;
-use Packet;
 use LoadgenProtocol;
+use Packet;
 use Transport;
 
 const REFLEX_HDR_SZ: usize = 24;

@@ -4,8 +4,8 @@ use std::io;
 use std::io::{Error, ErrorKind, Read};
 
 use Connection;
-use Packet;
 use LoadgenProtocol;
+use Packet;
 use Transport;
 
 /** Packet code from https://github.com/aisk/rust-memcache **/
