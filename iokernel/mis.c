@@ -583,7 +583,7 @@ static void mis_bandwidth_state_machine(uint64_t now)
 		sched_for_each_allowed_core(core, tmp) {
 			sibling = sched_siblings[core];
 			if (cores[core] == sd &&
-			    cores[sibling] != sd) {
+			    cores[sibling] == sd) {
 				mis_kick_core(core);
 				mis_kick_core(sibling);
 				goto done;
