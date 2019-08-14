@@ -19,6 +19,8 @@
 #include <string>
 #include <vector>
 
+barrier_t barrier;
+
 namespace {
 
 // number of iterations required for 1us on target server

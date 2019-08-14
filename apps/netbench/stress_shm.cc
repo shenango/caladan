@@ -15,6 +15,8 @@ extern "C" {
 
 #define SHM_KEY (0x123)
 
+barrier_t barrier;
+
 namespace {
 
 int threads;
@@ -30,6 +32,7 @@ void MainHandler(void *arg) {
   cnt = (uint64_t *)shm;
 	
   rt::WaitGroup wg(1);
+  barrier_init(&barrier, threads);
 
   for (int i = 0; i < threads; ++i) {
     rt::Spawn([&, i]() {

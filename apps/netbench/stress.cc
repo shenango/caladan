@@ -11,6 +11,8 @@ extern "C" {
 #include <chrono>
 #include <iostream>
 
+barrier_t barrier;
+
 namespace {
 
 int threads;
@@ -20,6 +22,8 @@ std::string worker_spec;
 void MainHandler(void *arg) {
   rt::WaitGroup wg(1);
   uint64_t cnt[threads] = {};
+
+  barrier_init(&barrier, threads);
 
   for (int i = 0; i < threads; ++i) {
     rt::Spawn([&, i]() {

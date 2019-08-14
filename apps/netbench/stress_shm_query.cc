@@ -13,7 +13,11 @@ extern "C" {
 #include <unistd.h>
 #include <sys/shm.h>
 
+barrier_t barrier;
+
 #define SHM_KEY (0x123)
+
+
 
 int main(int argc, char *argv[]) {
   if (argc != 2) {

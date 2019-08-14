@@ -10,6 +10,7 @@ extern "C" {
 
 #include "synthetic_worker.h"
 #include "util.h"
+#include "sync.h"
 
 #include <algorithm>
 #include <cmath>
@@ -18,6 +19,8 @@ extern "C" {
 #include <numeric>
 #include <random>
 #include <tuple>
+
+extern barrier_t barrier;
 
 namespace {
 
@@ -159,6 +162,7 @@ void DynamicCacheAntagonistWorker::Work(uint64_t n) {
     for (size_t j = 0; j < offset; j++) {
       ptr[j + offset] = ptr[j];
       if (cnt_++ == period_) {
+	barrier_wait(&barrier);
         cnt_ = 0;
 	for (int k = 0; k < nop_num_; k++) {
 	  asm("");

@@ -24,6 +24,8 @@ extern "C" {
 #include <utility>
 #include <vector>
 
+barrier_t barrier;
+
 namespace {
 
 using namespace std::chrono;
