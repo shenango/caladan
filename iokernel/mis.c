@@ -26,16 +26,17 @@ static DEFINE_BITMAP(mis_idle_cores, NCPU);
 static DEFINE_BITMAP(mis_sampled_cores, NCPU);
 
 /* poll the global (system-wide) memory bandwidth over this time interval */
-#define MIS_BW_MEASURE_INTERVAL          5
+#define MIS_BW_MEASURE_INTERVAL                      5
 /* wait for performance counter results over this time interval */
-#define MIS_BW_PUNISH_INTERVAL           10
+#define MIS_BW_PUNISH_INTERVAL                       10
 /* FIXME: should not be hard coded */
-#define MIS_PUNISH_HIGH_WATERMARK        0.09
-#define MIS_PUNISH_LOW_WATERMARK         0.08
+#define MIS_PUNISH_HIGH_WATERMARK                    0.09
+#define MIS_PUNISH_LOW_WATERMARK                     0.08
 
-#define MIS_ADD_BACK_FACTOR              0.07
-#define MIS_KICK_OUT_BW_FACTOR           0.01
-#define MIS_KICK_OUT_THREAD_LIMIT_FACTOR 0.25
+#define MIS_KICK_OUT_BW_FACTOR                       0.01
+#define MIS_KICK_OUT_THREAD_LIMIT_FACTOR             0.25
+
+#define MIS_UNDER_PUNISH_LOW_WATERMARK_CNT_THRESHOLD 1
 
 // #define DEBUG
 
@@ -608,9 +609,12 @@ static void mis_bandwidth_state_machine(uint64_t now)
 				kick_cnt++;
 			}
 			if (kick_cnt >= kick_thresh) {
+#ifdef DEBUG
+				total_kick_out_cnt += kick_cnt;
+#endif
 				goto done;
 			}
-		}	       
+		}
 	}
 	
  done:
@@ -621,7 +625,7 @@ static void mis_bandwidth_state_machine(uint64_t now)
 		/* safe to add back kthreads now */
 		under_punish_low_watermark_cnt++;
 		if (under_punish_low_watermark_cnt >=
-		    MIS_ADD_BACK_FACTOR / (MIS_PUNISH_LOW_WATERMARK - bw_estimate)) {
+		    MIS_UNDER_PUNISH_LOW_WATERMARK_CNT_THRESHOLD) {
 			struct mis_data *sd;
 			
 			under_punish_low_watermark_cnt = 0;
@@ -631,7 +635,7 @@ static void mis_bandwidth_state_machine(uint64_t now)
 				return;
 
 #ifdef DEBUG			
-			add_back_cnt++;
+			total_add_back_cnt++;
 #endif
 
 			if (sd->threads_limit <= sd->threads_active) {
@@ -649,9 +653,6 @@ static void mis_bandwidth_state_machine(uint64_t now)
 			/* exceeds the bandwidth limit, start punishing */
 			if (!bw_punish_triggered && !just_preempted) {
 				if (mis_sample_pmc(PMC_LLC_MISSES)) {
-#ifdef DEBUG
-					kick_out_cnt++;
-#endif
 					bw_punish_triggered = true;
 					last_bw_punish_ts = microtime();
 				}
@@ -661,7 +662,6 @@ static void mis_bandwidth_state_machine(uint64_t now)
 		
 #ifdef DEBUG
 	static uint64_t last_debug_ts = 0;
- print:
 	if (now - last_debug_ts > 2000000) {
 		last_debug_ts = now;
 		mis_print_debug_info();
