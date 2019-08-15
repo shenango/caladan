@@ -1,5 +1,13 @@
 #pragma once
 
+extern "C" {
+#include <net/ip.h>
+#include <runtime/smalloc.h>
+}
+
+#include "net.h"
+#include "sync.h"
+
 template <class ProtoHdr>
 struct Rpc {
   ProtoHdr req;
@@ -41,8 +49,8 @@ struct ReflexHdr {
   uint32_t get_reqid() { return req_handle; }
   void set_reqid(uint32_t reqid) { req_handle = reqid; }
   size_t get_body_len() {
-    BUG();
-    return 512 * lba_count;
+    if (opcode == CMD_GET) return 512 * lba_count;
+    return 0;
   }
 } __packed;
 static_assert(sizeof(ReflexHdr) == 24);
@@ -66,6 +74,16 @@ struct MemcachedHdr {
 static_assert(sizeof(MemcachedHdr) == 24);
 template class RpcEndpoint<MemcachedHdr>;
 
+class SmallocManaged {
+ public:
+  void *operator new(size_t size) {
+    void *p = smalloc(size);
+    if (unlikely(p == nullptr)) throw std::bad_alloc();
+    return p;
+  }
+  void operator delete(void *p) { sfree(p); }
+};
+
 class SharedTcpStream {
  public:
   SharedTcpStream(std::shared_ptr<rt::TcpConn> c) : c_(c) {}
@@ -82,3 +100,21 @@ class SharedTcpStream {
   std::shared_ptr<rt::TcpConn> c_;
   rt::Mutex sendMutex_;
 };
+
+class RequestContext : public SmallocManaged {
+ public:
+  RequestContext(std::shared_ptr<SharedTcpStream> _s) : conn(_s){};
+  std::shared_ptr<SharedTcpStream> conn;
+};
+
+static inline int StringToAddr(const char *str, netaddr *addr) {
+  uint8_t a, b, c, d;
+  uint16_t p;
+
+  if (sscanf(str, "%hhu.%hhu.%hhu.%hhu:%hu", &a, &b, &c, &d, &p) != 5)
+    return -EINVAL;
+
+  addr->ip = MAKE_IP_ADDR(a, b, c, d);
+  addr->port = p;
+  return 0;
+}

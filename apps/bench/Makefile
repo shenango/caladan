@@ -29,6 +29,9 @@ rpclib_obj = $(rpclib_src:.cc=.o)
 memcached_router_src = memcached_router.cc
 memcached_router_obj = $(memcached_router_src:.cc=.o)
 
+flash_client_src = flash_client.cc
+flash_client_obj = $(flash_client_src:.cc=.o)
+
 netbench_src = netbench.cc
 netbench_obj = $(netbench_src:.cc=.o)
 
@@ -53,7 +56,7 @@ INC += -I$(ROOT_PATH)/bindings/cc
 # must be first
 all: tbench callibrate stress efficiency efficiency_linux \
      netbench netbench2 netbench_udp netbench_linux netperf linux_mech_bench \
-     stress_linux memcached_router
+     stress_linux memcached_router flash_client
 
 tbench: $(tbench_obj) $(librt_libs) $(RUNTIME_DEPS)
 	$(LDXX) -o $@ $(LDFLAGS) $(tbench_obj) $(librt_libs) $(RUNTIME_LIBS)
@@ -81,6 +84,10 @@ memcached_router: $(rpclib_obj) $(memcached_router_obj) $(librt_libs) $(RUNTIME_
 	$(LDXX)  -o $@ $(LDFLAGS) $(rpclib_obj) $(memcached_router_obj) \
 	$(librt_libs) $(RUNTIME_LIBS)
 
+flash_client: $(rpclib_obj) $(flash_client_obj) $(librt_libs) $(RUNTIME_DEPS) $(fake_worker_obj)
+	$(LDXX)  -o $@ $(LDFLAGS) $(rpclib_obj) $(flash_client_obj) $(fake_worker_obj) \
+	$(librt_libs) $(RUNTIME_LIBS)
+
 netbench: $(netbench_obj) $(fake_worker_obj) $(librt_libs) $(RUNTIME_DEPS)
 	$(LDXX) -o $@ $(LDFLAGS) $(fake_worker_obj) $(netbench_obj) \
 	$(librt_libs) $(RUNTIME_LIBS)
@@ -105,7 +112,7 @@ linux_mech_bench: $(linux_mech_bench_obj) $(librt_libs)
 
 # general build rules for all targets
 src = $(fake_worker_src) $(tbench_src) $(callibrate_src) $(memcached_router_src) $(rpclib_src)
-src += $(stress_src) $(efficiency_src) $(efficiency_linux_src) $(netbench_src)
+src += $(stress_src) $(efficiency_src) $(efficiency_linux_src) $(netbench_src) $(flash_client_src)
 src += $(netbench2_src) $(netbench_udp_src) $(netbench_linux_src) $(netperf_src)
 src += $(linux_mech_bench_src)
 obj = $(src:.cc=.o)
@@ -126,4 +133,4 @@ endif
 clean:
 	rm -f $(obj) $(dep) tbench callibrate stress efficiency \
 	efficiency_linux netbench netbench2 netbench_udp netbench_linux \
-	netperf linux_mech_bench stress_linux memcached_router
+	netperf linux_mech_bench stress_linux memcached_router flash_client

@@ -24,41 +24,23 @@ static std::vector<netaddr> memcached_addrs;
 
 static std::vector<RpcEndpoint<MemcachedHdr> *> memcached_endpoints;
 
-static int StringToAddr(const char *str, netaddr *addr) {
-  uint8_t a, b, c, d;
-  uint16_t p;
-
-  if (sscanf(str, "%hhu.%hhu.%hhu.%hhu:%hu", &a, &b, &c, &d, &p) != 5)
-    return -EINVAL;
-
-  addr->ip = MAKE_IP_ADDR(a, b, c, d);
-  addr->port = p;
-  return 0;
-}
-
-class RequestContext {
+class MemcachedRequestContext : public RequestContext {
  public:
-  RequestContext(std::shared_ptr<SharedTcpStream> c) : conn(c) {
+  MemcachedRequestContext(std::shared_ptr<SharedTcpStream> c)
+      : RequestContext(c) {
     r.req_body = request_body;
     r.rsp_body = request_body;
     r.rsp_body_len = sizeof(request_body);
   }
   Rpc<MemcachedHdr> r;
   unsigned char request_body[MAX_REQUEST_BODY];
-  std::shared_ptr<SharedTcpStream> conn;
-  void *operator new(size_t size) {
-    void *p = smalloc(size);
-    if (unlikely(p == nullptr)) throw std::bad_alloc();
-    return p;
-  }
-  void operator delete(void *p) { sfree(p); }
 };
 
 inline unsigned int route(unsigned char *key, size_t keylen) {
   return jenkins_hash(key, keylen) % memcached_endpoints.size();
 }
 
-void HandleRequest(RequestContext *ctx) {
+void HandleRequest(MemcachedRequestContext *ctx) {
   unsigned char *key = ctx->request_body + ctx->r.req.extras_length;
   int server_idx = route(key, ntoh16(ctx->r.req.key_length));
 
@@ -80,7 +62,7 @@ void ClientHandler(std::shared_ptr<rt::TcpConn> conn) {
   auto resp = std::make_shared<SharedTcpStream>(conn);
 
   while (true) {
-    auto ctx = new RequestContext(resp);
+    auto ctx = new MemcachedRequestContext(resp);
     MemcachedHdr *h = &ctx->r.req;
 
     ssize_t rret = conn->ReadFull(h, sizeof(*h));
