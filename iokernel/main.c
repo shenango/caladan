@@ -38,6 +38,7 @@ static const struct init_entry iok_init_handlers[] = {
 	IOK_INITIALIZER(simple),
 	IOK_INITIALIZER(mis),
 	IOK_INITIALIZER(numa),
+	IOK_INITIALIZER(ias),
 
 	/* control plane */
 	IOK_INITIALIZER(control),
@@ -159,6 +160,12 @@ int main(int argc, char *argv[])
 			sched_ops = &mis_ops;
 		} else if (!strcmp(argv[1], "numa")) {
 			sched_ops = &numa_ops;
+		} else if (!strcmp(argv[1], "ias")) {
+			if (cfg.noht) {
+				fprintf(stderr, "ias can't be used w/ noht\n");
+				return -EINVAL;
+			}
+			sched_ops = &ias_ops;
 		} else {
 			print_usage();
 			return -EINVAL;

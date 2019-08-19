@@ -39,6 +39,8 @@ static DEFINE_PERTHREAD(struct tcache_perthread, thread_pt);
 static __thread uint64_t last_tsc;
 /* used to force timer and network processing after a timeout */
 static __thread uint64_t last_watchdog_tsc;
+/* used to update performance counters */
+static __thread uint64_t last_pmc_tsc;
 
 /**
  * In inc/runtime/thread.h, this function is declared inline (rather than static
@@ -292,9 +294,15 @@ static __noreturn __noinline void schedule(void)
 	store_release(&l->rcu_gen, l->rcu_gen + 1);
 	assert((l->rcu_gen & 0x1) == 0x0);
 
+	/* check if we need to refresh performance counters */
+	if (start_tsc - last_pmc_tsc >= cycles_per_us * RUNTIME_PMC_US) {
+		last_pmc_tsc = start_tsc;
+		pmc_periodic(l);
+	}
+
 	/* if it's been too long, run the softirq handler */
 	if (!disable_watchdog &&
-	    unlikely(start_tsc - last_watchdog_tsc >
+	    unlikely(start_tsc - last_watchdog_tsc >=
 	             cycles_per_us * RUNTIME_WATCHDOG_US)) {
 		last_watchdog_tsc = start_tsc;
 		th = do_watchdog(l);
@@ -527,7 +535,7 @@ void thread_yield(void)
 
 	assert(myth->state == THREAD_STATE_RUNNING);
 	myth->state = THREAD_STATE_SLEEPING;
-	myth->last_cpu = myk()->curr_cpu;
+	myth->last_cpu = k->curr_cpu;
 	store_release(&myth->stack_busy, true);
 	thread_ready(myth);
 

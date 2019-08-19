@@ -138,3 +138,4 @@ extern const struct sched_ops *sched_ops;
 extern struct sched_ops simple_ops;
 extern struct sched_ops mis_ops;
 extern struct sched_ops numa_ops;
+extern struct sched_ops ias_ops;

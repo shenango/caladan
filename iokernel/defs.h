@@ -84,10 +84,10 @@ struct thread {
 	unsigned int		ts_idx;
 	union {
 		struct {
-			struct hwq		directpath_hwq;
-			struct hwq		storage_hwq;
+			struct hwq	directpath_hwq;
+			struct hwq	storage_hwq;
 		};
-		struct hwq		hwqs[2];
+		struct hwq	hwqs[2];
 	};
 	struct timer		timer_heap;
 	struct list_node	idle_link;
@@ -320,6 +320,7 @@ extern int sched_init(void);
 extern int simple_init(void);
 extern int mis_init(void);
 extern int numa_init(void);
+extern int ias_init(void);
 extern int control_init(void);
 extern int dpdk_init(void);
 extern int rx_init(void);
