@@ -107,6 +107,10 @@ __jmp_thread_direct:
 	movq    %r14, R14(%rdi)
 	movq    %r15, R15(%rdi)
 
+	/* restore ip and stack */
+	movq    RSP(%rsi), %rsp
+	movq    RIP(%rsi), %rcx
+
 	/* clear the stack busy flag */
 	movl	$0, (%rdx)
 
@@ -117,10 +121,6 @@ __jmp_thread_direct:
 	movq    R13(%rsi), %r13
 	movq    R14(%rsi), %r14
 	movq    R15(%rsi), %r15
-
-	/* restore ip and stack */
-	movq    RSP(%rsi), %rsp
-	movq    RIP(%rsi), %rcx
 
 	/* set first argument (in case new thread) */
 	movq    RDI(%rsi), %rdi /* ARG0 */

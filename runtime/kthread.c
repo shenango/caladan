@@ -97,9 +97,8 @@ static __always_inline void kthread_yield_to_iokernel(void)
 
 	/* yield to the iokernel */
 	s = ioctl(ksched_fd, KSCHED_IOC_PARK, 0);
-	while (unlikely(s < 0)) {
+	while (unlikely(s < 0 || preempt_needed())) {
 		/* preempted while yielding, yield again */
-		assert(preempt_needed());
 		clear_preempt_needed();
 		s = ioctl(ksched_fd, KSCHED_IOC_PARK, 0);
 	}
