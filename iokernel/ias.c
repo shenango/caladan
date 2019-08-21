@@ -269,10 +269,6 @@ static void ias_notify_congested(struct proc *p, bitmap_ptr_t threads,
 		return;
 	}
 
-	/* do nothing if already marked as congested or can't be congested */
-	if (sd->is_congested)
-		return;
-
 	/* try to add an additional core right away */
 	ret = ias_add_kthread(p);
 	if (!ret)
