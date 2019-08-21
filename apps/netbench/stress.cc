@@ -52,7 +52,9 @@ void MainHandler(void *arg) {
           std::chrono::duration_cast<std::chrono::duration<double>>(now - last)
               .count();
       for (int i = 0; i < threads; i++) total += cnt[i];
+      preempt_disable();
       log_info("%f", static_cast<double>(total - last_total) / duration);
+      preempt_enable();
       last_total = total;
       last = now;
     }
