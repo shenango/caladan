@@ -124,6 +124,8 @@ static void ias_detach(struct proc *p)
 		if (cores[i] == sd)
 			cores[i] = NULL;
 	}
+	bitmap_xor(ias_claimed_cores, ias_claimed_cores,
+		   sd->claimed_cores, NCPU);
 
 	free(sd);
 }
