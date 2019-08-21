@@ -16,43 +16,50 @@ void ias_ht_poll(uint64_t now_us)
 	struct thread *th;
 	struct ias_data *sd, *sd2;
 	unsigned int core, sib;
-	int i, idx;
+	int i;
 
 	/* update the IPC estimation for each core */
 	ias_for_each_proc(sd) {
 		for (i = 0; i < sd->p->active_thread_count; i++) {
-			float ipc;
+			double ipc, us;
 			uint64_t last_tsc, last_instr, cur_tsc, cur_instr;
 
 			th = sd->p->active_threads[i];
 			if (!th->active)
 				continue;
 
-			idx = th - sd->p->threads;
 			core = th->core;
 			sib = sched_siblings[core];
 
 			/* calculate IPC and update counters */
-			last_tsc = sd->ht_last_tsc[idx];
-			last_instr = sd->ht_last_instr[idx];
+			last_tsc = sd->ht_last_tsc[core];
+			last_instr = sd->ht_last_instr[core];
 			cur_tsc = th->q_ptrs->tsc;
 			cur_instr = th->q_ptrs->instr;
+			sd->ht_last_tsc[core] = cur_tsc;
+			sd->ht_last_instr[core] = cur_instr;
 			if (cur_tsc == last_tsc)
 				continue;
-			ipc = (float)(cur_instr - last_instr) /
-			      (float)(cur_tsc - last_tsc);
-			sd->ht_last_tsc[idx] = cur_tsc;
-			sd->ht_last_instr[idx] = cur_instr;
+			if (ias_gen[core] != sd->ht_last_gen[core]) {
+				sd->ht_last_gen[core] = ias_gen[core];
+				continue;
+			}
+
+			ipc = (double)(cur_instr - last_instr) /
+			      (double)(cur_tsc - last_tsc);
 			if (ipc > 5.0)
 				continue; /* bad sample */
 
 			/* update IPC metrics */
+			us = (double)(cur_tsc - last_tsc) / (double)cycles_per_us;
+			if (us > 100.0)
+				us = 100.0;
 			if (!cores[sib]) {
 				ias_ewma(&sd->ht_unpaired_ipc, ipc,
-					 IAS_EWMA_FACTOR);
+					 us * IAS_EWMA_FACTOR);
 			} else {
 				ias_ewma(&sd->ht_pairing_ipc[cores[sib]->idx],
-					 ipc, IAS_EWMA_FACTOR);
+					 ipc, us * IAS_EWMA_FACTOR);
 			}
 		}
 	}

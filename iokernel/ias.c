@@ -27,6 +27,8 @@ static struct ias_data *ias_procs[IAS_NPROC];
 static unsigned int ias_procs_nr;
 /* the current process running on each core */
 struct ias_data *cores[NCPU];
+/* the generation number for reschedules on each core */
+uint64_t ias_gen[NCPU];
 /* the current time in microseconds */
 static uint64_t now_us;
 
@@ -140,6 +142,7 @@ static int ias_run_kthread_on_core(struct proc *p, unsigned int core)
 
 	ias_cleanup_core(core);
 	cores[core] = sd;
+	ias_gen[core]++;
 	bitmap_clear(ias_idle_cores, core);
 	sd->threads_active++;
 	return 0;
@@ -161,6 +164,7 @@ int ias_idle_on_core(unsigned int core)
 
 	ias_cleanup_core(core);
 	cores[core] = NULL;
+	ias_gen[core]++;
 	bitmap_set(ias_idle_cores, core);
 	return 0;
 }
@@ -177,7 +181,7 @@ static float ias_calculate_score(struct ias_data *sd, unsigned int core)
 		       ias_has_priority(cores[sib], core);
 
 	/* try to estimate how well the core and process pair together */
-	score = ias_has_priority(sd, core) ? 100.0 : 0.0;
+	score = ias_has_priority(sd, core) ? IAS_PRIORITY_WEIGHT : 0.0;
 	score += ias_loc_score(sd, core, now_us);
 
 	if (sib_has_prio)

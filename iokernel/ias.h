@@ -10,9 +10,10 @@
 #define IAS_BW_LOWER_LIMIT	0.08 /* the lower limit on mem bandwidth */
 #define IAS_BW_POLL_US		5   /* time to poll memory bandwidth usage */
 #define IAS_HT_POLL_US		5   /* time to poll for HT contention */
-#define IAS_HT_WEIGHT		10.0 /* how heavily to weigh the HT score */
+#define IAS_PRIORITY_WEIGHT	10000.0 /* how heavily to weigh LC priority */
+#define IAS_HT_WEIGHT		100.0 /* how heavily to weigh the HT score */
 #define IAS_LOC_EVICTED_US	100 /* us before all cache is evicted */
-#define IAS_EWMA_FACTOR		0.01 /* the moving average update rate */
+#define IAS_EWMA_FACTOR		0.001 /* the moving average update rate */
 #define IAS_DEBUG_PRINT_US	3000000 /* time to print out debug info */
 
 struct ias_data {
@@ -33,9 +34,10 @@ struct ias_data {
 	uint64_t		loc_last_us[NCPU];
 
 	/* hyperthread subcontroller */
-	float			ht_pairing_ipc[IAS_NPROC];
+	uint64_t		ht_last_gen[NCPU];
 	uint64_t		ht_last_tsc[NCPU];
 	uint64_t		ht_last_instr[NCPU];
+	float			ht_pairing_ipc[IAS_NPROC];
 	float			ht_unpaired_ipc;
 	float			ht_max_ipc;
 
@@ -59,6 +61,7 @@ static inline bool ias_has_priority(struct ias_data *sd, unsigned int core)
 
 extern struct list_head all_procs;
 extern struct ias_data *cores[NCPU];
+extern uint64_t ias_gen[NCPU];
 
 /**
  * ias_for_each_proc - iterates through all processes
