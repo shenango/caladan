@@ -32,6 +32,10 @@ uint64_t ias_gen[NCPU];
 /* the current time in microseconds */
 static uint64_t now_us;
 
+#ifdef IAS_DEBUG
+int owners[NCPU];
+#endif
+
 static void ias_cleanup_core(unsigned int core)
 {
 	struct ias_data *sd = cores[core];
@@ -75,6 +79,9 @@ static int ias_attach(struct proc *p, struct sched_spec *cfg)
 			goto fail_reserve;
 
 		sib = sched_siblings[core];
+#ifdef IAS_DEBUG
+		owners[core] = owners[sib] = p->pid;
+#endif
 		bitmap_set(sd->claimed_cores, core);
 		bitmap_set(ias_claimed_cores, core);
 		bitmap_set(sd->claimed_cores, sib);
@@ -322,6 +329,8 @@ int ias_add_kthread_on_core(unsigned int core)
 static void ias_print_debug_info(void)
 {
 	struct ias_data *sd, *sd2;
+	int core, sib;
+	static bool printed[NCPU];
 
 	ias_for_each_proc(sd) {
 		log_info("PID %d: %s%s ACTIVE %d, LIMIT %d, MAX %d, IPC %f",
@@ -337,6 +346,18 @@ static void ias_print_debug_info(void)
 	}
 	log_info("bw_cur %f bw_punish %ld bw_relax %ld",
 		 ias_count_bw_cur, ias_count_bw_punish, ias_count_bw_relax);
+	memset(printed, 0, sizeof(printed));
+	bitmap_for_each_set(sched_allowed_cores, NCPU, core) {
+		if (printed[core]) {
+			continue;
+		}
+		sib = sched_siblings[core];
+		printed[core] = printed[sib] = true;
+		int pid0 = cores[core] ? cores[core]->p->pid : -1;
+		int pid1 = cores[sib] ? cores[sib]->p->pid : -1;
+		log_info("core %d, %d (owner: %d): pid %d, %d", core, sib,
+			 owners[core], pid0, pid1);
+	}
 }
 
 static void ias_sched_poll(uint64_t now, int idle_cnt, bitmap_ptr_t idle)
