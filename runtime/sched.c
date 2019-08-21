@@ -587,6 +587,7 @@ static void thread_finish_cede(void)
 	myth->state = THREAD_STATE_SLEEPING;
 	myth->last_cpu = k->curr_cpu;
 	thread_ready(myth);
+	__self = NULL;
 
 	STAT(PROGRAM_CYCLES) += rdtsc() - last_tsc;
 
