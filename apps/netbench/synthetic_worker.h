@@ -28,6 +28,15 @@ class SqrtWorker : public SyntheticWorker {
   void Work(uint64_t n);
 };
 
+class AsmSqrtWorker : public SyntheticWorker {
+ public:
+  AsmSqrtWorker() {}
+  ~AsmSqrtWorker() {}
+
+  // Performs n iterations of sqrt().
+  void Work(uint64_t n);
+};
+
 class StridedMemtouchWorker : public SyntheticWorker {
  public:
   ~StridedMemtouchWorker() { delete buf_; }
