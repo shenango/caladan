@@ -45,7 +45,9 @@
 #endif
 #endif
 
+#define MSR_APIC_BASE (0x1B)
 #define MSR_X2APIC_ICR (0x830)
+#define X2APIC_ENABLED(apic_status) (apic_status >> 10)
 #define ICR_LOGICAL_MODE (1 << 11)
 #define ICR_DEST_FIELD(x) (((unsigned long long)x) << 32)
 #define MSR_X2APIC_LDR (0x80D)
@@ -546,8 +548,17 @@ static void __init ksched_init_pmc(void *arg)
 static int __init ksched_init(void)
 {
 	dev_t devno_ksched = MKDEV(KSCHED_MAJOR, KSCHED_MINOR);
-        dev_t devno_pci_cfg;
-        int ret;
+	dev_t devno_pci_cfg;
+	int ret;
+
+#ifdef OS_SUPPORT_CUSTOMIZED_IPI_HANDER
+	int apic_status;
+	rdmsrl(MSR_APIC_BASE, apic_status);
+	if (!X2APIC_ENABLED(apic_status)) {
+		printk(KERN_ERR "ksched: X2APIC is not enabled!");
+		return -ENOTSUPP;
+	}
+#endif
 
 	if (!cpu_has(&boot_cpu_data, X86_FEATURE_MWAIT)) {
 		printk(KERN_ERR "ksched: mwait support is required");
