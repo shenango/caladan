@@ -51,6 +51,31 @@ void SqrtWorker::Work(uint64_t n) {
   }
 }
 
+#define SQRT(src_var, dest_var, src_xmm, dest_xmm) \
+  asm volatile(                                    \
+    "movq %1, %%" src_xmm "\n"                     \
+    "sqrtsd %%" src_xmm ", %%" dest_xmm "\n"       \
+    "movq %%" dest_xmm ", %0 \n"                   \
+    : "=r"(dest_var)                               \
+    : "g"(src_var)                                 \
+    : src_xmm, dest_xmm, "memory")
+
+void AsmSqrtWorker::Work(uint64_t n) {
+  constexpr double kNumber = 2350845.545;
+  double src_0, src_1, src_2, src_3;
+  double dest_0, dest_1, dest_2, dest_3;
+  for (uint64_t i = 0; i < n; i += 4) {
+    src_0 = i * kNumber;
+    src_1 = (i + 1) * kNumber;
+    src_2 = (i + 2) * kNumber;
+    src_3 = (i + 3) * kNumber;
+    SQRT(src_0, dest_0, "xmm0", "xmm1");
+    SQRT(src_1, dest_1, "xmm2", "xmm3");
+    SQRT(src_2, dest_2, "xmm4", "xmm5");
+    SQRT(src_3, dest_3, "xmm6", "xmm7");
+  }
+}
+
 StridedMemtouchWorker *StridedMemtouchWorker::Create(std::size_t size,
                                                      std::size_t stride) {
   char *buf = new char[size]();
@@ -181,6 +206,9 @@ SyntheticWorker *SyntheticWorkerFactory(std::string s) {
   if (tokens[0] == "sqrt") {
     if (tokens.size() != 1) return nullptr;
     return new SqrtWorker();
+  }   if (tokens[0] == "asmsqrt") {
+    if (tokens.size() != 1) return nullptr;
+    return new AsmSqrtWorker();
   } else if (tokens[0] == "stridedmem") {
     if (tokens.size() != 3) return nullptr;
     unsigned long size = std::stoul(tokens[1], nullptr, 0);
