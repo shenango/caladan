@@ -37,6 +37,7 @@ struct ias_data {
 	uint64_t		ht_last_gen[NCPU];
 	uint64_t		ht_last_tsc[NCPU];
 	uint64_t		ht_last_instr[NCPU];
+	uint64_t                ht_start_running_tsc[NCPU];
 	float			ht_pairing_ipc[IAS_NPROC];
 	float			ht_unpaired_ipc;
 	float			ht_max_ipc;

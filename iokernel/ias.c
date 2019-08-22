@@ -150,6 +150,7 @@ static int ias_run_kthread_on_core(struct proc *p, unsigned int core)
 		return ret;
 
 	ias_cleanup_core(core);
+	sd->ht_start_running_tsc[core] = rdtsc();
 	cores[core] = sd;
 	ias_gen[core]++;
 	bitmap_clear(ias_idle_cores, core);
