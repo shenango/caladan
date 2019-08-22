@@ -49,7 +49,8 @@ void ias_ht_poll(uint64_t now_us)
 
 			ipc = (double)(cur_instr - last_instr) /
 			      (double)(cur_tsc - last_tsc);
-			if (ipc > 5.0)
+
+			if (ipc > 5.0 || ipc == 0)
 				continue; /* bad sample */
 
 			double runned_us =
