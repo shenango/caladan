@@ -120,69 +120,97 @@ extern "C" {
 #define MAX(x, y) ((x) > (y) ? (x) : (y))
 #endif
 
+#define OPS_BATCH (1 << 10)
+
 static double **a, **b, **c;
-
 static const char *label[4] = {"Copy", "Scale", "Add", "Triad"};
-
 static double ops_factor[4] = {0, 1, 1, 2};
-
-double *ops;
+volatile double *ops;
 
 int N;
 
 void *copyProc(void *arg) {
+	int local_ops = 0;
 	int me = (long long)arg;
 
 	double *a2 = a[me];
 	double *c2 = c[me];
+	int ops_idx = me * CACHELINE / sizeof(double);
+	ops[ops_idx] = 0;
 
 	while (1) {
 		for (int j = 0; j < N; j += STRIDE) {
 			c2[j] = a2[j];
-			ops[me * CACHELINE / sizeof(double)] += ops_factor[0];
+			local_ops++;
+			if (local_ops == OPS_BATCH) {
+				local_ops = 0;
+				ops[ops_idx] += ops_factor[0] * OPS_BATCH;
+			}
 		}
 	}
 }
 
 void *scaleProc(void *arg) {
+	int local_ops = 0;
 	int me = (long long)arg;
 
 	double *b2 = b[me];
 	double *c2 = c[me];
+	int ops_idx = me * CACHELINE / sizeof(double);
+	ops[ops_idx] = 0;
+
 	while (1) {
 		for (int j = 0; j < N; j += STRIDE) {
 			b2[j] = 3.0 * c2[j];
-			ops[me * CACHELINE / sizeof(double)] += ops_factor[1];
+			local_ops++;
+			if (local_ops == OPS_BATCH) {
+				local_ops = 0;
+				ops[ops_idx] += ops_factor[1] * OPS_BATCH;
+			}
 		}
 	}
 }
 
 void *addProc(void *arg) {
+	int local_ops = 0;
 	int me = (long long)arg;
 
 	double *a2 = a[me];
 	double *b2 = b[me];
 	double *c2 = c[me];
+	int ops_idx = me * CACHELINE / sizeof(double);
+	ops[ops_idx] = 0;
 
 	while (1) {
 		for (int j = 0; j < N; j += STRIDE) {
 			c2[j] = a2[j] + b2[j];
-			ops[me * CACHELINE / sizeof(double)] += ops_factor[2];
+			local_ops++;
+			if (local_ops == OPS_BATCH) {
+				local_ops = 0;
+				ops[ops_idx] += ops_factor[2] * OPS_BATCH;
+			}
 		}
 	}
 }
 
 void *triadProc(void *arg) {
+	int local_ops = 0;
 	int me = (long long)arg;
 
 	double *a2 = a[me];
 	double *b2 = b[me];
 	double *c2 = c[me];
+	int ops_idx = me * CACHELINE / sizeof(double);
+	ops[ops_idx] = 0;
 
 	while (1) {
 		for (int j = 0; j < N; j += STRIDE) {
 			a2[j] = b2[j] + 3.0 * c2[j];
-			ops[me * CACHELINE / sizeof(double)] += ops_factor[3];
+			local_ops++;
+			if (local_ops == OPS_BATCH) {
+				local_ops = 0;
+				ops[ops_idx] += ops_factor[3] * OPS_BATCH;
+			}
 		}
 	}
 }
@@ -225,7 +253,6 @@ void _main(void *_argv) {
 	void *shm = NULL;
 	shm = shmat(shmid, 0, 0);
 	ops = (double *)shm;
-	memset(ops, 0, sizeof(double) * MAX_NUM_THREADS);
 
 	pthread_t *threads = (pthread_t *)malloc(num_threads * sizeof(pthread_t));
 	pthread_attr_t pthread_custom_attr;
