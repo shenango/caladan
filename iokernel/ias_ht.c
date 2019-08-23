@@ -88,3 +88,20 @@ void ias_ht_poll(uint64_t now_us)
 		sd->ht_max_ipc = MAX(sd->ht_max_ipc, sd->ht_unpaired_ipc);
 	}
 }
+
+void ias_ht_random_kick()
+{
+	static int rr_cnt = 0;
+	int cnt = 0, core;
+	bitmap_for_each_set(sched_allowed_cores, NCPU, core) {
+		struct ias_data *sd = cores[core];
+		if (cnt == rr_cnt && sd) {
+			bool is_lc = sd->threads_active < sd->threads_guaranteed;
+			if (!is_lc)
+				ias_idle_on_core(core);
+			break;
+		}
+		cnt++;
+	}
+	rr_cnt = (rr_cnt + 1) % num_sched_allowed_cores;	
+}

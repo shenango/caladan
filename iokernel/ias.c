@@ -31,6 +31,7 @@ struct ias_data *cores[NCPU];
 uint64_t ias_gen[NCPU];
 /* the current time in microseconds */
 static uint64_t now_us;
+int num_sched_allowed_cores;
 
 #ifdef IAS_DEBUG
 int owners[NCPU];
@@ -333,12 +334,12 @@ static void ias_print_debug_info(void)
 	static bool printed[NCPU];
 
 	ias_for_each_proc(sd) {
-		log_info("PID %d: %s%s ACTIVE %d, LIMIT %d, MAX %d, IPC %f",
+		log_info("PID %d: %s%s ACTIVE %d, LIMIT %d, MAX %d, MAX IPC %f, UP IPC %f",
 			 sd->p->pid,
 			 sd->is_congested ? "C" : "_",
 			 sd->is_bwlimited ? "B" : "_",
 			 sd->threads_active, sd->threads_limit, sd->threads_max,
-			 sd->ht_max_ipc);
+			 sd->ht_max_ipc, sd->ht_unpaired_ipc);
 		ias_for_each_proc(sd2) {
 			log_info("\tPID %dx%d: IPC %f", sd->p->pid,
 				 sd2->p->pid, sd->ht_pairing_ipc[sd2->idx]);
@@ -366,7 +367,8 @@ static void ias_sched_poll(uint64_t now, int idle_cnt, bitmap_ptr_t idle)
 #ifdef IAS_DEBUG
 	static uint64_t debug_ts = 0;
 #endif
-	static uint64_t bw_ts = 0, ht_ts = 0;
+	static uint64_t bw_ts = 0, ht_ts = 0, random_kick_ts = 0;
+		
 	unsigned int core;
 
 	now_us = now;
@@ -387,6 +389,11 @@ static void ias_sched_poll(uint64_t now, int idle_cnt, bitmap_ptr_t idle)
 		ias_ht_poll(now);
 	}
 
+	if (now - random_kick_ts >= IAS_HT_RANDOM_KICK_US) {
+		random_kick_ts = now;
+		ias_ht_random_kick();
+	}
+	
 	/* mark cores idle */
 	if (idle_cnt != 0)
 		bitmap_or(ias_idle_cores, ias_idle_cores, idle, NCPU);
@@ -415,8 +422,12 @@ struct sched_ops ias_ops = {
  */
 int ias_init(void)
 {
+	int tmp;
 	bitmap_init(ias_claimed_cores, true, NCPU);
 	bitmap_xor(ias_claimed_cores, ias_claimed_cores, sched_allowed_cores,
 		   NCPU);
+	bitmap_for_each_set(sched_allowed_cores, NCPU, tmp) {
+		num_sched_allowed_cores++;
+	}
 	return 0;
 }

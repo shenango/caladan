@@ -15,6 +15,7 @@
 #define IAS_LOC_EVICTED_US	         100 /* us before all cache is evicted */
 #define IAS_EWMA_FACTOR		         0.001 /* the moving average update rate */
 #define IAS_DEBUG_PRINT_US	         3000000 /* time to print out debug info */
+#define IAS_HT_RANDOM_KICK_US            200 /* time to randomly kick out a BE */
 #define IAS_KICK_OUT_THREAD_LIMIT_FACTOR 0.25 /* used to calc the number of victims */
 #define IAS_KICK_OUT_BW_FACTOR           0.01 /* used to calc the number of victims */
 
@@ -65,6 +66,7 @@ static inline bool ias_has_priority(struct ias_data *sd, unsigned int core)
 extern struct list_head all_procs;
 extern struct ias_data *cores[NCPU];
 extern uint64_t ias_gen[NCPU];
+extern int num_sched_allowed_cores;
 
 /**
  * ias_for_each_proc - iterates through all processes
@@ -141,6 +143,7 @@ static inline float ias_ht_pairing_score(struct ias_data *lc,
 }
 
 extern void ias_ht_poll(uint64_t now_us);
+extern void ias_ht_random_kick();
 
 
 /*
