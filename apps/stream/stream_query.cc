@@ -9,25 +9,24 @@ extern "C" {
 
 #include <chrono>
 #include <iostream>
-#include <unistd.h>
 #include <sys/shm.h>
+#include <unistd.h>
 
 barrier_t barrier;
 
 #define SHM_KEY (0x123)
+#define CACHELINE 64
 
 int main(int argc, char *argv[]) {
 	if (argc != 2) {
-		std::cerr << "usage: [#threads]"
-			  << std::endl;
+		std::cerr << "usage: [#threads]" << std::endl;
 		return -EINVAL;
 	}
 
 	int threads = std::stoi(argv[1], nullptr, 0);
-	
+
 	volatile double *cnt;
-	int shmid = shmget((key_t)SHM_KEY, sizeof(double) * threads,
-			   0666 | IPC_CREAT);
+	int shmid = shmget((key_t)SHM_KEY, CACHELINE * threads, 0666 | IPC_CREAT);
 	void *shm = NULL;
 	shm = shmat(shmid, 0, 0);
 	cnt = (volatile double *)shm;
@@ -41,13 +40,15 @@ int main(int argc, char *argv[]) {
 		double duration =
 			std::chrono::duration_cast<std::chrono::duration<double>>(now - last)
 			.count();
-		for (int i = 0; i < threads; i++) total += cnt[i];
+		for (int i = 0; i < threads; i++) {
+			total += cnt[i * CACHELINE / sizeof(double)];
+		}
 		log_info("mops: %lf, timestamp: %lu",
 			 static_cast<double>(total - last_total) / 1E6 / duration,
 			 (unsigned long)time(NULL));
 		last_total = total;
-		last = now;	  
+		last = now;
 	}
-	
+
 	return 0;
 }

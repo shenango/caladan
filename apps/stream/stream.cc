@@ -52,11 +52,12 @@ extern "C" {
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <sys/time.h>
 #include <string.h>
-#include <unistd.h>
 #include <sys/shm.h>
+#include <sys/time.h>
+#include <unistd.h>
 
+#define CACHELINE 64
 #define SHM_KEY (0x123)
 
 /* INSTRUCTIONS:
@@ -138,7 +139,7 @@ void *copyProc(void *arg) {
 	while (1) {
 		for (int j = 0; j < N; j += STRIDE) {
 			c2[j] = a2[j];
-			ops[me] += ops_factor[0];
+			ops[me * CACHELINE / sizeof(double)] += ops_factor[0];
 		}
 	}
 }
@@ -151,7 +152,7 @@ void *scaleProc(void *arg) {
 	while (1) {
 		for (int j = 0; j < N; j += STRIDE) {
 			b2[j] = 3.0 * c2[j];
-			ops[me] += ops_factor[1];
+			ops[me * CACHELINE / sizeof(double)] += ops_factor[1];
 		}
 	}
 }
@@ -166,7 +167,7 @@ void *addProc(void *arg) {
 	while (1) {
 		for (int j = 0; j < N; j += STRIDE) {
 			c2[j] = a2[j] + b2[j];
-			ops[me] += ops_factor[2];
+			ops[me * CACHELINE / sizeof(double)] += ops_factor[2];
 		}
 	}
 }
@@ -181,9 +182,17 @@ void *triadProc(void *arg) {
 	while (1) {
 		for (int j = 0; j < N; j += STRIDE) {
 			a2[j] = b2[j] + 3.0 * c2[j];
-			ops[me] += ops_factor[3];
+			ops[me * CACHELINE / sizeof(double)] += ops_factor[3];
 		}
 	}
+}
+
+void *aligned_malloc(int size) {
+	char *mem = (char *)malloc(size + CACHELINE + sizeof(void *));
+	void **ptr = (void **)((uintptr_t)(mem + CACHELINE + sizeof(void *)) &
+			       ~(CACHELINE - 1));
+	ptr[-1] = mem;
+	return ptr;
 }
 
 int _argc;
@@ -191,7 +200,7 @@ int _argc;
 void _main(void *_argv) {
 	int argc = _argc;
 	char **argv = (char **)_argv;
-		
+
 	if (argc != 4) {
 		puts("Usage: stream [N] [#threads] [spec]");
 		exit(-1);
@@ -211,8 +220,8 @@ void _main(void *_argv) {
 		exit(-1);
 	}
 
-	int shmid = shmget((key_t)SHM_KEY, sizeof(double) * MAX_NUM_THREADS,
-			   0666 | IPC_CREAT);
+	int shmid =
+		shmget((key_t)SHM_KEY, CACHELINE * MAX_NUM_THREADS, 0666 | IPC_CREAT);
 	void *shm = NULL;
 	shm = shmat(shmid, 0, 0);
 	ops = (double *)shm;
@@ -228,9 +237,9 @@ void _main(void *_argv) {
 	c = (double **)malloc(sizeof(double *) * num_threads);
 
 	for (int i = 0; i < num_threads; i++) {
-		a[i] = (double *)malloc(sizeof(double) * N);
-		b[i] = (double *)malloc(sizeof(double) * N);
-		c[i] = (double *)malloc(sizeof(double) * N);
+		a[i] = (double *)aligned_malloc(sizeof(double) * N);
+		b[i] = (double *)aligned_malloc(sizeof(double) * N);
+		c[i] = (double *)aligned_malloc(sizeof(double) * N);
 		if ((a[i] == NULL) || (b[i] == NULL) || (c[i] == NULL)) {
 			printf("Failed to allocate %d bytes\n", (int)sizeof(double) * N);
 			exit(-1);
@@ -257,7 +266,7 @@ void _main(void *_argv) {
 		/* ADD */
 		for (long long i = 0; i < num_threads; i++) {
 			pthread_create(&threads[i], &pthread_custom_attr, addProc, (void *)i);
-		}		
+		}
 	} else if (spec_idx == 3) {
 		/* TRIAD */
 		for (long long i = 0; i < num_threads; i++) {
