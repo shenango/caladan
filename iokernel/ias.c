@@ -325,6 +325,7 @@ int ias_add_kthread_on_core(unsigned int core)
 	return 0;
 }
 
+#ifdef IAS_DEBUG
 static void ias_print_debug_info(void)
 {
 	struct ias_data *sd, *sd2;
@@ -358,10 +359,14 @@ static void ias_print_debug_info(void)
 			 owners[core], pid0, pid1);
 	}
 }
+#endif
 
 static void ias_sched_poll(uint64_t now, int idle_cnt, bitmap_ptr_t idle)
 {
-	static uint64_t debug_ts = 0, bw_ts = 0, ht_ts = 0;
+#ifdef IAS_DEBUG
+	static uint64_t debug_ts = 0;
+#endif
+	static uint64_t bw_ts = 0, ht_ts = 0;
 	unsigned int core;
 
 	now_us = now;
