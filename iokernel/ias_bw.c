@@ -14,6 +14,7 @@
 uint64_t ias_count_bw_punish;
 uint64_t ias_count_bw_relax;
 float    ias_count_bw_cur;
+float    bw_estimate;
 
 /* a mask of the cores currently being sampled */
 static DEFINE_BITMAP(ias_sampled_cores, NCPU);
@@ -92,6 +93,16 @@ static struct ias_data *ias_bw_choose_victim(void)
 	return victim;
 }
 
+static inline void ias_kick_core(int core)
+{
+	struct ias_data *sd = cores[core];
+	sd->threads_limit = MAX(0,
+				MIN(sd->threads_limit - 1,
+				    sd->threads_active - 1));
+	if (ias_add_kthread_on_core(core))
+		ias_idle_on_core(core);
+}
+
 static void ias_bw_punish(void)
 {
 	struct ias_data *sd;
@@ -101,27 +112,28 @@ static void ias_bw_punish(void)
 	if (!sd)
 		return;
 
-	sd->threads_limit = MIN(sd->threads_limit - 1,
-				sd->threads_active - 1);
 	sd->is_bwlimited = true;
 	ias_count_bw_punish++;
 
-	/* first prefer lone hyperthreads */
-	sched_for_each_allowed_core(core, tmp) {
-		if (cores[core] == sd &&
-		    cores[sched_siblings[core]] != sd) {
-			if (ias_add_kthread_on_core(core))
-				ias_idle_on_core(core);
-			return;
-		}
-	}
+	int kick_cnt = 0;
+	int kick_thresh = IAS_KICK_OUT_THREAD_LIMIT_FACTOR * sd->threads_limit +
+		((MAX(0, bw_estimate - IAS_BW_UPPER_LIMIT)) / IAS_KICK_OUT_BW_FACTOR);
+	int sibling;
 
-	/* then try any core */
+	// TODO: actually we need to spread kick_thresh among multiple sds
+	// rather than a single sd, for example when all sds are single-threaded.
 	sched_for_each_allowed_core(core, tmp) {
 		if (cores[core] == sd) {
-			if (ias_add_kthread_on_core(core))
-				ias_idle_on_core(core);
-			return;
+			ias_kick_core(core);
+			kick_cnt++;
+		}
+		sibling = sched_siblings[core];
+		if (cores[sibling] == sd) {
+			ias_kick_core(sibling);
+			kick_cnt++;
+		}
+		if (kick_cnt >= kick_thresh) {
+			break;
 		}
 	}
 }
@@ -149,20 +161,6 @@ void ias_bw_poll(uint64_t now_us)
 	static uint32_t last_cas = 0;
 	uint64_t tsc;
 	uint32_t cur_cas;
-	float bw_estimate;
-
-	/* punish a process that is using too much bandwidth */
-	if (bw_punish_triggered) {
-		bw_punish_triggered = false;
-		ias_bw_punish();
-
-		/* reset counters to detect the new bw more quickly */
-		barrier();
-		last_tsc = rdtsc();
-		barrier();
-		last_cas = get_cas_count_all();
-		return;
-	}
 
 	/* update the bandwidth estimate */
 	barrier();
@@ -174,11 +172,17 @@ void ias_bw_poll(uint64_t now_us)
 	last_tsc = tsc;
 	ias_count_bw_cur = bw_estimate;
 
-	/* check if the bandwidth limit has been exceeded */
-	if (bw_estimate >= IAS_BW_UPPER_LIMIT) {
-		ias_bw_sample_pmc(PMC_LLC_MISSES);
-		bw_punish_triggered = true;
-	} else if (bw_estimate <= IAS_BW_LOWER_LIMIT) {
-		ias_bw_relax();
+	/* punish a process that is using too much bandwidth */
+	if (bw_punish_triggered) {
+		bw_punish_triggered = false;
+		ias_bw_punish();
+	} else {
+		/* check if the bandwidth limit has been exceeded */
+		if (bw_estimate >= IAS_BW_UPPER_LIMIT) {
+			ias_bw_sample_pmc(PMC_LLC_MISSES);
+			bw_punish_triggered = true;
+		} else if (bw_estimate < IAS_BW_LOWER_LIMIT) {
+			ias_bw_relax();
+		}
 	}
 }

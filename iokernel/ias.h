@@ -5,16 +5,18 @@
 #pragma once
 
 /* constant tunables */
-#define IAS_NPROC		32  /* the maximum number of processes */
-#define IAS_BW_UPPER_LIMIT	0.09 /* the upper limit on mem bandwidth */
-#define IAS_BW_LOWER_LIMIT	0.08 /* the lower limit on mem bandwidth */
-#define IAS_BW_POLL_US		5   /* time to poll memory bandwidth usage */
-#define IAS_HT_POLL_US		5   /* time to poll for HT contention */
-#define IAS_PRIORITY_WEIGHT	10000.0 /* how heavily to weigh LC priority */
-#define IAS_HT_WEIGHT		100.0 /* how heavily to weigh the HT score */
-#define IAS_LOC_EVICTED_US	100 /* us before all cache is evicted */
-#define IAS_EWMA_FACTOR		0.001 /* the moving average update rate */
-#define IAS_DEBUG_PRINT_US	3000000 /* time to print out debug info */
+#define IAS_NPROC		         32  /* the maximum number of processes */
+#define IAS_BW_UPPER_LIMIT	         0.09 /* the upper limit on mem bandwidth */
+#define IAS_BW_LOWER_LIMIT	         0.08 /* the lower limit on mem bandwidth */
+#define IAS_BW_POLL_US		         5   /* time to poll memory bandwidth usage */
+#define IAS_HT_POLL_US		         5   /* time to poll for HT contention */
+#define IAS_PRIORITY_WEIGHT	         10000.0 /* how heavily to weigh LC priority */
+#define IAS_HT_WEIGHT		         100.0 /* how heavily to weigh the HT score */
+#define IAS_LOC_EVICTED_US	         100 /* us before all cache is evicted */
+#define IAS_EWMA_FACTOR		         0.001 /* the moving average update rate */
+#define IAS_DEBUG_PRINT_US	         3000000 /* time to print out debug info */
+#define IAS_KICK_OUT_THREAD_LIMIT_FACTOR 0.25 /* used to calc the number of victims */
+#define IAS_KICK_OUT_BW_FACTOR           0.01 /* used to calc the number of victims */
 
 struct ias_data {
 	struct proc		*p;
