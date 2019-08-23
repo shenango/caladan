@@ -27,9 +27,6 @@ static void dp_clients_add_client(struct proc *p)
 {
 	int ret;
 
-	p->kill = false;
-	dp.clients[dp.nr_clients++] = p;
-
 	if (!p->has_directpath) {
 		ret = rte_hash_add_key_data(dp.mac_to_proc, &p->mac.addr[0], p);
 		if (ret < 0)
@@ -39,12 +36,17 @@ static void dp_clients_add_client(struct proc *p)
 		if (dp.is_mlx) {
 			p->mr = mlx_reg_mem(dp.port, p->region.base, p->region.len, &p->lkey);
 			if (!p->mr)
-				log_err("dp clients: failed to register memory with MLX nic");
+				log_err("dp_clients: failed to register memory with MLX nic");
 		}
 #endif
 	}
 
-	sched_attach_proc(p);
+	if (!sched_attach_proc(p)) {
+		p->kill = false;
+		dp.clients[dp.nr_clients++] = p;
+	} else {
+		log_err("dp_clients: failed to attach proc.");
+	}
 }
 
 void proc_release(struct ref *r)
