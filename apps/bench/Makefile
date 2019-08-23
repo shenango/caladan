@@ -35,6 +35,9 @@ flash_client_obj = $(flash_client_src:.cc=.o)
 netbench_src = netbench.cc
 netbench_obj = $(netbench_src:.cc=.o)
 
+storage_bench_src = storage_bench.cc
+storage_bench_obj = $(storage_bench_src:.cc=.o)
+
 netbench2_src = netbench2.cc
 netbench2_obj = $(netbench2_src:.cc=.o)
 
@@ -56,7 +59,7 @@ INC += -I$(ROOT_PATH)/bindings/cc
 # must be first
 all: tbench callibrate stress efficiency efficiency_linux \
      netbench netbench2 netbench_udp netbench_linux netperf linux_mech_bench \
-     stress_linux memcached_router flash_client
+     stress_linux memcached_router flash_client storage_bench
 
 tbench: $(tbench_obj) $(librt_libs) $(RUNTIME_DEPS)
 	$(LDXX) -o $@ $(LDFLAGS) $(tbench_obj) $(librt_libs) $(RUNTIME_LIBS)
@@ -92,6 +95,10 @@ netbench: $(netbench_obj) $(fake_worker_obj) $(librt_libs) $(RUNTIME_DEPS)
 	$(LDXX) -o $@ $(LDFLAGS) $(fake_worker_obj) $(netbench_obj) \
 	$(librt_libs) $(RUNTIME_LIBS)
 
+storage_bench: $(storage_bench_obj) $(librt_libs) $(RUNTIME_DEPS)
+	$(LDXX) -o $@ $(LDFLAGS) $(storage_bench_obj) $(librt_libs) \
+	$(RUNTIME_LIBS)
+
 netbench2: $(netbench2_obj) $(fake_worker_obj) $(librt_libs) $(RUNTIME_DEPS)
 	$(LDXX) -o $@ $(LDFLAGS) $(fake_worker_obj) $(netbench2_obj) \
 	$(librt_libs) $(RUNTIME_LIBS)
@@ -114,7 +121,7 @@ linux_mech_bench: $(linux_mech_bench_obj) $(librt_libs)
 src = $(fake_worker_src) $(tbench_src) $(callibrate_src) $(memcached_router_src) $(rpclib_src)
 src += $(stress_src) $(efficiency_src) $(efficiency_linux_src) $(netbench_src) $(flash_client_src)
 src += $(netbench2_src) $(netbench_udp_src) $(netbench_linux_src) $(netperf_src)
-src += $(linux_mech_bench_src)
+src += $(linux_mech_bench_src) $(storage_bench_src)
 obj = $(src:.cc=.o)
 dep = $(obj:.o=.d)
 
@@ -133,4 +140,5 @@ endif
 clean:
 	rm -f $(obj) $(dep) tbench callibrate stress efficiency \
 	efficiency_linux netbench netbench2 netbench_udp netbench_linux \
-	netperf linux_mech_bench stress_linux memcached_router flash_client
+	netperf linux_mech_bench stress_linux memcached_router flash_client \
+	storage_bench

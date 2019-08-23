@@ -12,3 +12,4 @@ netperf
 linux_mech_bench
 memcached_router
 flash_client
+storage_bench
