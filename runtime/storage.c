@@ -4,6 +4,10 @@
 
 #include <runtime/storage.h>
 
+
+uint32_t block_size;
+uint64_t num_blocks;
+
 #ifdef DIRECT_STORAGE
 #include <stdio.h>
 #include <base/hash.h>
@@ -22,8 +26,6 @@ bool cfg_storage_enabled;
 
 static struct spdk_nvme_ctrlr *controller;
 static struct spdk_nvme_ns *spdk_namespace;
-static uint32_t block_size;
-static uint64_t num_blocks;
 
 static __thread struct thread **cb_ths;
 static __thread unsigned int nrcb_ths;
@@ -377,28 +379,6 @@ done_np:
 	return rc;
 }
 
-/*
- * storage_block_size - get the size of a block from the nvme device
- */
-uint32_t storage_block_size(void)
-{
-	if (!cfg_storage_enabled)
-		return 0;
-
-	return block_size;
-}
-
-/*
- * storage_num_blocks - gets the number of blocks from the nvme device
- */
-uint64_t storage_num_blocks(void)
-{
-	if (!cfg_storage_enabled)
-		return 0;
-
-	return num_blocks;
-}
-
 #else
 int storage_write(const void *payload, uint64_t lba, uint32_t lba_count)
 {
@@ -408,16 +388,6 @@ int storage_write(const void *payload, uint64_t lba, uint32_t lba_count)
 int storage_read(void *dest, uint64_t lba, uint32_t lba_count)
 {
 	return -ENODEV;
-}
-
-uint32_t storage_block_size(void)
-{
-	return 0;
-}
-
-uint64_t storage_num_blocks(void)
-{
-	return 0;
 }
 
 int storage_init(void)

@@ -4,6 +4,8 @@
 #![feature(asm)]
 #![feature(integer_atomics)]
 #![feature(thread_local)]
+#![feature(new_uninit)]
+#![feature(get_mut_unchecked)]
 
 extern crate byteorder;
 
@@ -20,6 +22,7 @@ pub mod ffi {
 }
 
 mod asm;
+pub mod storage;
 pub mod tcp;
 pub mod thread;
 pub mod udp;
@@ -93,19 +96,20 @@ where
 }
 
 pub struct WaitGroup {
-    inner: Arc<UnsafeCell<ffi::waitgroup>>,
+    inner: Arc<ffi::waitgroup>,
 }
 impl WaitGroup {
     pub fn new() -> Self {
-        let inner = Arc::new(UnsafeCell::new(unsafe { std::mem::uninitialized() }));
-        unsafe { ffi::waitgroup_init(inner.get() as *mut _) };
+        let mut inner_uninit = Arc::new_uninit();
+        unsafe { ffi::waitgroup_init(Arc::get_mut_unchecked(&mut inner_uninit).as_mut_ptr()) };
+        let inner = unsafe { inner_uninit.assume_init() };
         Self { inner }
     }
     pub fn add(&self, count: i32) {
-        unsafe { ffi::waitgroup_add(self.inner.get() as *const _ as *mut _, count as c_int) }
+        unsafe { ffi::waitgroup_add(&*self.inner as *const _ as *mut _, count as c_int) }
     }
     pub fn wait(&self) {
-        unsafe { ffi::waitgroup_wait(self.inner.get() as *const _ as *mut _) }
+        unsafe { ffi::waitgroup_wait(&*self.inner as *const _ as *mut _) }
     }
     pub fn done(&self) {
         self.add(-1)

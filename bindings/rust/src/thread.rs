@@ -77,7 +77,7 @@ struct JoinData<T: Send + 'static> {
     lock: SpinLock,
     done: bool,
     waiter: *mut ffi::thread_t,
-    data: Option<Result<T, Box<Any + Send + 'static>>>,
+    data: Option<Result<T, Box<dyn Any + Send + 'static>>>,
 }
 
 struct StackBase<T, F>
@@ -94,7 +94,7 @@ pub struct JoinHandle<T: Send + 'static> {
     join_data: *const UnsafeCell<JoinData<T>>,
 }
 impl<T: Send + 'static> JoinHandle<T> {
-    pub fn join(mut self) -> Result<T, Box<Any + Send + 'static>> {
+    pub fn join(mut self) -> Result<T, Box<dyn Any + Send + 'static>> {
         unsafe {
             let join_data = (&*self.join_data).get();
             self.join_data = ptr::null();

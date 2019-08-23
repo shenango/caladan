@@ -11,6 +11,7 @@
 #include <runtime/preempt.h>
 #include <runtime/runtime.h>
 #include <runtime/smalloc.h>
+#include <runtime/storage.h>
 #include <runtime/sync.h>
 #include <runtime/tcp.h>
 #include <runtime/thread.h>
