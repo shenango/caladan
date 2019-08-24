@@ -616,6 +616,50 @@ static inline bool softirq_work_soon(struct kthread *k, uint64_t now)
 		timer_available_soon(k, now);
 }
 
+
+/*
+ * Preemption
+ */
+
+extern volatile __thread bool preempt_cede;
+extern volatile __thread bool preempt_yield;
+
+extern void thread_cede(void);
+
+/**
+ * clear_preempt_yield - clears flag indicating a pending yield
+ */
+static inline void clear_preempt_yield(void)
+{
+	preempt_yield = false;
+}
+
+/**
+ * preempt_yield_needed - is a yield request pending?
+ */
+static inline bool preempt_yield_needed(void)
+{
+	return preempt_yield;
+}
+
+/**
+ * clear_preempt_cede - clears flag indicating a pending cede
+ */
+static inline void clear_preempt_cede(void)
+{
+	clear_preempt_yield();
+	preempt_cede = false;
+}
+
+/**
+ * preempt_cede_needed - is a cede request pending?
+ */
+static inline bool preempt_cede_needed(void)
+{
+	return preempt_cede;
+}
+
+
 /*
  * Init
  */
@@ -659,5 +703,4 @@ extern int cfg_load(const char *path);
 /* runtime entry helpers */
 extern void sched_start(void) __noreturn;
 extern int thread_spawn_main(thread_fn_t fn, void *arg);
-extern void thread_cede(void);
 extern void join_kthread(struct kthread *k);
