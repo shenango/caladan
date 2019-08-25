@@ -43,6 +43,7 @@
 
 extern "C" {
 #include "runtime/runtime.h"
+#include "runtime/thread.h"
 }
 
 #include <float.h>
@@ -120,7 +121,7 @@ extern "C" {
 #define MAX(x, y) ((x) > (y) ? (x) : (y))
 #endif
 
-#define OPS_BATCH (1 << 10)
+#define OPS_BATCH (1 << 20)
 
 static double **a, **b, **c;
 static const char *label[4] = {"Copy", "Scale", "Add", "Triad"};
@@ -145,6 +146,7 @@ void *copyProc(void *arg) {
 			if (local_ops == OPS_BATCH) {
 				local_ops = 0;
 				ops[ops_idx] += ops_factor[0] * OPS_BATCH;
+				thread_yield();
 			}
 		}
 	}
@@ -166,6 +168,7 @@ void *scaleProc(void *arg) {
 			if (local_ops == OPS_BATCH) {
 				local_ops = 0;
 				ops[ops_idx] += ops_factor[1] * OPS_BATCH;
+				thread_yield();
 			}
 		}
 	}
@@ -188,6 +191,7 @@ void *addProc(void *arg) {
 			if (local_ops == OPS_BATCH) {
 				local_ops = 0;
 				ops[ops_idx] += ops_factor[2] * OPS_BATCH;
+				thread_yield();
 			}
 		}
 	}
@@ -210,6 +214,7 @@ void *triadProc(void *arg) {
 			if (local_ops == OPS_BATCH) {
 				local_ops = 0;
 				ops[ops_idx] += ops_factor[3] * OPS_BATCH;
+				thread_yield();
 			}
 		}
 	}
@@ -236,6 +241,7 @@ void _main(void *_argv) {
 
 	N = atoi(argv[1]);
 	int num_threads = atoi(argv[2]);
+	
 	int spec_idx = -1;
 	for (int i = 0; i < 4; i++) {
 		if (!strcmp(argv[3], label[i])) {
@@ -262,7 +268,7 @@ void _main(void *_argv) {
 	a = (double **)malloc(sizeof(double *) * num_threads);
 	b = (double **)malloc(sizeof(double *) * num_threads);
 	c = (double **)malloc(sizeof(double *) * num_threads);
-
+	
 	for (int i = 0; i < num_threads; i++) {
 		a[i] = (double *)aligned_malloc(sizeof(double) * N);
 		b[i] = (double *)aligned_malloc(sizeof(double) * N);
