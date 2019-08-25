@@ -230,7 +230,6 @@ static unsigned int ias_choose_core(struct ias_data *sd, bool lc)
 static int ias_add_kthread(struct proc *p)
 {
 	struct ias_data *sd = (struct ias_data *)p->policy_data;
-	bool is_lc = sd->threads_active < sd->threads_guaranteed;
 	unsigned int core;
 
 	/* check if we're constrained by the thread limit */
@@ -238,7 +237,7 @@ static int ias_add_kthread(struct proc *p)
 		return -ENOENT;
 
 	/* choose the best core to run the process on */
-	core = ias_choose_core(sd, is_lc);
+	core = ias_choose_core(sd, is_lc(sd));
 	if (core == NCPU)
 		return -ENOENT;
 
