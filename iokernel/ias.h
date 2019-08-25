@@ -84,7 +84,10 @@ extern int num_sched_allowed_cores;
  */
 static inline void ias_ewma(float *curp, float newv, float factor)
 {
-	*curp = newv * factor + *curp * (1 - factor);
+       if ((*curp) < 1E-3)
+               *curp = newv;
+       else
+               *curp = newv * factor + *curp * (1 - factor);
 }
 
 extern int ias_idle_on_core(unsigned int core);
