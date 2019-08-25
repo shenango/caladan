@@ -184,21 +184,14 @@ static float ias_calculate_score(struct ias_data *sd, unsigned int core)
 {
 	float score, ht_score;
 	unsigned int sib;
-	bool sib_has_prio;
 
-	/* determine if the sibling has priority over this core */
 	sib = sched_siblings[core];
-	sib_has_prio = cores[sib] && sd != cores[sib] &&
-		       ias_has_priority(cores[sib], core);
 
 	/* try to estimate how well the core and process pair together */
 	score = ias_has_priority(sd, core) ? IAS_PRIORITY_WEIGHT : 0.0;
 	score += ias_loc_score(sd, core, now_us);
-
-	if (sib_has_prio)
-		ht_score = ias_ht_pairing_score(cores[sib], sd);
-	else
-		ht_score = ias_ht_pairing_score(sd, cores[sib]);
+	ht_score = ias_ht_pairing_score(cores[core], sd, cores[sib],
+					ias_has_priority(sd, core));
 
 	return score + IAS_HT_WEIGHT * ht_score;
 }

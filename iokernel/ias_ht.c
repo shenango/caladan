@@ -13,69 +13,63 @@
 
 #define WARMUP_US 10
 
+static void ias_ht_poll_one(struct ias_data *sd, struct thread *th)
+{
+	float ipc, us, run_us;
+	uint64_t last_tsc, last_instr, cur_tsc, cur_instr;
+	int core, sib;
+
+	core = th->core;
+	sib = sched_siblings[core];
+
+	/* calculate IPC and update counters */
+	last_tsc = sd->ht_last_tsc[core];
+	last_instr = sd->ht_last_instr[core];
+	cur_tsc = th->q_ptrs->tsc;
+	cur_instr = th->q_ptrs->instr;
+	sd->ht_last_tsc[core] = cur_tsc;
+	sd->ht_last_instr[core] = cur_instr;
+	if (cur_tsc == last_tsc)
+		return;
+	if (ias_gen[core] != sd->ht_last_gen[core]) {
+		sd->ht_last_gen[core] = ias_gen[core];
+		return;
+	}
+
+	ipc = (float)(cur_instr - last_instr) / (float)(cur_tsc - last_tsc);
+	if (ipc > 5.0 || ipc == 0)
+		return; /* bad sample */
+	us = (float)(cur_tsc - last_tsc) / (float)cycles_per_us;
+
+	/* update unpaired IPC metrics */
+	run_us = (float)(cur_tsc - cores[core]->ht_start_running_tsc[core]) /
+		 cycles_per_us;
+	if (run_us - us < WARMUP_US)
+		return;
+	if (!cores[sib]) {
+		ias_ewma(&sd->ht_unpaired_ipc, ipc,
+			 MIN(100.0, us) * IAS_EWMA_FACTOR);
+		return;
+	}
+
+	/* update paired IPC metrics */
+	run_us = (float)(cur_tsc - cores[sib]->ht_start_running_tsc[sib]) /
+		 cycles_per_us;
+	if (run_us - us < WARMUP_US)
+		return;
+	ias_ewma(&sd->ht_pairing_ipc[cores[sib]->idx], ipc,
+		 MIN(100.0, us) * IAS_EWMA_FACTOR);
+}
+
 void ias_ht_poll(uint64_t now_us)
 {
-	struct thread *th;
 	struct ias_data *sd, *sd2;
-	unsigned int core, sib;
 	int i;
 
 	/* update the IPC estimation for each core */
 	ias_for_each_proc(sd) {
-		for (i = 0; i < sd->p->active_thread_count; i++) {
-			double ipc, us, cut_us;
-			uint64_t last_tsc, last_instr, cur_tsc, cur_instr;
-
-			th = sd->p->active_threads[i];
-			if (!th->active)
-				continue;
-
-			core = th->core;
-			sib = sched_siblings[core];
-
-			/* calculate IPC and update counters */
-			last_tsc = sd->ht_last_tsc[core];
-			last_instr = sd->ht_last_instr[core];
-			cur_tsc = th->q_ptrs->tsc;
-			cur_instr = th->q_ptrs->instr;
-			sd->ht_last_tsc[core] = cur_tsc;
-			sd->ht_last_instr[core] = cur_instr;
-			if (cur_tsc == last_tsc)
-				continue;
-			if (ias_gen[core] != sd->ht_last_gen[core]) {
-				sd->ht_last_gen[core] = ias_gen[core];
-				continue;
-			}
-
-			ipc = (double)(cur_instr - last_instr) /
-			      (double)(cur_tsc - last_tsc);
-
-			if (ipc > 5.0 || ipc == 0)
-				continue; /* bad sample */
-
-			double runned_us =
-				MAX(0, (double)cur_tsc - cores[core]->ht_start_running_tsc[core]) /
-				cycles_per_us;
-
-			/* update IPC metrics */
-			us = cut_us = (double)(cur_tsc - last_tsc) / (double)cycles_per_us;
-			if (us > 100.0)
-				cut_us = 100.0;
-			if (!cores[sib]) {
-				if (runned_us - us >= WARMUP_US) {
-					ias_ewma(&sd->ht_unpaired_ipc, ipc,
-						 cut_us * IAS_EWMA_FACTOR);
-				}
-			} else {
-				double sib_runned_us =
-					MAX(0, (double)cur_tsc - cores[sib]->ht_start_running_tsc[sib]) /
-					cycles_per_us;
-				if (runned_us - us >= WARMUP_US && sib_runned_us - us >= WARMUP_US) {
-					ias_ewma(&sd->ht_pairing_ipc[cores[sib]->idx],
-						 ipc, cut_us * IAS_EWMA_FACTOR);
-				}
-			}
-		}
+		for (i = 0; i < sd->p->active_thread_count; i++)
+			ias_ht_poll_one(sd, sd->p->active_threads[i]);
 	}
 
 	/* refresh the maximum IPC for each process */
@@ -89,15 +83,14 @@ void ias_ht_poll(uint64_t now_us)
 	}
 }
 
-void ias_ht_random_kick()
+void ias_ht_random_kick(void)
 {
 	static int rr_cnt = 0;
 	int cnt = 0, core;
 	bitmap_for_each_set(sched_allowed_cores, NCPU, core) {
 		struct ias_data *sd = cores[core];
 		if (cnt == rr_cnt && sd) {
-			bool is_lc = sd->threads_active < sd->threads_guaranteed;
-			if (!is_lc)
+			if (sd->threads_active > sd->threads_guaranteed)
 				ias_idle_on_core(core);
 			break;
 		}

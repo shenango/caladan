@@ -127,23 +127,36 @@ static inline float ias_loc_score(struct ias_data *sd, unsigned int core,
 
 /**
  * ias_ht_pairing_score - estimates how effective a process pairing is
- * @lc: the latency critical process
- * @be: the best effort process
+ * @prev: the current process running on the core (can be NULL)
+ * @next: the proposed process to run on this core
+ * @sib: the sibling process on this core (can be NULL)
+ * @next_has_prio: does the next process have priority?
  *
  * Returns a pairing score, higher is better.
  */
-static inline float ias_ht_pairing_score(struct ias_data *lc,
-					 struct ias_data *be)
+static inline float ias_ht_pairing_score(struct ias_data *prev,
+					 struct ias_data *next,
+					 struct ias_data *sib,
+					 bool next_has_prio)
 {
-	if (!be)
+	if (!prev && !sib)
 		return 1.1;
-	if (lc->ht_max_ipc == 0.0)
+	if (!sib)
+		return 0.1;
+
+	if (next_has_prio) {
+		if (next->ht_max_ipc == 0.0)
+			return 1.0;
+		return next->ht_pairing_ipc[sib->idx] / next->ht_max_ipc;
+	}
+
+	if (sib->ht_max_ipc == 0.0)
 		return 1.0;
-	return lc->ht_pairing_ipc[be->idx] / lc->ht_max_ipc;
+	return sib->ht_pairing_ipc[next->idx] / sib->ht_max_ipc;
 }
 
 extern void ias_ht_poll(uint64_t now_us);
-extern void ias_ht_random_kick();
+extern void ias_ht_random_kick(void);
 
 
 /*
