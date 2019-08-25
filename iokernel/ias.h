@@ -66,6 +66,7 @@ static inline bool ias_has_priority(struct ias_data *sd, unsigned int core)
 
 extern struct list_head all_procs;
 extern struct ias_data *cores[NCPU];
+extern uint64_t cores_idle_tsc[NCPU];
 extern uint64_t ias_gen[NCPU];
 extern int num_sched_allowed_cores;
 

@@ -15,7 +15,7 @@
 
 static void ias_ht_poll_one(struct ias_data *sd, struct thread *th)
 {
-	float ipc, us, run_us;
+	float ipc, us, run_us, idle_us;
 	uint64_t last_tsc, last_instr, cur_tsc, cur_instr;
 	int core, sib;
 
@@ -44,8 +44,10 @@ static void ias_ht_poll_one(struct ias_data *sd, struct thread *th)
 	/* update unpaired IPC metrics */
 	run_us = ((float)cur_tsc - sd->ht_start_running_tsc[core]) /
 		 cycles_per_us;
-	if (run_us - us < WARMUP_US)
-		return;
+	idle_us = ((float)cur_tsc - cores_idle_tsc[sib]) /
+		cycles_per_us;
+	if (run_us - us < WARMUP_US || idle_us - us < WARMUP_US)
+                return;
 	if (!cores[sib]) {
 		ias_ewma(&sd->ht_unpaired_ipc, ipc,
 			 MIN(100.0, us) * IAS_EWMA_FACTOR);

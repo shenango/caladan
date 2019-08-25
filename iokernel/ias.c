@@ -27,6 +27,8 @@ static struct ias_data *ias_procs[IAS_NPROC];
 static unsigned int ias_procs_nr;
 /* the current process running on each core */
 struct ias_data *cores[NCPU];
+/* when does the core gets idled */
+uint64_t cores_idle_tsc[NCPU];
 /* the generation number for reschedules on each core */
 uint64_t ias_gen[NCPU];
 /* the current time in microseconds */
@@ -175,6 +177,7 @@ int ias_idle_on_core(unsigned int core)
 
 	ias_cleanup_core(core);
 	cores[core] = NULL;
+	cores_idle_tsc[core] = rdtsc();
 	ias_gen[core]++;
 	bitmap_set(ias_idle_cores, core);
 	return 0;
