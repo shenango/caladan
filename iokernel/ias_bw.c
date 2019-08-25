@@ -82,9 +82,6 @@ static struct ias_data *ias_bw_choose_victim(void)
 		float estimated_l3miss = (float)sd->bw_llc_misses /
 					 (float)sd->ok_bw_threads_monitored *
 					 (float)sd->threads_active;
-
-		if (sd->bw_threads_monitored == 0)
-			continue;
 		if (sd->threads_limit == 0 ||
 		    sd->threads_limit <= sd->threads_guaranteed)
 			continue;
@@ -97,14 +94,14 @@ static struct ias_data *ias_bw_choose_victim(void)
 	return victim;
 }
 
-static inline void ias_kick_core(int core)
+static inline void ias_throttle_kthread_on_core(int core, uint64_t now_tsc)
 {
-	struct ias_data *sd = cores[core];
-	sd->threads_limit = MAX(0,
-				MIN(sd->threads_limit - 1,
-				    sd->threads_active - 1));
-	if (ias_add_kthread_on_core(core))
-		ias_idle_on_core(core);
+        struct ias_data *sd = cores[core];
+        sd->threads_limit = MAX(0,
+                                MIN(sd->threads_limit - 1,
+                                    sd->threads_active - 1));
+        if (ias_add_kthread_on_core(core, now_tsc))
+                ias_idle_on_core(core);
 }
 
 static int ias_bw_punish(void)
@@ -120,25 +117,24 @@ static int ias_bw_punish(void)
 	ias_count_bw_punish++;
 
 	int kick_cnt = 0;
-	int kick_thresh = IAS_KICK_OUT_THREAD_LIMIT_FACTOR * sd->threads_limit +
-		(ias_bw_estimate - IAS_BW_UPPER_LIMIT) / IAS_KICK_OUT_BW_FACTOR;
+	int kick_thresh = IAS_KICK_OUT_FACTOR * sd->threads_active;
 	int sibling;
 
 	// TODO: actually we need to spread kick_thresh among multiple sds
 	// rather than a single sd, for example when all sds are single-threaded.
+	uint64_t now_tsc = rdtsc();
 	sched_for_each_allowed_core(core, tmp) {
 		if (cores[core] == sd) {
-			ias_kick_core(core);
+		        ias_throttle_kthread_on_core(core, now_tsc);
 			kick_cnt++;
+			sibling = sched_siblings[core];
+			if (cores[sibling] == sd) {
+				kick_cnt++;
+				ias_throttle_kthread_on_core(sibling, now_tsc);
+			}
 		}
-		sibling = sched_siblings[core];
-		if (cores[sibling] == sd) {
-			ias_kick_core(sibling);
-			kick_cnt++;
-		}
-		if (kick_cnt >= kick_thresh) {
+		if (kick_cnt >= kick_thresh)
 			break;
-		}
 	}
 	return 0;
 }

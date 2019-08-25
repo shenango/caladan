@@ -4,6 +4,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <float.h>
 
 #include <base/stddef.h>
 #include <base/log.h>
@@ -13,7 +14,7 @@
 #include "ksched.h"
 #include "ias.h"
 
-#define IAS_DEBUG 1
+// #define IAS_DEBUG 1
 
 /* a list of all processes */
 LIST_HEAD(all_procs);
@@ -33,7 +34,6 @@ uint64_t cores_idle_tsc[NCPU];
 uint64_t ias_gen[NCPU];
 /* the current time in microseconds */
 static uint64_t now_us;
-int num_sched_allowed_cores;
 
 #ifdef IAS_DEBUG
 int owners[NCPU];
@@ -187,14 +187,30 @@ static float ias_calculate_score(struct ias_data *sd, unsigned int core)
 {
 	float score, ht_score;
 	unsigned int sib;
+	bool sib_has_prio;
 
+	/* occasionally we choose a random pairing */
+	static int rr_cnt = 0;
+	if (rr_cnt++ == IAS_HT_RANDOM_PAIRING_CNT) {
+		rr_cnt = 0;
+		return FLT_MAX;
+	}
+	
+	/* determine if the sibling has priority over this core */
 	sib = sched_siblings[core];
+	sib_has_prio = cores[sib] && sd != cores[sib] &&
+		       ias_has_priority(cores[sib], core);
 
 	/* try to estimate how well the core and process pair together */
 	score = ias_has_priority(sd, core) ? IAS_PRIORITY_WEIGHT : 0.0;
 	score += ias_loc_score(sd, core, now_us);
-	ht_score = ias_ht_pairing_score(cores[core], sd, cores[sib],
-					ias_has_priority(sd, core));
+
+	if (sib_has_prio)
+		ht_score = ias_ht_pairing_score(cores[sib], sd);
+	else
+		ht_score = ias_ht_pairing_score(sd, cores[sib]);
+	/* encourage to use a full HT pair when the IPC degradation is acceptable */
+	ht_score += (cores[sib] != NULL) ? IAS_HT_MAX_IPC_DEGRADE_RATIO : 0;
 
 	return score + IAS_HT_WEIGHT * ht_score;
 }
@@ -275,9 +291,9 @@ static void ias_notify_congested(struct proc *p, bitmap_ptr_t threads,
 	sd->is_congested = true;
 }
 
-static struct ias_data *ias_choose_kthread(unsigned int core)
+static struct ias_data *ias_choose_kthread(unsigned int core, uint64_t now_tsc)
 {
-	struct ias_data *sd, *best_sd = NULL;
+	struct ias_data *sd, *sib_sd, *best_sd = NULL;
 	float score, best_score = 0;
 
 	ias_for_each_proc(sd) {
@@ -286,6 +302,10 @@ static struct ias_data *ias_choose_kthread(unsigned int core)
 			continue;
 		/* check if we're constrained by the thread limit */
 		if (sd->threads_active >= sd->threads_limit)
+			continue;
+		/* check if the sd has been banned by its sibling */
+		sib_sd = cores[sched_siblings[core]];
+		if (is_banned(sd, sib_sd, now_tsc))
 			continue;
 
 		/* try to estimate how good this core is for the process */
@@ -302,15 +322,16 @@ static struct ias_data *ias_choose_kthread(unsigned int core)
 /**
  * ias_add_kthread_on_core - pick a process and wake it on a core
  * @core: the core to schedule on
+ * @now_tsc: the current tsc
  *
  * Returns 0 if successful.
  */
-int ias_add_kthread_on_core(unsigned int core)
+int ias_add_kthread_on_core(unsigned int core, uint64_t now_tsc)
 {
 	struct ias_data *sd;
 	int ret;
 
-	sd = ias_choose_kthread(core);
+	sd = ias_choose_kthread(core, now_tsc);
 	if (unlikely(!sd))
 		return -ENOENT;
 
@@ -363,19 +384,13 @@ static void ias_sched_poll(uint64_t now, int idle_cnt, bitmap_ptr_t idle)
 #ifdef IAS_DEBUG
 	static uint64_t debug_ts = 0;
 #endif
-	static uint64_t bw_ts = 0, ht_ts = 0, random_kick_ts = 0;
+	static uint64_t bw_ts = 0, ht_ts = 0;
 		
 	unsigned int core;
 
 	now_us = now;
 
 	/* handle timeouts for various subcontrollers */
-#ifdef IAS_DEBUG
-	if (now - debug_ts >= IAS_DEBUG_PRINT_US) {
-		debug_ts = now;
-		ias_print_debug_info();
-	}
-#endif
 	if (now - bw_ts >= IAS_BW_POLL_US) {
 		bw_ts = now;
 		ias_bw_poll(now);
@@ -384,22 +399,52 @@ static void ias_sched_poll(uint64_t now, int idle_cnt, bitmap_ptr_t idle)
 		ht_ts = now;
 		ias_ht_poll(now);
 	}
-
-	if (now - random_kick_ts >= IAS_HT_RANDOM_KICK_US) {
-		random_kick_ts = now;
-		ias_ht_random_kick();
+#ifdef IAS_DEBUG
+	if (now - debug_ts >= IAS_DEBUG_PRINT_US) {
+		debug_ts = now;
+		ias_print_debug_info();
 	}
+#endif
 	
 	/* mark cores idle */
 	if (idle_cnt != 0)
 		bitmap_or(ias_idle_cores, ias_idle_cores, idle, NCPU);
 
 	/* try to allocate any idle cores */
+	uint64_t now_tsc = rdtsc();
 	bitmap_for_each_set(ias_idle_cores, NCPU, core) {
 		if (cores[core] != NULL)
 			cores[core]->is_congested = false;
 		ias_cleanup_core(core);
-		ias_add_kthread_on_core(core);
+		ias_add_kthread_on_core(core, now_tsc);
+	}
+}
+
+void ias_discover_better_pairing(struct ias_data *sd, int cur_core,
+				 struct ias_data *cur_sib_sd, uint64_t now_tsc) {
+	struct ias_data *new_sib_sd;
+	float score, best_score = 0;
+	unsigned int core, best_core = NCPU;
+	
+	bitmap_for_each_set(ias_idle_cores, NCPU, core) {
+		if (cores[core])
+			continue;
+		new_sib_sd = cores[sched_siblings[core]];
+		/* cannot use a banned pairing */
+		if (is_banned(sd, new_sib_sd, now_tsc))
+			continue;
+		score = ias_calculate_score(sd, core);
+		if (score > best_score) {
+			best_score = score;
+			best_core = core;
+		}
+	}
+	if (best_core != NCPU &&
+	    cores[sched_siblings[best_core]] != cur_sib_sd) {
+		/* do migration */
+		if (ias_add_kthread_on_core(cur_core, now_tsc))
+			ias_idle_on_core(cur_core);
+		ias_run_kthread_on_core(sd->p, best_core);
 	}
 }
 
@@ -418,12 +463,8 @@ struct sched_ops ias_ops = {
  */
 int ias_init(void)
 {
-	int tmp;
 	bitmap_init(ias_claimed_cores, true, NCPU);
 	bitmap_xor(ias_claimed_cores, ias_claimed_cores, sched_allowed_cores,
 		   NCPU);
-	bitmap_for_each_set(sched_allowed_cores, NCPU, tmp) {
-		num_sched_allowed_cores++;
-	}
 	return 0;
 }

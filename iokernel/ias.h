@@ -14,10 +14,11 @@
 #define IAS_HT_WEIGHT		         100.0 /* how heavily to weigh the HT score */
 #define IAS_LOC_EVICTED_US	         100 /* us before all cache is evicted */
 #define IAS_EWMA_FACTOR		         0.001 /* the moving average update rate */
-#define IAS_DEBUG_PRINT_US	         3000000 /* time to print out debug info */
-#define IAS_HT_RANDOM_KICK_US            200 /* time to randomly kick out a BE */
-#define IAS_KICK_OUT_THREAD_LIMIT_FACTOR 0.25 /* used to calc the number of victims */
-#define IAS_KICK_OUT_BW_FACTOR           0.01 /* used to calc the number of victims */
+#define IAS_DEBUG_PRINT_US	         100000 /* time to print out debug info */
+#define IAS_KICK_OUT_FACTOR              0.2 /* used to calc the number of victims */
+#define IAS_HT_MAX_IPC_DEGRADE_RATIO     0.3 /* used to judge the bad pairing */
+#define IAS_BAN_DURATION_US              500 /* the duration of banning a bad pairing */
+#define IAS_HT_RANDOM_PAIRING_CNT        1000 /* used to form a pairing randomly */
 
 struct ias_data {
 	struct proc		*p;
@@ -41,6 +42,7 @@ struct ias_data {
 	uint64_t		ht_last_tsc[NCPU];
 	uint64_t		ht_last_instr[NCPU];
 	uint64_t                ht_start_running_tsc[NCPU];
+	uint64_t                ht_last_banned_tsc[IAS_NPROC];
 	float			ht_pairing_ipc[IAS_NPROC];
 	float			ht_unpaired_ipc;
 	float			ht_max_ipc;
@@ -68,7 +70,6 @@ extern struct list_head all_procs;
 extern struct ias_data *cores[NCPU];
 extern uint64_t cores_idle_tsc[NCPU];
 extern uint64_t ias_gen[NCPU];
-extern int num_sched_allowed_cores;
 
 /**
  * ias_for_each_proc - iterates through all processes
@@ -85,14 +86,18 @@ extern int num_sched_allowed_cores;
  */
 static inline void ias_ewma(float *curp, float newv, float factor)
 {
-       if ((*curp) < 1E-3)
-               *curp = newv;
-       else
-               *curp = newv * factor + *curp * (1 - factor);
+	if ((*curp) < 1E-3)
+		*curp = newv;
+	else
+		*curp = newv * factor + *curp * (1 - factor);
 }
 
 extern int ias_idle_on_core(unsigned int core);
-extern int ias_add_kthread_on_core(unsigned int core);
+extern int ias_add_kthread_on_core(unsigned int core, uint64_t now_tsc);
+extern void ias_discover_better_pairing(struct ias_data *sd,
+				    int cur_core,
+				    struct ias_data *cur_sib_sd,
+				    uint64_t now_tsc);
 
 
 /*
@@ -136,37 +141,32 @@ static inline bool is_lc(struct ias_data *sd)
 
 /**
  * ias_ht_pairing_score - estimates how effective a process pairing is
- * @prev: the current process running on the core (can be NULL)
- * @next: the proposed process to run on this core
- * @sib: the sibling process on this core (can be NULL)
- * @next_has_prio: does the next process have priority?
+ * @lc: the latency critical process
+ * @be: the best effort process
  *
  * Returns a pairing score, higher is better.
  */
-static inline float ias_ht_pairing_score(struct ias_data *prev,
-					 struct ias_data *next,
-					 struct ias_data *sib,
-					 bool next_has_prio)
+static inline float ias_ht_pairing_score(struct ias_data *lc,
+					 struct ias_data *be)
 {
-	if (!prev && !sib)
-		return 1.1;
-	if (!sib)
-		return 0.1;
-
-	if (next_has_prio) {
-		if (next->ht_max_ipc == 0.0)
-			return 1.0;
-		return next->ht_pairing_ipc[sib->idx] / next->ht_max_ipc;
-	}
-
-	if (sib->ht_max_ipc == 0.0)
+	double cur_ipc =
+		be ? lc->ht_pairing_ipc[be->idx] : lc->ht_unpaired_ipc;
+	if (lc->ht_max_ipc == 0.0)
 		return 1.0;
-	return sib->ht_pairing_ipc[next->idx] / sib->ht_max_ipc;
+	if (cur_ipc < 1E-3)
+		return 1.0;
+	return cur_ipc / lc->ht_max_ipc;
+}
+
+static inline bool is_banned(struct ias_data *sd, struct ias_data *sib_sd,
+			     uint64_t now_tsc)
+{
+	return sib_sd &&
+		(now_tsc - sd->ht_last_banned_tsc[sib_sd->idx] <=
+		(uint64_t)cycles_per_us * IAS_BAN_DURATION_US);
 }
 
 extern void ias_ht_poll(uint64_t now_us);
-extern void ias_ht_random_kick(void);
-
 
 /*
  * Bandwidth (BW) subcontroller definitions
