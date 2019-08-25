@@ -47,6 +47,7 @@ struct ias_data {
 
 	/* memory bandwidth subcontroller */
 	int			bw_threads_monitored;
+	int			ok_bw_threads_monitored;
 	uint64_t		bw_llc_misses;
 };
 
@@ -120,6 +121,10 @@ static inline float ias_loc_score(struct ias_data *sd, unsigned int core,
 	return (float)(IAS_LOC_EVICTED_US - delta_us)  / IAS_LOC_EVICTED_US;
 }
 
+static inline bool is_lc(struct ias_data *sd)
+{
+        return sd && sd->threads_guaranteed;
+}
 
 /*
  * Hyperthread (HT) subcontroller definitions
@@ -172,4 +177,5 @@ extern void ias_bw_poll(uint64_t now_us);
 
 extern uint64_t ias_count_bw_punish;
 extern uint64_t ias_count_bw_relax;
-extern float	ias_count_bw_cur;
+extern float    ias_bw_estimate;
+extern bool     ias_bw_punish_triggered;

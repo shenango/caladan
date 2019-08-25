@@ -337,8 +337,9 @@ static void ias_print_debug_info(void)
 				 sd2->p->pid, sd->ht_pairing_ipc[sd2->idx]);
 		}
 	}
-	log_info("bw_cur %f bw_punish %ld bw_relax %ld",
-		 ias_count_bw_cur, ias_count_bw_punish, ias_count_bw_relax);
+	log_info("bw_cur %f bw_punish %ld bw_relax %ld bw_punish_triggered %d",
+		 ias_bw_estimate, ias_count_bw_punish, ias_count_bw_relax,
+		 ias_bw_punish_triggered);
 	memset(printed, 0, sizeof(printed));
 	bitmap_for_each_set(sched_allowed_cores, NCPU, core) {
 		if (printed[core]) {
