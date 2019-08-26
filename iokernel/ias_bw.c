@@ -117,7 +117,7 @@ static int ias_bw_punish(void)
 	ias_count_bw_punish++;
 
 	int kick_cnt = 0;
-	int kick_thresh = IAS_KICK_OUT_FACTOR * sd->threads_active;
+	int kick_thresh = MAX(1, IAS_KICK_OUT_FACTOR * sd->threads_active);
 	int sibling;
 
 	// TODO: actually we need to spread kick_thresh among multiple sds

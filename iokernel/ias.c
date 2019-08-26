@@ -14,7 +14,7 @@
 #include "ksched.h"
 #include "ias.h"
 
-// #define IAS_DEBUG 1
+#define IAS_DEBUG 1
 
 /* a list of all processes */
 LIST_HEAD(all_procs);
@@ -219,6 +219,7 @@ static unsigned int ias_choose_core(struct ias_data *sd, bool lc)
 {
 	unsigned int core, best_core = NCPU, tmp;
 	float score, best_score = 0;
+	uint64_t now_tsc = rdtsc();
 
 	sched_for_each_allowed_core(core, tmp) {
 		if (lc) {
@@ -232,6 +233,8 @@ static unsigned int ias_choose_core(struct ias_data *sd, bool lc)
 		} else {
 			/* BE tasks can only take idle cores */
 			if (cores[core] != NULL)
+				continue;
+			if (is_banned(sd, cores[sched_siblings[core]], now_tsc))
 				continue;
 		}
 
