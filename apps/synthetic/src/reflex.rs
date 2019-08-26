@@ -91,7 +91,7 @@ impl ReflexProtocol {
     pub fn set_request(&self, lba: u64, handle: usize, buf: &mut Vec<u8>) {
         PacketHeader {
             opcode: Opcode::Set as u16,
-            req_handle: handle,
+            req_handle: handle + 1,
             lba: lba,
             lba_count: self.sectors_per_rq,
             ..Default::default()
@@ -131,7 +131,7 @@ impl LoadgenProtocol for ReflexProtocol {
 
         PacketHeader {
             opcode: Opcode::Get as u16,
-            req_handle: i,
+            req_handle: i + 1,
             lba: lba,
             lba_count: self.sectors_per_rq,
             ..Default::default()
@@ -149,6 +149,6 @@ impl LoadgenProtocol for ReflexProtocol {
 
         // TODO: more error checking?
 
-        Ok(hdr.req_handle)
+        Ok(hdr.req_handle - 1)
     }
 }

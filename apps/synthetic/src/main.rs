@@ -347,6 +347,9 @@ fn gen_loadshift_experiment(
 }
 
 fn process_result(sched: &RequestSchedule, packets: &mut [Packet], wct_start: SystemTime) -> bool {
+    if packets.len() == 0 {
+        return true;
+    }
     let start_unix = wct_start + packets[0].target_start;
 
     // Discard the first X% of the packets.
