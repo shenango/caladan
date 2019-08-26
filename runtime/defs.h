@@ -285,7 +285,9 @@ static inline bool storage_available_completions(struct storage_q *q)
 
 static inline bool storage_pending_completions(struct storage_q *q)
 {
-	return cfg_storage_enabled && q->outstanding_reqs > 0;
+	extern unsigned long device_latency_us;
+	return cfg_storage_enabled && q->outstanding_reqs > 0 &&
+	       device_latency_us <= 10;
 }
 
 extern int storage_proc_completions(struct storage_q *q,

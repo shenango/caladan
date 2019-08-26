@@ -11,9 +11,11 @@ extern "C" {
 
 #include <algorithm>
 #include <chrono>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <random>
+#include <sstream>
 
 namespace {
 
@@ -26,6 +28,8 @@ int threads;
 size_t block_count;
 size_t pct_set;
 double total_block_count = 547002288.0;
+size_t us_per_sample;
+size_t nsamples;
 
 // The maximum lateness to tolerate before dropping egress samples.
 constexpr uint64_t kMaxCatchUpUS = 5;
@@ -36,6 +40,26 @@ struct work_unit {
   bool is_set;
   double duration_us;
 };
+
+struct uptime {
+  uint64_t idle;
+  uint64_t busy;
+};
+
+uptime ReadUptime() {
+    std::ifstream file("/proc/stat");
+    std::string line;
+    std::getline(file, line);
+    std::istringstream ss(line);
+    std::string tmp;
+    uint64_t user, nice, system, idle, iowait, irq, softirq, steal, guest,
+             guest_nice;
+    ss >> tmp >> user >> nice >> system >> idle >> iowait >> irq >> softirq
+       >> steal >> guest >> guest_nice;
+    return {idle + iowait,
+                user + nice + system + irq + softirq + steal};
+}
+
 
 template <class Arrival, class Service>
 std::vector<work_unit> GenerateWork(Arrival a, Service s, double cur_us,
@@ -48,6 +72,7 @@ std::vector<work_unit> GenerateWork(Arrival a, Service s, double cur_us,
   }
   return w;
 }
+
 
 std::vector<work_unit> ClientWorker(
     rt::WaitGroup *starter, std::function<std::vector<work_unit>()> wf) {
@@ -87,6 +112,14 @@ std::vector<work_unit> ClientWorker(
       int ret;
       unsigned char dat[block_count * 512];
 
+      auto now = steady_clock::now();
+
+      if (duration_cast<sec>(now - expstart).count() - w[i].start_us >
+          kMaxCatchUpUS) {
+        wg.Done();
+        return;
+      }
+
       if (w[i].is_set) {
         ret = storage_write(dat, w[i].lba, block_count);
       } else {
@@ -109,7 +142,7 @@ std::vector<work_unit> ClientWorker(
 }
 
 std::vector<work_unit> RunExperiment(
-    int threads, double *reqs_per_sec, double *cpu_usage,
+    int threads, double *reqs_per_sec, double *cpu_usage, uint64_t *start_wct,
     std::function<std::vector<work_unit>()> wf) {
   // Launch a worker thread for each connection.
   rt::WaitGroup starter(threads + 1);
@@ -129,7 +162,9 @@ std::vector<work_unit> RunExperiment(
   // |--- start experiment duration timing ---|
   barrier();
   auto start = steady_clock::now();
+  auto start_sys = system_clock::now();
   barrier();
+  uptime u1 = ReadUptime();
 
   // Wait for the workers to finish.
   for (auto &t : th) t.Join();
@@ -138,6 +173,7 @@ std::vector<work_unit> RunExperiment(
   barrier();
   auto finish = steady_clock::now();
   barrier();
+  uptime u2 = ReadUptime();
 
   // Aggregate all the samples together.
   std::vector<work_unit> w;
@@ -155,11 +191,18 @@ std::vector<work_unit> RunExperiment(
   double elapsed = duration_cast<sec>(finish - start).count();
   if (reqs_per_sec != nullptr)
     *reqs_per_sec = static_cast<double>(w.size()) / elapsed * 1000000;
+  uint64_t idle = u2.idle - u1.idle;
+  uint64_t busy = u2.busy - u1.busy;
+  if (cpu_usage != nullptr)
+    *cpu_usage = static_cast<double>(busy) /
+                 static_cast<double>(idle + busy);
+  if (start_wct != nullptr)
+    *start_wct = duration_cast<sec>(start_sys.time_since_epoch()).count() / 1000000;
   return w;
 }
 
 void PrintStatResults(std::vector<work_unit> w, double offered_rps, double rps,
-                      double cpu_usage) {
+                      double cpu_usage, uint64_t start_wct) {
   std::sort(w.begin(), w.end(), [](const work_unit &s1, work_unit &s2) {
     return s1.duration_us < s2.duration_us;
   });
@@ -180,27 +223,30 @@ void PrintStatResults(std::vector<work_unit> w, double offered_rps, double rps,
       << std::setprecision(4) << std::fixed << threads << "," << offered_rps
       << "," << rps << "," << cpu_usage << "," << w.size() << "," << min << ","
       << mean << "," << p90 << "," << p99 << "," << p999 << "," << p9999 << ","
-      << max << std::endl;
+      << max << "," << start_wct << std::endl;
 }
 
 void SteadyStateExperiment(int threads, double offered_rps,
                            double service_time) {
   double rps, cpu_usage;
-  std::vector<work_unit> w = RunExperiment(threads, &rps, &cpu_usage, [=] {
+  uint64_t start_wct;
+  std::vector<work_unit> w = RunExperiment(threads, &rps, &cpu_usage, &start_wct, [=] {
     std::mt19937 rg(rand());
     std::mt19937 dg(rand());
     std::exponential_distribution<double> rd(
         1.0 / (1000000.0 / (offered_rps / static_cast<double>(threads))));
     std::uniform_int_distribution<size_t> wd(0.0, total_block_count);
-    return GenerateWork(std::bind(rd, rg), std::bind(wd, dg), 0, 5000000);
+    return GenerateWork(std::bind(rd, rg), std::bind(wd, dg), 0, us_per_sample);
   });
 
   // Print the results.
-  PrintStatResults(w, offered_rps, rps, cpu_usage);
+  PrintStatResults(w, offered_rps, rps, cpu_usage, start_wct);
 }
 
 void ClientHandler(void *arg) {
-  for (double i = 20000; i <= 600000; i += 20000) {
+  double max_pps = 600000;
+  double step = max_pps / nsamples;
+  for (double i = step; i <= max_pps; i += step) {
     SteadyStateExperiment(threads, i, 0);
   }
 }
@@ -210,8 +256,9 @@ void ClientHandler(void *arg) {
 int main(int argc, char *argv[]) {
   int ret;
 
-  if (argc < 5) {
+  if (argc < 7) {
     std::cerr << "usage: [cfg_file] [#threads] [block_count] [pct_set]"
+              << " [us_per_sample] [nsamples]"
               << std::endl;
     return -EINVAL;
   }
@@ -219,6 +266,8 @@ int main(int argc, char *argv[]) {
   threads = std::stoi(argv[2], nullptr, 0);
   block_count = std::stoi(argv[3], nullptr, 0);
   pct_set = std::stoi(argv[4], nullptr, 0);
+  us_per_sample = std::stoi(argv[5], nullptr, 0);
+  nsamples = std::stoi(argv[6], nullptr, 0);
 
   ret = runtime_init(argv[1], ClientHandler, NULL);
   if (ret) {
