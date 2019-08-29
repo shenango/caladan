@@ -103,11 +103,12 @@ extern void ias_migrate_kthread_on_core(int core);
 
 static inline bool is_lc(struct ias_data *sd)
 {
-        return sd && sd->threads_guaranteed;
+        return sd && sd->threads_guaranteed &&
+		sd->threads_limit <= sd->threads_guaranteed;
 }
 
 /*
- * Hyperthread (HT) subcontroller definitions
+ * Locality (LOC) subcontroller definitions
  */
 
 /**
@@ -136,7 +137,9 @@ static inline float ias_loc_score(struct ias_data *sd, unsigned int core,
 	return (float)(IAS_LOC_EVICTED_US - delta_us)  / IAS_LOC_EVICTED_US;
 }
 
-
+/*
+ * Hyperthread (HT) subcontroller definitions
+ */
 /**
  * ias_ht_pairing_score - estimates how effective a process pairing is
  *
@@ -148,7 +151,7 @@ static inline float ias_ht_pairing_score(struct ias_data *sd,
 	double ipc =
 		sib_sd ? sd->ht_pairing_ipc[sib_sd->idx] :
 		sd->ht_unpaired_ipc;
-	if (sd->ht_max_ipc == 0.0)
+	if (sd->ht_max_ipc < 1E-3)
 		return 1.0;
 	if (ipc < 1E-3)
 		return 1.0;
