@@ -118,7 +118,6 @@ static int ias_bw_punish(void)
 
 	int kick_cnt = 0;
 	int kick_thresh = MAX(1, IAS_KICK_OUT_FACTOR * sd->threads_active);
-	int sibling;
 
 	// TODO: actually we need to spread kick_thresh among multiple sds
 	// rather than a single sd, for example when all sds are single-threaded.
@@ -127,11 +126,6 @@ static int ias_bw_punish(void)
 		if (cores[core] == sd) {
 		        ias_throttle_kthread_on_core(core, now_tsc);
 			kick_cnt++;
-			sibling = sched_siblings[core];
-			if (cores[sibling] == sd) {
-				kick_cnt++;
-				ias_throttle_kthread_on_core(sibling, now_tsc);
-			}
 		}
 		if (kick_cnt >= kick_thresh)
 			break;

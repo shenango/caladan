@@ -37,7 +37,7 @@ static void ias_ht_poll_one(struct ias_data *sd, struct thread *th)
 	}
 
 	ipc = (float)(cur_instr - last_instr) / (float)(cur_tsc - last_tsc);
-	if (ipc > 5.0 || ipc < 1E-3)
+	if (ipc > 5.0)
 		return; /* bad sample */
 	us = (float)(cur_tsc - last_tsc) / (float)cycles_per_us;
 
@@ -65,12 +65,19 @@ static void ias_ht_poll_one(struct ias_data *sd, struct thread *th)
 		 MIN(100.0, us) * IAS_EWMA_FACTOR);
 }
 
-static inline bool is_bad_pairing(struct ias_data *sd, struct ias_data *sib_sd)
+/**
+ * ias_bad_sibling - detect if we should migrate sib_sd
+ * @sd: cannot be NULL
+ * @sib_sd: cannot be MULL
+ */
+static inline bool is_bad_sibling(struct ias_data *sd, struct ias_data *sib_sd)
 {
-	double cur_ipc =
-		(!sib_sd) ? sd->ht_unpaired_ipc : sd->ht_pairing_ipc[sib_sd->idx];
-	double ratio = (cur_ipc > 1E-3) ? cur_ipc / sd->ht_max_ipc : 1;
-	return ratio <= 1 - IAS_HT_MAX_IPC_DEGRADE_RATIO;
+	/* never migrate an LC kthread */
+	if (is_lc(sib_sd))
+		return false;	
+	double ipc = sd->ht_pairing_ipc[sib_sd->idx];
+	double ratio = (ipc > 1E-3) ? ipc / sd->ht_max_ipc : 1;
+	return ratio <= 1 - GET_MAX_IPC_DEGRADE_RATIO(sd);
 }
 
 /**
@@ -81,29 +88,14 @@ void ias_ht_detect_bad_pairing() {
 	int core, tmp;
 	uint64_t now_tsc = rdtsc();
 	sched_for_each_allowed_core(core, tmp) {
-		struct ias_data *sd = cores[core];
-		if (!sd)
-			continue;
+ 		struct ias_data *sd = cores[core];
 		int sib = sched_siblings[core];
 		struct ias_data *sib_sd = cores[sib];
-		bool sd_is_lc = is_lc(sd);
-		bool sib_sd_is_lc = is_lc(sib_sd);
-		/* never kick out an LC kthread */
-		if (sib_sd_is_lc)
+		if (!sd || !sib_sd || !is_bad_sibling(sd, sib_sd))
 			continue;
-		if (!is_bad_pairing(sd, sib_sd))
-			continue;
-		if (sd_is_lc) {
-			if (sib_sd) {
-				/* sd is LC and sib_sd is BE, ban the sibing */
-				sib_sd->ht_last_banned_tsc[sd->idx] = now_tsc;
-				/* find a better pairing for the banned sibling */
-				ias_discover_better_pairing(sib_sd, sib, sd, now_tsc);
-			}
-		} else {
-			/* sd is BE and sib_sd is BE|NULL, try to migrate sd */
-			ias_discover_better_pairing(sd, core, sib_sd, now_tsc);
-		}
+		sib_sd->ht_last_banned_tsc[sd->idx] = now_tsc;
+		/* try to migrate it to anywhere else */
+		ias_migrate_kthread_on_core(sib);
 	}
 }
 

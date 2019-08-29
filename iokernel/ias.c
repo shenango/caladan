@@ -183,11 +183,11 @@ int ias_idle_on_core(unsigned int core)
 	return 0;
 }
 
-static float ias_calculate_score(struct ias_data *sd, unsigned int core)
+static float ias_calculate_score(struct ias_data *sd, unsigned int core,
+				 uint64_t now_tsc)
 {
 	float score, ht_score;
-	unsigned int sib;
-	bool sib_has_prio;
+	unsigned int sib;	
 
 	/* occasionally we choose a random pairing */
 	static int rr_cnt = 0;
@@ -195,22 +195,19 @@ static float ias_calculate_score(struct ias_data *sd, unsigned int core)
 		rr_cnt = 0;
 		return FLT_MAX;
 	}
-	
-	/* determine if the sibling has priority over this core */
-	sib = sched_siblings[core];
-	sib_has_prio = cores[sib] && sd != cores[sib] &&
-		       ias_has_priority(cores[sib], core);
+
+	if (is_banned(sd, cores[sched_siblings[core]], now_tsc))
+		return -FLT_MAX;
 
 	/* try to estimate how well the core and process pair together */
 	score = ias_has_priority(sd, core) ? IAS_PRIORITY_WEIGHT : 0.0;
 	score += ias_loc_score(sd, core, now_us);
-
-	if (sib_has_prio)
-		ht_score = ias_ht_pairing_score(cores[sib], sd);
-	else
-		ht_score = ias_ht_pairing_score(sd, cores[sib]);
+	
+	sib = sched_siblings[core];
+	ht_score = ias_ht_pairing_score(sd, cores[sib]);
+	
 	/* encourage to use a full HT pair when the IPC degradation is acceptable */
-	ht_score += (cores[sib] != NULL) ? IAS_HT_MAX_IPC_DEGRADE_RATIO : 0;
+	ht_score += cores[sib] ? GET_MAX_IPC_DEGRADE_RATIO(sd) : 0;
 
 	return score + IAS_HT_WEIGHT * ht_score;
 }
@@ -234,12 +231,10 @@ static unsigned int ias_choose_core(struct ias_data *sd, bool lc)
 			/* BE tasks can only take idle cores */
 			if (cores[core] != NULL)
 				continue;
-			if (is_banned(sd, cores[sched_siblings[core]], now_tsc))
-				continue;
 		}
 
 		/* try to estimate how good this core is for the process */
-		score = ias_calculate_score(sd, core);
+		score = ias_calculate_score(sd, core, now_tsc);
 		if (score > best_score) {
 			best_score = score;
 			best_core = core;
@@ -296,7 +291,7 @@ static void ias_notify_congested(struct proc *p, bitmap_ptr_t threads,
 
 static struct ias_data *ias_choose_kthread(unsigned int core, uint64_t now_tsc)
 {
-	struct ias_data *sd, *sib_sd, *best_sd = NULL;
+	struct ias_data *sd, *best_sd = NULL;
 	float score, best_score = 0;
 
 	ias_for_each_proc(sd) {
@@ -306,13 +301,9 @@ static struct ias_data *ias_choose_kthread(unsigned int core, uint64_t now_tsc)
 		/* check if we're constrained by the thread limit */
 		if (sd->threads_active >= sd->threads_limit)
 			continue;
-		/* check if the sd has been banned by its sibling */
-		sib_sd = cores[sched_siblings[core]];
-		if (is_banned(sd, sib_sd, now_tsc))
-			continue;
 
 		/* try to estimate how good this core is for the process */
-		score = ias_calculate_score(sd, core);
+		score = ias_calculate_score(sd, core, now_tsc);
 		if (score > best_score) {
 			best_score = score;
 			best_sd = sd;
@@ -423,32 +414,10 @@ static void ias_sched_poll(uint64_t now, int idle_cnt, bitmap_ptr_t idle)
 	}
 }
 
-void ias_discover_better_pairing(struct ias_data *sd, int cur_core,
-				 struct ias_data *cur_sib_sd, uint64_t now_tsc) {
-	struct ias_data *new_sib_sd;
-	float score, best_score = 0;
-	unsigned int core, best_core = NCPU;
-	
-	bitmap_for_each_set(ias_idle_cores, NCPU, core) {
-		if (cores[core])
-			continue;
-		new_sib_sd = cores[sched_siblings[core]];
-		/* cannot use a banned pairing */
-		if (is_banned(sd, new_sib_sd, now_tsc))
-			continue;
-		score = ias_calculate_score(sd, core);
-		if (score > best_score) {
-			best_score = score;
-			best_core = core;
-		}
-	}
-	if (best_core != NCPU &&
-	    cores[sched_siblings[best_core]] != cur_sib_sd) {
-		/* do migration */
-		if (ias_add_kthread_on_core(cur_core, now_tsc))
-			ias_idle_on_core(cur_core);
-		ias_run_kthread_on_core(sd->p, best_core);
-	}
+void ias_migrate_kthread_on_core(int core) {
+	struct proc *p = cores[core]->p;
+	ias_idle_on_core(core);
+	ias_notify_core_needed(p);
 }
 
 struct sched_ops ias_ops = {

@@ -16,9 +16,14 @@
 #define IAS_EWMA_FACTOR		         0.001 /* the moving average update rate */
 #define IAS_DEBUG_PRINT_US	         100000 /* time to print out debug info */
 #define IAS_KICK_OUT_FACTOR              0.2 /* used to calc the number of victims */
-#define IAS_HT_MAX_IPC_DEGRADE_RATIO     0.3 /* used to judge the bad pairing */
+#define IAS_HT_LC_MAX_IPC_DEGRADE_RATIO  0.3 /* used to judge the bad pairing */
+#define IAS_HT_BE_MAX_IPC_DEGRADE_RATIO  0.5 /* used to judge the bad pairing */
 #define IAS_BAN_DURATION_US              500 /* the duration of banning a bad pairing */
 #define IAS_HT_RANDOM_PAIRING_CNT        1000 /* used to form a pairing randomly */
+
+#define GET_MAX_IPC_DEGRADE_RATIO(sd)                  \
+	(is_lc(sd) ? IAS_HT_LC_MAX_IPC_DEGRADE_RATIO : \
+         IAS_HT_BE_MAX_IPC_DEGRADE_RATIO)
 
 struct ias_data {
 	struct proc		*p;
@@ -94,14 +99,15 @@ static inline void ias_ewma(float *curp, float newv, float factor)
 
 extern int ias_idle_on_core(unsigned int core);
 extern int ias_add_kthread_on_core(unsigned int core, uint64_t now_tsc);
-extern void ias_discover_better_pairing(struct ias_data *sd,
-				    int cur_core,
-				    struct ias_data *cur_sib_sd,
-				    uint64_t now_tsc);
+extern void ias_migrate_kthread_on_core(int core);
 
+static inline bool is_lc(struct ias_data *sd)
+{
+        return sd && sd->threads_guaranteed;
+}
 
 /*
- * Locality (LOC) subcontroller definitions
+ * Hyperthread (HT) subcontroller definitions
  */
 
 /**
@@ -130,33 +136,25 @@ static inline float ias_loc_score(struct ias_data *sd, unsigned int core,
 	return (float)(IAS_LOC_EVICTED_US - delta_us)  / IAS_LOC_EVICTED_US;
 }
 
-static inline bool is_lc(struct ias_data *sd)
-{
-        return sd && sd->threads_guaranteed;
-}
-
-/*
- * Hyperthread (HT) subcontroller definitions
- */
 
 /**
  * ias_ht_pairing_score - estimates how effective a process pairing is
- * @lc: the latency critical process
- * @be: the best effort process
  *
  * Returns a pairing score, higher is better.
  */
-static inline float ias_ht_pairing_score(struct ias_data *lc,
-					 struct ias_data *be)
+static inline float ias_ht_pairing_score(struct ias_data *sd,
+					  struct ias_data *sib_sd)
 {
-	double cur_ipc =
-		be ? lc->ht_pairing_ipc[be->idx] : lc->ht_unpaired_ipc;
-	if (lc->ht_max_ipc == 0.0)
+	double ipc =
+		sib_sd ? sd->ht_pairing_ipc[sib_sd->idx] :
+		sd->ht_unpaired_ipc;
+	if (sd->ht_max_ipc == 0.0)
 		return 1.0;
-	if (cur_ipc < 1E-3)
+	if (ipc < 1E-3)
 		return 1.0;
-	return cur_ipc / lc->ht_max_ipc;
+	return ipc / sd->ht_max_ipc;
 }
+
 
 static inline bool is_banned(struct ias_data *sd, struct ias_data *sib_sd,
 			     uint64_t now_tsc)
@@ -173,7 +171,6 @@ extern void ias_ht_poll(uint64_t now_us);
  */
 
 extern void ias_bw_poll(uint64_t now_us);
-
 
 /*
  * Counters
