@@ -36,7 +36,7 @@ mod backend;
 use backend::*;
 
 mod payload;
-use payload::{Payload, SyntheticProtocol};
+use payload::{Payload, SyntheticProtocol, PAYLOAD_SIZE};
 
 #[derive(Default)]
 pub struct Packet {
@@ -154,7 +154,7 @@ fn run_linux_udp_server(
                 loop {
                     let (len, remote_addr) = socket.recv_from(&mut buf[..]).unwrap();
                     let payload = Payload::deserialize(&mut &buf[..len]).unwrap();
-                    worker.work(payload.work_iterations);
+                    worker.work(payload.work_iterations, payload.randomness);
                     socket.send_to(&buf[..len], remote_addr).unwrap();
                 }
             })
@@ -167,12 +167,12 @@ fn run_linux_udp_server(
 }
 
 fn socket_worker(socket: &mut Connection, worker: Arc<FakeWorker>) {
-    let mut v = vec![0; 16];
+    let mut v = vec![0; PAYLOAD_SIZE];
     let mut r = || {
-        socket.read_exact(&mut v[..16])?;
-        let payload = Payload::deserialize(&mut &v[..16])?;
+        socket.read_exact(&mut v[..PAYLOAD_SIZE])?;
+        let payload = Payload::deserialize(&mut &v[..PAYLOAD_SIZE])?;
         v.clear();
-        worker.work(payload.work_iterations);
+        worker.work(payload.work_iterations, payload.randomness);
         payload.serialize_into(&mut v)?;
         Ok(socket.write_all(&v[..])?)
     };
@@ -216,7 +216,7 @@ fn run_spawner_server(addr: SocketAddrV4, workerspec: &str) {
             let buf = slice::from_raw_parts((*d).buf as *mut u8, (*d).len);
             let payload = Payload::deserialize(&mut &buf[..]).unwrap();
             let worker = SPAWNER_WORKER.as_ref().unwrap();
-            worker.work(payload.work_iterations);
+            worker.work(payload.work_iterations, payload.randomness);
             let _ = UdpSpawner::reply(d, buf);
             UdpSpawner::release_data(d);
         }
@@ -657,7 +657,7 @@ fn run_local(
         send_threads.push(backend.spawn_thread(move || {
             let remaining = Arc::new(AtomicUsize::new(packets.len()));
             for i in 0..packets.len() {
-                let (work_iterations, completion_time_ns) = {
+                let (work_iterations, completion_time_ns, rnd) = {
                     let packet = &mut packets[i];
 
                     let mut t = start.elapsed();
@@ -669,13 +669,14 @@ fn run_local(
                     (
                         packet.work_iterations,
                         AtomicU64Pointer(&packet.completion_time_ns as *const AtomicU64),
+                        packet.randomness,
                     )
                 };
 
                 let remaining = remaining.clone();
                 let worker = worker.clone();
                 backend.spawn_thread(move || {
-                    worker.work(work_iterations);
+                    worker.work(work_iterations, rnd);
                     unsafe {
                         (*completion_time_ns.0)
                             .store(start.elapsed().as_nanos() as u64, Ordering::SeqCst);
@@ -745,7 +746,6 @@ fn main() {
                     "runtime-client",
                     "spawner-server",
                     "local-client",
-                    "work-bench",
                 ])
                 .required(true)
                 .requires_ifs(&[("runtime-client", "config"), ("spawner-server", "config")])
@@ -793,6 +793,12 @@ fn main() {
                 .long("warmup")
                 .takes_value(false)
                 .help("Run the warmup routine"),
+        )
+        .arg(
+            Arg::with_name("callibrate")
+                .long("callibrate")
+                .takes_value(true)
+                .help("us to callibrate fake work for"),
         )
         .arg(
             Arg::with_name("output")
@@ -907,7 +913,7 @@ fn main() {
     let mode = matches.value_of("mode").unwrap();
     let backend = match mode {
         "linux-server" | "linux-client" => Backend::Linux,
-        "spawner-server" | "runtime-client" | "work-bench" | "local-client" => Backend::Runtime,
+        "spawner-server" | "runtime-client" | "local-client" => Backend::Runtime,
         _ => unreachable!(),
     };
     let mut barrier_group = matches.value_of("barrier-leader").map(|leader| {
@@ -923,15 +929,29 @@ fn main() {
     let fwspec = value_t_or_exit!(matches, "fakework", String);
     let fakeworker = Arc::new(FakeWorker::create(&fwspec).unwrap());
 
+    if matches.is_present("callibrate") {
+        let us = value_t_or_exit!(matches, "callibrate", u64);
+        backend.init_and_run(config, move || {
+            let barrier = Arc::new(AtomicUsize::new(nthreads));
+            let join_handles: Vec<_> = (0..nthreads)
+                .map(|_| {
+                    let fakeworker = fakeworker.clone();
+                    let barrier = barrier.clone();
+                    backend.spawn_thread(move || {
+                        barrier.fetch_sub(1, Ordering::SeqCst);
+                        while barrier.load(Ordering::SeqCst) > 0 {}
+                        fakeworker.callibrate(us);
+                    })
+                })
+                .collect();
+            for j in join_handles {
+                j.join().unwrap();
+            }
+        });
+        return;
+    }
+
     match mode {
-        "work-bench" => {
-            let iterations = 100_000_000;
-            println!("Timing {} iterations of work()", iterations);
-            let start = Instant::now();
-            fakeworker.work(iterations);
-            let elapsed = duration_to_ns(start.elapsed());
-            println!("Rate = {} ns/iteration", elapsed as f64 / iterations as f64);
-        }
         "spawner-server" => match tport {
             Transport::Udp => {
                 backend.init_and_run(config, move || run_spawner_server(addr, &fwspec))
