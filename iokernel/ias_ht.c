@@ -42,12 +42,12 @@ static void ias_ht_poll_one(struct ias_data *sd, struct thread *th)
 	us = (float)(cur_tsc - last_tsc) / (float)cycles_per_us;
 
 	/* update unpaired IPC metrics */
-	run_us = ((float)cur_tsc - sd->ht_start_running_tsc[core]) /
+	run_us = ((double)cur_tsc - sd->ht_start_running_tsc[core]) /
 		 cycles_per_us;
 	if (run_us - us < WARMUP_US)
 		return;
 	if (!cores[sib]) {
-		idle_us = ((float)cur_tsc - cores_idle_tsc[sib]) /
+		idle_us = ((double)cur_tsc - cores_idle_tsc[sib]) /
 			cycles_per_us;
 		if (idle_us - us < WARMUP_US)
 			return;
@@ -57,7 +57,7 @@ static void ias_ht_poll_one(struct ias_data *sd, struct thread *th)
 	}
 
 	/* update paired IPC metrics */
-	run_us = ((float)cur_tsc - cores[sib]->ht_start_running_tsc[sib]) /
+	run_us = ((double)cur_tsc - cores[sib]->ht_start_running_tsc[sib]) /
 		 cycles_per_us;
 	if (run_us - us < WARMUP_US)
 		return;
