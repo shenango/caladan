@@ -10,7 +10,7 @@ lib_shim = $(ROOT_PATH)/shim/libshim.a -ldl
 librt_libs = $(ROOT_PATH)/bindings/cc/librt++.a
 INC += -I$(ROOT_PATH)/bindings/cc
 
-CXXFLAGS += -DENABLE_THREADS -march=native -g -O0
+CXXFLAGS += -DENABLE_THREADS -march=native
 LDFLAGS += -Wl,--wrap=main -no-pie
 
 RUNTIME_LIBS := $(RUNTIME_LIBS)
