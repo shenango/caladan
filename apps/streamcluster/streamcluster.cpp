@@ -143,6 +143,12 @@ tbb::cache_aligned_allocator<bool> memoryBool;
 #endif
 
 
+void *my_calloc(size_t nmemb, size_t size) {
+  void *ptr = malloc(nmemb * size);
+  memset(ptr, nmemb * size, 0);
+  return ptr;
+}
+
 float dist(Point p1, Point p2, int dim);
 
 
@@ -928,7 +934,7 @@ double pgain(long x, Points *points, double z, long int *numcenters)
   //my own cost of opening x
   double cost_of_opening_x = 0;
 
-  work_mem = (double*) calloc(stride*((NUM_DIVISIONS)+1),sizeof(double));
+  work_mem = (double*) my_calloc(stride*((NUM_DIVISIONS)+1),sizeof(double));
   
   gl_cost_of_opening_x = 0;
   gl_number_of_centers_to_close = 0;
@@ -1400,7 +1406,7 @@ float pkmedian(Points *points, long kmin, long kmax, long* kfinal,
   static double* hizs;
 
 
-  //  hizs = (double*)calloc(nproc,sizeof(double));
+  //  hizs = (double*)my_calloc(nproc,sizeof(double));
   hiz = loz = 0.0;
   long numberOfPoints = points->num;
   long ptDimension = points->dim;
@@ -1545,7 +1551,7 @@ float pkmedian(Points *points, long kmin, long kmax, long* kfinal,
   static int numfeasible;
   static double* hizs;
 
-  if( pid==0 ) hizs = (double*)calloc(nproc,sizeof(double));
+  if( pid==0 ) hizs = (double*)my_calloc(nproc,sizeof(double));
   hiz = loz = 0.0;
   long numberOfPoints = points->num;
   long ptDimension = points->dim;
@@ -1710,7 +1716,7 @@ void copycenters(Points *points, Points* centers, long* centerIDs, long offset)
   long i;
   long k;
 
-  bool *is_a_median = (bool *) calloc(points->num, sizeof(bool));
+  bool *is_a_median = (bool *) my_calloc(points->num, sizeof(bool));
 
   /* mark the centers */
   for ( i = 0; i < points->num; i++ ) {
@@ -1881,7 +1887,7 @@ void outcenterIDs( Points* centers, long* centerIDs, char* outfile ) {
     // fprintf(stderr, "error opening %s\n",outfile);
     exit(1);
   }
-  int* is_a_median = (int*)calloc( sizeof(int), centers->num );
+  int* is_a_median = (int*)my_calloc( sizeof(int), centers->num );
   for( int i =0 ; i< centers->num; i++ ) {
     is_a_median[centers->p[i].assign] = 1;
   }
@@ -1974,7 +1980,7 @@ void streamCluster( PStream* stream,
 
 #ifdef TBB_VERSION
     switch_membership = (bool*)memoryBool.allocate(points.num*sizeof(bool), NULL);
-    is_center = (bool*)calloc(points.num,sizeof(bool));
+    is_center = (bool*)my_calloc(points.num,sizeof(bool));
     center_table = (int*)memoryInt.allocate(points.num*sizeof(int));
 #else
     if (nalloc < points.num) {
@@ -1985,7 +1991,7 @@ void streamCluster( PStream* stream,
       if (center_table)
         free(center_table);
       switch_membership = (bool*)malloc(points.num*sizeof(bool));
-      is_center = (bool*)calloc(points.num,sizeof(bool));
+      is_center = (bool*)my_calloc(points.num,sizeof(bool));
       center_table = (int*)malloc(points.num*sizeof(int));
       nalloc = points.num;
     }
@@ -2038,11 +2044,11 @@ void streamCluster( PStream* stream,
   //finally cluster all temp centers
 #ifdef TBB_VERSION
   switch_membership = (bool*)memoryBool.allocate(centers.num*sizeof(bool));
-  is_center = (bool*)calloc(centers.num,sizeof(bool));
+  is_center = (bool*)my_calloc(centers.num,sizeof(bool));
   center_table = (int*)memoryInt.allocate(centers.num*sizeof(int));
 #else
   switch_membership = (bool*)malloc(centers.num*sizeof(bool));
-  is_center = (bool*)calloc(centers.num,sizeof(bool));
+  is_center = (bool*)my_calloc(centers.num,sizeof(bool));
   center_table = (int*)malloc(centers.num*sizeof(int));
 #endif
 
