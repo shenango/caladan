@@ -121,7 +121,8 @@ extern "C" {
 #define MAX(x, y) ((x) > (y) ? (x) : (y))
 #endif
 
-#define OPS_BATCH (1 << 20)
+#define OPS_BATCH (1 << 14)
+#define YIELD_CNT (1 << 6)
 
 static double **a, **b, **c;
 static const char *label[4] = {"Copy", "Scale", "Add", "Triad"};
@@ -132,6 +133,7 @@ int N;
 
 void *copyProc(void *arg) {
 	int local_ops = 0;
+	int yield_cnt = 0;
 	int me = (long long)arg;
 
 	double *a2 = a[me];
@@ -146,7 +148,11 @@ void *copyProc(void *arg) {
 			if (local_ops == OPS_BATCH) {
 				local_ops = 0;
 				ops[ops_idx] += ops_factor[0] * OPS_BATCH;
-				thread_yield();
+				yield_cnt++;
+				if (yield_cnt == YIELD_CNT) {
+					yield_cnt = 0;
+					thread_yield();
+				}
 			}
 		}
 	}
@@ -154,6 +160,7 @@ void *copyProc(void *arg) {
 
 void *scaleProc(void *arg) {
 	int local_ops = 0;
+	int yield_cnt = 0;
 	int me = (long long)arg;
 
 	double *b2 = b[me];
@@ -168,7 +175,11 @@ void *scaleProc(void *arg) {
 			if (local_ops == OPS_BATCH) {
 				local_ops = 0;
 				ops[ops_idx] += ops_factor[1] * OPS_BATCH;
-				thread_yield();
+				yield_cnt++;
+				if (yield_cnt == YIELD_CNT) {
+					yield_cnt = 0;
+					thread_yield();
+				}
 			}
 		}
 	}
@@ -176,6 +187,7 @@ void *scaleProc(void *arg) {
 
 void *addProc(void *arg) {
 	int local_ops = 0;
+	int yield_cnt = 0;
 	int me = (long long)arg;
 
 	double *a2 = a[me];
@@ -191,7 +203,11 @@ void *addProc(void *arg) {
 			if (local_ops == OPS_BATCH) {
 				local_ops = 0;
 				ops[ops_idx] += ops_factor[2] * OPS_BATCH;
-				thread_yield();
+				yield_cnt++;
+				if (yield_cnt == YIELD_CNT) {
+					yield_cnt = 0;
+					thread_yield();
+				}
 			}
 		}
 	}
@@ -199,6 +215,7 @@ void *addProc(void *arg) {
 
 void *triadProc(void *arg) {
 	int local_ops = 0;
+	int yield_cnt = 0;
 	int me = (long long)arg;
 
 	double *a2 = a[me];
@@ -214,7 +231,11 @@ void *triadProc(void *arg) {
 			if (local_ops == OPS_BATCH) {
 				local_ops = 0;
 				ops[ops_idx] += ops_factor[3] * OPS_BATCH;
-				thread_yield();
+				yield_cnt++;
+				if (yield_cnt == YIELD_CNT) {
+					yield_cnt = 0;
+					thread_yield();
+				}
 			}
 		}
 	}
