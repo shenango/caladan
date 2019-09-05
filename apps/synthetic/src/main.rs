@@ -795,10 +795,10 @@ fn main() {
                 .help("Run the warmup routine"),
         )
         .arg(
-            Arg::with_name("callibrate")
-                .long("callibrate")
+            Arg::with_name("calibrate")
+                .long("calibrate")
                 .takes_value(true)
-                .help("us to callibrate fake work for"),
+                .help("us to calibrate fake work for"),
         )
         .arg(
             Arg::with_name("output")
@@ -929,8 +929,8 @@ fn main() {
     let fwspec = value_t_or_exit!(matches, "fakework", String);
     let fakeworker = Arc::new(FakeWorker::create(&fwspec).unwrap());
 
-    if matches.is_present("callibrate") {
-        let us = value_t_or_exit!(matches, "callibrate", u64);
+    if matches.is_present("calibrate") {
+        let us = value_t_or_exit!(matches, "calibrate", u64);
         backend.init_and_run(config, move || {
             let barrier = Arc::new(AtomicUsize::new(nthreads));
             let join_handles: Vec<_> = (0..nthreads)
@@ -940,7 +940,7 @@ fn main() {
                     backend.spawn_thread(move || {
                         barrier.fetch_sub(1, Ordering::SeqCst);
                         while barrier.load(Ordering::SeqCst) > 0 {}
-                        fakeworker.callibrate(us);
+                        fakeworker.calibrate(us);
                     })
                 })
                 .collect();

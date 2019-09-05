@@ -97,7 +97,7 @@ impl FakeWorker {
             / 50
     }
 
-    pub fn callibrate(&self, target_us: u64) {
+    pub fn calibrate(&self, target_us: u64) {
         let target_ns = target_us * 1000;
         let mut iterations = 1;
         while self.time(iterations) < target_ns {
@@ -119,7 +119,7 @@ impl FakeWorker {
             }
             FakeWorker::StridedMem(ref buf, stride) => {
                 for i in 0..iters as usize {
-                    test::black_box::<u8>(buf[(i * stride) % buf.len()]);
+                    test::black_box::<u8>(buf[(randomness as usize + i * stride) % buf.len()]);
                 }
             }
             FakeWorker::RandomMem(ref buf, ref sched) => {
