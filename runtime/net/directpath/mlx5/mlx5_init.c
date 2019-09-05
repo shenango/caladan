@@ -22,8 +22,6 @@
 #include "mlx5.h"
 #include "mlx5_ifc.h"
 
-#define PORT_NUM 1 // TODO: make this dynamic
-
 static struct mlx5_txq txqs[NCPU];
 
 struct mlx5_rxq rxqs[NCPU];
@@ -84,10 +82,10 @@ static void mlx5_init_tx_segment(struct mlx5_txq *v, unsigned int idx)
 	segment = v->tx_qp_dv.sq.buf + idx * v->tx_qp_dv.sq.stride;
 	ctrl = segment;
 	eseg = segment + sizeof(*ctrl);
-	dpseg = (void *)eseg + (offsetof(struct mlx5_wqe_eth_seg, inline_hdr) & ~0xf);
+	dpseg = (void *)eseg + ((offsetof(struct mlx5_wqe_eth_seg, inline_hdr) + MLX5_ETH_L2_INLINE_HEADER_SIZE) & ~0xf);
 
 	size = (sizeof(*ctrl) / 16) +
-	       (offsetof(struct mlx5_wqe_eth_seg, inline_hdr)) / 16 +
+	       ((offsetof(struct mlx5_wqe_eth_seg, inline_hdr)) + MLX5_ETH_L2_INLINE_HEADER_SIZE) / 16 +
 	       sizeof(struct mlx5_wqe_data_seg) / 16;
 
 	/* set ctrl segment */
@@ -99,6 +97,8 @@ static void mlx5_init_tx_segment(struct mlx5_txq *v, unsigned int idx)
 	/* set eseg */
 	memset(eseg, 0, sizeof(struct mlx5_wqe_eth_seg));
 	eseg->cs_flags |= MLX5_ETH_WQE_L3_CSUM | MLX5_ETH_WQE_L4_CSUM;
+	eseg->inline_hdr_sz = htobe16(MLX5_ETH_L2_INLINE_HEADER_SIZE);
+
 
 	/* set dpseg */
 	dpseg->lkey = htobe32(mr_tx->lkey);
@@ -285,7 +285,7 @@ static int mlx5_init_txq(int index, struct mlx5_txq *v)
 			.max_send_wr = SQ_NUM_DESC,
 			.max_recv_wr = 0,
 			.max_send_sge = 1,
-			.max_inline_data = 0, // TODO: should inline some data?
+			.max_inline_data = MLX5_ETH_L2_INLINE_HEADER_SIZE,
 		},
 		.qp_type = IBV_QPT_RAW_PACKET,
 		.sq_sig_all = 1,
@@ -303,7 +303,7 @@ static int mlx5_init_txq(int index, struct mlx5_txq *v)
 	struct ibv_qp_attr qp_attr;
 	memset(&qp_attr, 0, sizeof(qp_attr));
 	qp_attr.qp_state = IBV_QPS_INIT;
-	qp_attr.port_num = 1;
+	qp_attr.port_num = PORT_NUM;
 	ret = ibv_modify_qp(v->tx_qp, &qp_attr, IBV_QP_STATE | IBV_QP_PORT);
 	if (ret)
 		return -ret;

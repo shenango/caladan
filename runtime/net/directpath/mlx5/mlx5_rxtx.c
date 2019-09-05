@@ -122,14 +122,16 @@ int mlx5_transmit_one(struct mbuf *m)
 	segment = v->tx_qp_dv.sq.buf + (idx << v->tx_sq_log_stride);
 	ctrl = segment;
 	eseg = segment + sizeof(*ctrl);
-	dpseg = (void *)eseg + (offsetof(struct mlx5_wqe_eth_seg, inline_hdr) & ~0xf);
+	dpseg = (void *)eseg + ((offsetof(struct mlx5_wqe_eth_seg, inline_hdr) + MLX5_ETH_L2_INLINE_HEADER_SIZE) & ~0xf);
 
 	ctrl->opmod_idx_opcode = htobe32(((v->sq_head & 0xffff) << 8) |
 					       MLX5_OPCODE_SEND);
 
+	assert(mbuf_length(m) >= MLX5_ETH_L2_INLINE_HEADER_SIZE);
+	memcpy(eseg->inline_hdr_start, mbuf_data(m), MLX5_ETH_L2_INLINE_HEADER_SIZE);
 
-	dpseg->byte_count = htobe32(mbuf_length(m));
-	dpseg->addr = htobe64((uint64_t)mbuf_data(m));
+	dpseg->byte_count = htobe32(mbuf_length(m) - MLX5_ETH_L2_INLINE_HEADER_SIZE);
+	dpseg->addr = htobe64((uint64_t)mbuf_data(m) + MLX5_ETH_L2_INLINE_HEADER_SIZE);
 
 	/* record buffer */
 	store_release(&v->buffers[v->sq_head & (v->tx_qp_dv.sq.wqe_cnt - 1)], m);

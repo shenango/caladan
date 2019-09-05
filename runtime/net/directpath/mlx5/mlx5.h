@@ -10,6 +10,8 @@
 
 #include "../defs.h"
 
+#define PORT_NUM 1 // TODO: make this dynamic
+#define MLX5_ETH_L2_INLINE_HEADER_SIZE 18
 
 struct mlx5_rxq {
 	/* handle for runtime */
