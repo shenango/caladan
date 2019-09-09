@@ -16,11 +16,14 @@ INC += -I$(ROOT_PATH)/bindings/cc
 RUNTIME_LIBS := $(RUNTIME_LIBS)
 
 # must be first
-all: stream stream_query
+all: stream stream_query stream_linux
 
 stream: $(stream_obj) $(librt_libs) $(RUNTIME_DEPS)
 	$(LDXX) -o $@ $(LDFLAGS) $(stream_obj) \
-	$(lib_shim) $(librt_libs) $(RUNTIME_LIBS)
+	-Wl,--wrap=main $(lib_shim) $(librt_libs) $(RUNTIME_LIBS)
+
+stream_linux: $(stream_obj)
+	$(LDXX) -o $@ $(LDFLAGS) $(stream_obj) -lpthread
 
 stream_query: $(stream_query_obj) $(librt_libs) $(RUNTIME_DEPS)
 	$(LDXX) -o $@ $(LDFLAGS) $(stream_query_obj) \
@@ -44,4 +47,4 @@ endif
 
 .PHONY: clean
 clean:
-	rm -f $(obj) $(dep) stream stream_query
+	rm -f $(obj) $(dep) stream stream_query stream_linux

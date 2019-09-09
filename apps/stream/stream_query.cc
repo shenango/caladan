@@ -25,6 +25,12 @@ int main(int argc, char *argv[]) {
 
 	int threads = std::stoi(argv[1], nullptr, 0);
 
+	int ret = base_init();
+	if (ret) {
+		fprintf(stderr, "failed to init base, ret = %d\n", ret);
+		return ret;
+	}
+
 	volatile double *cnt;
 	int shmid = shmget((key_t)SHM_KEY, CACHELINE * threads, 0666 | IPC_CREAT);
 	void *shm = NULL;

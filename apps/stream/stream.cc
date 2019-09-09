@@ -41,11 +41,6 @@
 /*  5. Absolutely no warranty is expressed or implied.                   */
 /*-----------------------------------------------------------------------*/
 
-extern "C" {
-#include "runtime/runtime.h"
-#include "runtime/thread.h"
-}
-
 #include <float.h>
 #include <limits.h>
 #include <malloc.h>
@@ -57,6 +52,8 @@ extern "C" {
 #include <sys/shm.h>
 #include <sys/time.h>
 #include <unistd.h>
+
+#include <cstdint>
 
 #define CACHELINE 64
 #define SHM_KEY (0x123)
@@ -151,7 +148,7 @@ void *copyProc(void *arg) {
 				yield_cnt++;
 				if (yield_cnt == YIELD_CNT) {
 					yield_cnt = 0;
-					thread_yield();
+					sched_yield();
 				}
 			}
 		}
@@ -178,7 +175,7 @@ void *scaleProc(void *arg) {
 				yield_cnt++;
 				if (yield_cnt == YIELD_CNT) {
 					yield_cnt = 0;
-					thread_yield();
+					sched_yield();
 				}
 			}
 		}
@@ -206,7 +203,7 @@ void *addProc(void *arg) {
 				yield_cnt++;
 				if (yield_cnt == YIELD_CNT) {
 					yield_cnt = 0;
-					thread_yield();
+					sched_yield();
 				}
 			}
 		}
@@ -234,7 +231,7 @@ void *triadProc(void *arg) {
 				yield_cnt++;
 				if (yield_cnt == YIELD_CNT) {
 					yield_cnt = 0;
-					thread_yield();
+					sched_yield();
 				}
 			}
 		}
@@ -249,11 +246,7 @@ void *aligned_malloc(int size) {
 	return ptr;
 }
 
-int _argc;
-
-void _main(void *_argv) {
-	int argc = _argc;
-	char **argv = (char **)_argv;
+int main(int argc, char **argv) {
 
 	if (argc != 4) {
 		puts("Usage: stream [N] [#threads] [spec]");
@@ -262,7 +255,7 @@ void _main(void *_argv) {
 
 	N = atoi(argv[1]);
 	int num_threads = atoi(argv[2]);
-	
+
 	int spec_idx = -1;
 	for (int i = 0; i < 4; i++) {
 		if (!strcmp(argv[3], label[i])) {
@@ -289,7 +282,7 @@ void _main(void *_argv) {
 	a = (double **)malloc(sizeof(double *) * num_threads);
 	b = (double **)malloc(sizeof(double *) * num_threads);
 	c = (double **)malloc(sizeof(double *) * num_threads);
-	
+
 	for (int i = 0; i < num_threads; i++) {
 		a[i] = (double *)aligned_malloc(sizeof(double) * N);
 		b[i] = (double *)aligned_malloc(sizeof(double) * N);
@@ -328,24 +321,6 @@ void _main(void *_argv) {
 		}
 	}
 	pthread_join(threads[0], NULL);
-}
 
-int main(int argc, char **argv) {
-	int ret;
-
-	if (argc < 2) {
-		printf("missing shenango config file\n");
-		return -1;
-	}
-
-	char *cfgpath = argv[1];
-	argv[1] = argv[0];
-
-	_argc = argc - 1;
-
-	ret = runtime_init(cfgpath, _main, argv + 1);
-	if (ret) {
-		printf("failed to start runtime\n");
-		return ret;
-	}
+	return 0;
 }
