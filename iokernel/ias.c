@@ -14,7 +14,7 @@
 #include "ksched.h"
 #include "ias.h"
 
-#define IAS_DEBUG 1
+// #define IAS_DEBUG 1
 
 /* a list of all processes */
 LIST_HEAD(all_procs);
