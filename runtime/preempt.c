@@ -13,10 +13,7 @@
 
 /* the current preemption count */
 volatile __thread unsigned int preempt_cnt = PREEMPT_NOT_PENDING;
-/* has a cede been requested? */
 volatile __thread bool preempt_cede;
-/* has a yield been requested? */
-volatile __thread bool preempt_yield;
 
 /* set a flag to indicate a preemption request is pending */
 static void set_preempt_needed(void)
@@ -28,16 +25,14 @@ static void set_preempt_needed(void)
 static void handle_sigusr1(int s, siginfo_t *si, void *c)
 {
 	STAT(PREEMPTIONS)++;
+	set_preempt_needed();
 
 	/* resume execution if preemption is disabled */
 	if (!preempt_enabled()) {
-		set_preempt_needed();
 		preempt_cede = true;
 		return;
 	}
 
-	clear_preempt_needed();
-	clear_preempt_cede();
 	thread_cede();
 }
 
@@ -45,20 +40,27 @@ static void handle_sigusr1(int s, siginfo_t *si, void *c)
 static void handle_sigusr2(int s, siginfo_t *si, void *c)
 {
 	STAT(PREEMPTIONS)++;
-
-	/* if cede has already been requested, no point in yielding */
-	if (preempt_cede_needed())
-		return;
+	set_preempt_needed();
 
 	/* resume execution if preemption is disabled */
-	if (!preempt_enabled()) {
-		set_preempt_needed();
-		preempt_yield = true;
+	if (!preempt_enabled())
 		return;
-	}
 
-	clear_preempt_yield();
 	thread_yield();
+}
+
+/**
+ * preempt - entry point for preemption
+ */
+void preempt(void)
+{
+	assert(preempt_needed());
+	if (preempt_cede) {
+		preempt_cede = false;
+		thread_cede();
+	} else {
+		thread_yield();
+	}
 }
 
 /**
