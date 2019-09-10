@@ -54,7 +54,19 @@
 #define X2APIC_LDR_MAX_LOGICAL_IDS (16)
 
 #ifdef OS_SUPPORT_CUSTOMIZED_IPI_HANDER
+
+/* so far only use the cores from socket 0 */
+#define FOR_ALL_CORES(i) for (i = 0; i < 48; i += 2)
+
+struct ldr_info {
+	unsigned int ldr;
+	unsigned short id;
+};
+
 static unsigned int ldrs[NR_CPUS];
+static struct ldr_info ipi_ldrs[NR_CPUS];
+int ipi_ldrs_num = 0;
+
 #endif
 
 /* the character device that provides the ksched IOCTL interface */
@@ -331,50 +343,49 @@ static inline int get_cluster_id(unsigned int ldr)
 
 }
 
-static int compare(const void *lhs, const void *rhs)
-{
-	unsigned int lhs_integer = *(const int *)(lhs);
-	unsigned int rhs_integer = *(const int *)(rhs);
+static int compare(const void *lhs, const void *rhs) {
+        const struct ldr_info lhs_info = *(const struct ldr_info *)(lhs);
+        const struct ldr_info rhs_info = *(const struct ldr_info *)(rhs);
 
-	if (lhs_integer < rhs_integer) return -1;
-	if (lhs_integer > rhs_integer) return 1;
+	if (lhs_info.ldr < rhs_info.ldr) return -1;
+	if (lhs_info.ldr > rhs_info.ldr) return 1;
 	return 0;
 }
 
-static void send_ipi(cpumask_var_t mask)
+static inline void write_icr_reg(unsigned int clustered_ldr)
 {
-	static unsigned int ipi_ldrs[NR_CPUS];
-		
-	unsigned int clustered_ldr = 0;
-	unsigned int cur_ldr;
-	int cpu;
 	unsigned long long icr;
-	int ipi_ldrs_num = 0;
-	int i;
-
-	for_each_cpu(cpu, mask) {
-	        ipi_ldrs[ipi_ldrs_num++] = ldrs[cpu];
-	}
-	if (!ipi_ldrs_num)
+	if (!clustered_ldr)
 		return;
-	
-	sort(ipi_ldrs, ipi_ldrs_num, sizeof(unsigned int), &compare, NULL);
-	clustered_ldr = ipi_ldrs[0];
-	for (i = 1; i < ipi_ldrs_num; i++) {
-		cur_ldr = ipi_ldrs[i];
-		if (get_cluster_id(cur_ldr) ==
-		    get_cluster_id(clustered_ldr)) {
-			clustered_ldr |= cur_ldr;
-		} else {
-			icr = ZAIN_VECTOR | ICR_LOGICAL_MODE |
-				ICR_DEST_FIELD(clustered_ldr);
-			wrmsrl(MSR_X2APIC_ICR, icr);
-			clustered_ldr = cur_ldr;
-		}
-	}
 	icr = ZAIN_VECTOR | ICR_LOGICAL_MODE |
 		ICR_DEST_FIELD(clustered_ldr);
 	wrmsrl(MSR_X2APIC_ICR, icr);
+}
+
+static void send_ipi(cpumask_var_t mask)
+{		
+	unsigned int clustered_ldr = 0;
+	unsigned int cur_ldr;
+	int i;
+
+	if (cpumask_empty(mask))
+		return;
+
+	clustered_ldr = 0;
+	for (i = 0; i < ipi_ldrs_num; i++) {
+		if (!cpumask_test_cpu(ipi_ldrs[i].id, mask))
+			continue;
+		cur_ldr = ipi_ldrs[i].ldr;
+		if (!clustered_ldr ||
+		    get_cluster_id(cur_ldr) ==
+		    get_cluster_id(clustered_ldr)) {
+			clustered_ldr |= cur_ldr;
+		} else {
+			write_icr_reg(clustered_ldr);
+			clustered_ldr = cur_ldr;
+		}
+	}
+	write_icr_reg(clustered_ldr);
 }
 
 static void local_read_ldr(void *unused)
@@ -385,9 +396,16 @@ static void local_read_ldr(void *unused)
 	put_cpu();
 }
 
-static void read_ldrs(void)
+static void prepare_ldrs(void)
 {
+	int i;
 	on_each_cpu(local_read_ldr, NULL, true);
+	FOR_ALL_CORES(i) {
+		ipi_ldrs[ipi_ldrs_num].id = i;
+		ipi_ldrs[ipi_ldrs_num].ldr = ldrs[i];
+		ipi_ldrs_num++;
+	}
+	sort(ipi_ldrs, ipi_ldrs_num, sizeof(struct ldr_info), &compare, NULL);
 }
 #endif
 
@@ -601,7 +619,7 @@ static int __init ksched_init(void)
 
 #ifdef OS_SUPPORT_CUSTOMIZED_IPI_HANDER
 	set_customized_ipi_handler(ipi_handler);
-	read_ldrs();
+	prepare_ldrs();	
 #endif
 	
 	return 0;
