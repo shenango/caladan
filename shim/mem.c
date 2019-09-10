@@ -85,8 +85,8 @@ void *calloc(size_t a, size_t b)
 		barrier();
 		real_calloc = dlsym(RTLD_NEXT, "calloc");
 	}
-	preempt_enable();
-	void *ptr = real_calloc(a, b);
 	preempt_disable();
+	void *ptr = real_calloc(a, b);
+	preempt_enable();
 	return ptr;
 }
