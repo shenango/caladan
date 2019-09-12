@@ -97,7 +97,7 @@ static size_t estimate_shm_space(void)
 #ifdef DIRECTPATH
 	// mlx5 directpath
 	if (cfg_directpath_enabled)
-		ret += align_up(directpath_rx_buf_pool_sz(maxks), PGSIZE_2MB);
+		ret += PGSIZE_2MB;
 #endif
 
 #ifdef DIRECT_STORAGE
