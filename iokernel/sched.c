@@ -216,7 +216,7 @@ int sched_idle_on_core(uint32_t mwait_hint, unsigned int core)
 	}
 
 	/* setup the requested idle state */
-	ksched_idle_hint(mwait_hint, core);
+	ksched_idle_hint(core, mwait_hint);
 
 	/* issue the command to idle the core */
 	return __sched_run(s, NULL, core);
