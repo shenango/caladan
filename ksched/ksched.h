@@ -33,7 +33,6 @@ struct ksched_shm_cpu {
 	unsigned int		sig;
 	unsigned int		signum;
 	unsigned int		pmc;
-	unsigned int		pad;
 	__u64			pmcsel;
 
 	/* written by kernelspace */
