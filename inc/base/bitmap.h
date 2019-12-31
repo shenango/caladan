@@ -163,7 +163,21 @@ static inline bool bitmap_atomic_test(unsigned long *bits, int pos)
 {
 	return (atomic64_read((atomic64_t *)&bits[BITMAP_POS_IDX(pos)]) &
 		(1ul << BITMAP_POS_SHIFT(pos))) != 0;
-		
+}
+
+/**
+ * bitmap_atomic_or - atomically performs a bitwise OR operation
+ * @dst: the destination to atomically or
+ * @src: the input bits to or
+ * @nbits: the number of bits in the bitmap
+ */
+static inline void
+bitmap_atomic_or(unsigned long *dst, const unsigned long *src, int nbits)
+{
+	int i;
+
+	for (i = 0; i < BITMAP_LONG_SIZE(nbits); i++)
+		atomic64_fetch_and_or((atomic64_t *)&dst[i], src[i]);
 }
 
 /**
