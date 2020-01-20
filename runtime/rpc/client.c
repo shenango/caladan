@@ -5,6 +5,7 @@
 #include <base/stddef.h>
 #include <base/list.h>
 #include <base/log.h>
+#include <base/atomic.h>
 #include <runtime/rpc.h>
 #include <runtime/smalloc.h>
 
@@ -31,9 +32,9 @@ ssize_t crpc_send_one(struct crpc_session *s,
 	ssize_t ret;
 
 	/* adjust the window */
-	if (s->win_used >= s->win_avail)
+	if (atomic_read(&s->win_used) >= s->win_avail)
 		return -ENOBUFS;
-	s->win_used++;
+	atomic_inc(&s->win_used);
 
 	/* send the client header */
 	chdr.magic = RPC_REQ_MAGIC;
@@ -97,8 +98,9 @@ ssize_t crpc_recv_one(struct crpc_session *s, void *buf, size_t len)
 	assert(ret == shdr.len);
 
 	/* adjust the window */
-	assert(s->win_used > 0);
-	s->win_used--;
+	assert(atomic_read(&s->win_used) > 0);
+	atomic_dec(&s->win_used);
+	ACCESS_ONCE(s->win_avail) = shdr.win;
 
 	return shdr.len;
 }
@@ -138,7 +140,7 @@ int crpc_open(struct netaddr raddr, struct crpc_session **sout)
 
 	s->c = c;
 	s->win_avail = 1;
-	s->win_used = 0;
+	atomic_write(&s->win_used, 0);
 	*sout = s;
 	return 0;
 }

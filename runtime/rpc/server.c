@@ -16,7 +16,7 @@
 #include "proto.h"
 
 /* the maximum supported window size */
-#define SRPC_MAX_WINDOW	64
+#define SRPC_MAX_WINDOW	16
 
 /* the handler function for each RPC */
 static srpc_fn_t srpc_handler;
@@ -60,8 +60,11 @@ static void srpc_update_window(struct srpc_session *s)
 	uint64_t us = runtime_standing_queue_us();
 
 	/* update window (currently AIMD) */
-	if (us >= 10) {
-		s->win /= 2;
+	if (us >= 20) {
+		if (us > 60)
+			us = 60;
+		float scale = (us - 20) / 40;
+		s->win = (float)s->win / (2.0 * scale);
 	} else {
 		s->win++;
 	}
@@ -176,20 +179,24 @@ static void srpc_sender(void *arg)
 	while (true) {
 		/* find slots that have completed */
 		spin_lock_np(&s->lock);
-		sleep = !s->closed &&
-			bitmap_popcount(s->completed_slots,
-					SRPC_MAX_WINDOW) == 0;
-		while (sleep) {
+		while (true) {
+			sleep = !s->closed &&
+				bitmap_popcount(s->completed_slots,
+						SRPC_MAX_WINDOW) == 0;
+			if (!sleep) {
+				s->sender_th = NULL;
+				break;
+			}
 			s->sender_th = thread_self();
 			thread_park_and_unlock_np(&s->lock);
-			continue;
+			spin_lock_np(&s->lock);
 		}
 		if (unlikely(s->closed)) {
 			spin_unlock_np(&s->lock);
 			break;
 		}
 		memcpy(tmp, s->completed_slots, sizeof(tmp));
-		bitmap_init(s->completed_slots, false, SRPC_MAX_WINDOW);
+		bitmap_init(s->completed_slots, SRPC_MAX_WINDOW, false);
 		srpc_update_window(s);
 		spin_unlock_np(&s->lock);
 
@@ -233,7 +240,7 @@ static void srpc_server(void *arg)
 	BUG_ON(!s);
 	memset(s, 0, sizeof(*s));
 	s->c = c;
-	bitmap_init(s->avail_slots, true, SRPC_MAX_WINDOW);
+	bitmap_init(s->avail_slots, SRPC_MAX_WINDOW, true);
 	for (i = 0; i < SRPC_MAX_WINDOW; i++)
 		s->slots[i].s = s;
 	waitgroup_init(&s->send_waiter);

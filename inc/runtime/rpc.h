@@ -5,6 +5,7 @@
 #pragma once
 
 #include <base/types.h>
+#include <base/atomic.h>
 #include <runtime/net.h>
 #include <runtime/tcp.h>
 
@@ -39,7 +40,7 @@ extern int srpc_enable(srpc_fn_t handler);
 struct crpc_session {
 	tcpconn_t		*c;
 	uint32_t 		win_avail;
-	uint32_t		win_used;
+	atomic_t		win_used;
 };
 
 extern ssize_t crpc_send_one(struct crpc_session *s,
@@ -55,5 +56,5 @@ extern void crpc_close(struct crpc_session *s);
  */
 static inline bool crpc_is_busy(struct crpc_session *s)
 {
-	return s->win_avail <= s->win_used;
+	return ACCESS_ONCE(s->win_avail) <= atomic_read(&s->win_used);
 }
