@@ -63,8 +63,8 @@ static void srpc_update_window(struct srpc_session *s)
 	if (us >= 20) {
 		if (us > 60)
 			us = 60;
-		float scale = (us - 20) / 40;
-		s->win = (float)s->win / (2.0 * scale);
+		float scale = 1.0 + (us - 20) / 40.0;
+		s->win = (float)s->win / scale;
 	} else {
 		s->win++;
 	}
