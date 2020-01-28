@@ -64,7 +64,7 @@ static void srpc_update_window(struct srpc_session *s)
 		if (us > 60)
 			us = 60;
     float alpha = (us - 20) / 40.0;
-		s->win = (float)s->win / (1.0 - alpha/2.0);
+		s->win = (float)s->win * (1.0 - alpha / 2.0);
 	} else {
 		s->win++;
 	}
