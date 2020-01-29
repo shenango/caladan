@@ -16,7 +16,11 @@
 #include "proto.h"
 
 /* the maximum supported window size */
-#define SRPC_MAX_WINDOW	16
+#define SRPC_MAX_WINDOW		16
+/* the minimum runtime queuing delay */
+#define SRPC_MIN_DELAY_US	20
+/* the maximum runtime queuing delay */
+#define SRPC_MAX_DELAY_US	60
 
 /* the handler function for each RPC */
 static srpc_fn_t srpc_handler;
@@ -58,12 +62,13 @@ static void srpc_put_slot(struct srpc_session *s, int slot)
 static void srpc_update_window(struct srpc_session *s)
 {
 	uint64_t us = runtime_standing_queue_us();
+	float alpha;
 
 	/* update window (currently AIMD) */
-	if (us >= 20) {
-		if (us > 60)
-			us = 60;
-    float alpha = (us - 20) / 40.0;
+	if (us >= SRPC_MIN_DELAY_US) {
+		us = MIN(SRPC_MAX_DELAY_US, us);
+		alpha = (float)(us - SRPC_MIN_DELAY_US) /
+			(float)(SRPC_MAX_DELAY_US - SRPC_MIN_DELAY_US);
 		s->win = (float)s->win * (1.0 - alpha / 2.0);
 	} else {
 		s->win++;
