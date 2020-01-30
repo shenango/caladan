@@ -8,6 +8,7 @@
 #include <base/atomic.h>
 #include <runtime/net.h>
 #include <runtime/tcp.h>
+#include <runtime/rpc_proto.h>
 
 
 /*
@@ -18,6 +19,7 @@ struct srpc_session;
 
 #define SRPC_PORT	8123
 #define SRPC_BUF_SIZE	4096
+#define CRPC_BUF_SIZE 4096
 
 struct srpc_ctx {
 	struct srpc_session	*s;
@@ -26,6 +28,7 @@ struct srpc_ctx {
 	size_t			req_len;
 	size_t			resp_len;
 	char			req_buf[SRPC_BUF_SIZE];
+  struct srpc_hdr resp_hdr;
 	char			resp_buf[SRPC_BUF_SIZE];
 };
 
@@ -42,6 +45,7 @@ struct crpc_session {
 	tcpconn_t		*c;
 	uint32_t 		win_avail;
 	atomic_t		win_used;
+  char        buf[CRPC_BUF_SIZE];
 };
 
 extern ssize_t crpc_send_one(struct crpc_session *s,

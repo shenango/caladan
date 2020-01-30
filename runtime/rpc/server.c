@@ -13,10 +13,9 @@
 #include <runtime/runtime.h>
 
 #include "util.h"
-#include "proto.h"
 
 /* the maximum supported window size */
-#define SRPC_MAX_WINDOW		128
+#define SRPC_MAX_WINDOW		64
 /* the minimum runtime queuing delay */
 #define SRPC_MIN_DELAY_US	20
 /* the maximum runtime queuing delay */
@@ -154,26 +153,22 @@ static int srpc_recv_one(struct srpc_session *s)
 
 static int srpc_send_one(struct srpc_session *s, struct srpc_ctx *c)
 {
-	struct srpc_hdr shdr;
+	struct srpc_hdr *shdr = &c->resp_hdr;
 	int ret;
+  ssize_t pkt_len = sizeof(struct srpc_hdr) + c->resp_len;
 
 	/* must have a response payload */
 	if (unlikely(c->resp_len == 0))
 		return -EINVAL;
 
 	/* craft the response header */
-	shdr.magic = RPC_RESP_MAGIC;
-	shdr.op = RPC_OP_CALL;
-	shdr.len = c->resp_len;
-	shdr.win = s->win;
+	shdr->magic = RPC_RESP_MAGIC;
+	shdr->op = RPC_OP_CALL;
+	shdr->len = c->resp_len;
+	shdr->win = s->win;
 
-	/* send the response header */
-	ret = tcp_write_full(s->c, &shdr, sizeof(shdr));
-	if (unlikely(ret < 0))
-		return ret;
-
-	/* send the response payload */
-	ret = tcp_write_full(s->c, c->resp_buf, c->resp_len);
+	/* send the packet */
+	ret = tcp_write_full(s->c, shdr, pkt_len);
 	if (unlikely(ret < 0))
 		return ret;
 
