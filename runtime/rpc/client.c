@@ -10,6 +10,7 @@
 #include <runtime/smalloc.h>
 
 #include "util.h"
+#include "proto.h"
 
 /**
  * crpc_send_one - sends one RPC request
@@ -27,12 +28,12 @@
 ssize_t crpc_send_one(struct crpc_session *s,
 		      const void *buf, size_t len)
 {
-	struct crpc_hdr *chdr;
+	struct iovec vec[2];
+	struct crpc_hdr chdr;
 	ssize_t ret;
-  ssize_t pkt_len = sizeof(struct crpc_hdr) + len;
 
-  if (pkt_len > SRPC_BUF_SIZE)
-    return -ENOBUFS;
+	if (len > SRPC_BUF_SIZE)
+		return -ENOBUFS;
 
 	/* adjust the window */
 	if (atomic_read(&s->win_used) >= s->win_avail)
@@ -40,19 +41,21 @@ ssize_t crpc_send_one(struct crpc_session *s,
 	atomic_inc(&s->win_used);
 
 	/* send the client header */
-  chdr = (struct crpc_hdr *)(s->buf);
-	chdr->magic = RPC_REQ_MAGIC;
-	chdr->op = RPC_OP_CALL;
-	chdr->len = len;
+	chdr.magic = RPC_REQ_MAGIC;
+	chdr.op = RPC_OP_CALL;
+	chdr.len = len;
 
-  /* copy the payload */
-  memcpy(s->buf + sizeof(struct crpc_hdr), buf, len);
+	/* initialize the SG vector */
+	vec[0].iov_base = &chdr;
+	vec[0].iov_len = sizeof(chdr);
+	vec[1].iov_base = (void *)buf;
+	vec[1].iov_len = len;
 
 	/* send the request */
-	ret = tcp_write_full(s->c, s->buf, pkt_len);
+	ret = tcp_writev_full(s->c, vec, 2);
 	if (unlikely(ret < 0))
 		return ret;
-	assert(ret == pkt_len);
+	assert(ret == sizeof(chdr) + len);
 
 	return len;
 }
