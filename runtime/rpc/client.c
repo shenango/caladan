@@ -70,7 +70,7 @@ ssize_t crpc_send_one(struct crpc_session *s,
  *
  * On success, returns the length received in bytes. On failure returns standard
  * socket errors (<= 0).
- */ 
+ */
 ssize_t crpc_recv_one(struct crpc_session *s, void *buf, size_t len)
 {
 	struct srpc_hdr shdr;
@@ -88,25 +88,35 @@ ssize_t crpc_recv_one(struct crpc_session *s, void *buf, size_t len)
 		return -EINVAL;
 	}
 	if (unlikely(shdr.len > MIN(SRPC_BUF_SIZE, len))) {
-		log_warn("srpc: request len %ld too large (limit %ld)",
+		log_warn("crpc: request len %ld too large (limit %ld)",
 			 shdr.len, MIN(SRPC_BUF_SIZE, len));
 		return -EINVAL;
 	}
-	if (unlikely(shdr.op != RPC_OP_CALL)) {
-		log_warn("srpc: got invalid op %d", shdr.op);
+	if (unlikely(shdr.op >= RPC_OP_MAX)) {
+		log_warn("crpc: got invalid op %d", shdr.op);
 		return -EINVAL;
 	}
 
-	/* receive the payload */
-	ret = tcp_read_full(s->c, buf, shdr.len);
- 	if (unlikely(ret <= 0))
-		return ret;
-	assert(ret == shdr.len);
+	if (shdr.op == RPC_OP_CALL) {
+		/* receive the payload */
+		ret = tcp_read_full(s->c, buf, shdr.len);
+		if (unlikely(ret <= 0))
+			return ret;
+		assert(ret == shdr.len);
 
-	/* adjust the window */
-	assert(atomic_read(&s->win_used) > 0);
-	atomic_dec(&s->win_used);
-	ACCESS_ONCE(s->win_avail) = shdr.win;
+		/* adjust the window */
+		assert(atomic_read(&s->win_used) > 0);
+		atomic_dec(&s->win_used);
+		ACCESS_ONCE(s->win_avail) = shdr.win;
+	} else if (shdr.op == RPC_OP_WINUPDATE) {
+		/* update the window */
+		assert(shdr.len == 0);
+		ACCESS_ONCE(s->win_avail) = shdr.win;
+		return crpc_recv_one(s, buf, len);
+	} else {
+		panic("crpc: processing invalid op %d", shdr.op);
+		return -EINVAL;
+	}
 
 	return shdr.len;
 }

@@ -12,6 +12,7 @@
 enum {
 	RPC_OP_CALL = 0,  /* performs a procedure call */
 	RPC_OP_WINUPDATE, /* just updates the window (no call) */
+	RPC_OP_MAX,	  /* maximum number of opcodes */
 };
 
 /* header used for CLIENT -> SERVER */
