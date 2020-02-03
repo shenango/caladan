@@ -32,8 +32,9 @@ ssize_t crpc_send_one(struct crpc_session *s,
 	struct crpc_hdr chdr;
 	ssize_t ret;
 
-	if (len > SRPC_BUF_SIZE)
-		return -ENOBUFS;
+	/* implementation is currently limited to a maximum payload size */
+	if (unlikely(len > SRPC_BUF_SIZE))
+		return -E2BIG;
 
 	/* adjust the window */
 	if (atomic_read(&s->win_used) >= s->win_avail)
