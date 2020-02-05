@@ -85,7 +85,7 @@ static void tcp_rx_append_text(tcpconn_t *c, struct mbuf *m)
 	assert(c->pcb.rcv_wnd >= m->seg_end - m->seg_seq);
 	uint64_t nxt_wnd =  (uint64_t)m->seg_end | ((uint64_t)(c->pcb.rcv_wnd - (m->seg_end - m->seg_seq)) << 32);
 	store_release(&c->pcb.rcv_nxt_wnd, nxt_wnd);
-	if (c->pcb.rcv_wnd == 0)
+	if (unlikely(c->pcb.rcv_wnd <= 2))
 		c->rcv_wnd_full = true;
 	list_add_tail(&c->rxq, &m->link);
 }
@@ -247,6 +247,8 @@ void tcp_rx_conn(struct trans_entry *e, struct mbuf *m)
 	nxt_wnd = (uint64_t)m->seg_end;
 	nxt_wnd |= ((uint64_t)(c->pcb.rcv_wnd - len) << 32);
 	store_release(&c->pcb.rcv_nxt_wnd, nxt_wnd);
+
+	c->rcv_wnd_full = c->pcb.rcv_wnd <= 2;
 
 	list_add_tail(&c->rxq, &m->link);
 	rx_th = waitq_signal(&c->rx_wq, &c->lock);

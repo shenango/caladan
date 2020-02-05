@@ -891,7 +891,8 @@ static int tcp_write_wait(tcpconn_t *c, size_t *winlen)
 
 	/* drop the lock to allow concurrent RX processing */
 	c->tx_exclusive = true;
-	/* TODO: must allow at least one byte to avoid zero window deadlock */
+
+	/* snd_wnd reflects 2 reserved bytes */
 	*winlen = c->pcb.snd_una + c->pcb.snd_wnd - c->pcb.snd_nxt;
 	spin_unlock_np(&c->lock);
 
@@ -965,11 +966,11 @@ ssize_t tcp_write(tcpconn_t *c, const void *buf, size_t len)
 		return c->err ? -c->err : -EPIPE;
 	}
 
-	/* TODO: must allow at least one byte to avoid zero window deadlock */
+	/* snd_wnd reflects 2 reserved bytes */
 	winlen = c->pcb.snd_una + c->pcb.snd_wnd - c->pcb.snd_nxt;
 
 	/* actually send the data */
-	ret = tcp_tx_send(c, buf, MIN(len, winlen), len <= winlen);
+	ret = tcp_tx_send(c, buf, MIN(len, winlen), true);
 
 	c->ack_delayed = (ret < 0);
 	tcp_timer_update(c);
