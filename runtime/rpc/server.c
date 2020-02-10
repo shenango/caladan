@@ -17,21 +17,15 @@
 
 /* the maximum supported window size */
 #define SRPC_MAX_WINDOW		64
-/* the minimum runtime queuing delay */
-#define SRPC_MIN_DELAY_US	20
-/* the maximum runtime queuing delay */
-#define SRPC_MAX_DELAY_US	60
 
 /* the handler function for each RPC */
 static srpc_fn_t srpc_handler;
-/* a list of zero window sessions */
-static LIST_HEAD(srpc_drained);
 
 struct srpc_session {
 	tcpconn_t		*c;
-	struct list_node	drained_link;
 	waitgroup_t		send_waiter;
-	uint32_t		win;
+	bool			probe_pending;
+	bool			probe_accepted;
 
 	/* shared state between receiver and sender */
 	DEFINE_BITMAP(avail_slots, SRPC_MAX_WINDOW);
@@ -63,26 +57,6 @@ static void srpc_put_slot(struct srpc_session *s, int slot)
 	sfree(s->slots[slot]);
 	s->slots[slot] = NULL;
 	bitmap_atomic_set(s->avail_slots, slot);
-}
-
-static void srpc_update_window(struct srpc_session *s)
-{
-	uint64_t us = runtime_standing_queue_us();
-	float alpha;
-
-	/* update window (currently AIMD) */
-	if (us >= SRPC_MIN_DELAY_US) {
-		us = MIN(SRPC_MAX_DELAY_US, us);
-		alpha = (float)(us - SRPC_MIN_DELAY_US) /
-			(float)(SRPC_MAX_DELAY_US - SRPC_MIN_DELAY_US);
-		s->win = (float)s->win * (1.0 - alpha / 2.0);
-	} else {
-		s->win++;
-	}
-
-	/* clamp to supported values */
-	s->win = MAX(s->win, 1);
-	s->win = MIN(s->win, SRPC_MAX_WINDOW - 1);
 }
 
 static void srpc_worker(void *arg)
@@ -125,9 +99,35 @@ static int srpc_recv_one(struct srpc_session *s)
 			 chdr.len, SRPC_BUF_SIZE);
 		return -EINVAL;
 	}
-	if (unlikely(chdr.op != RPC_OP_CALL)) {
+	if (unlikely(chdr.op >= RPC_OP_MAX)) {
 		log_warn("srpc: got invalid op %d", chdr.op);
 		return -EINVAL;
+	}
+
+	/* handle probe request */
+	if (chdr.op == RPC_OP_PROBE) {
+		thread_t *th;
+
+		spin_lock_np(&s->lock);
+		s->probe_pending = true;
+		s->probe_accepted = runtime_standing_queue_us() <= 20;
+		th = s->sender_th;
+		s->sender_th = NULL;
+		spin_unlock_np(&s->lock);
+		if (th)
+			thread_ready(th);
+
+		/* trim payload if the probe wasn't accepted */
+		if (!s->probe_accepted) {
+			char buf[SRPC_BUF_SIZE];
+			ret = tcp_read_full(s->c, buf, chdr.len);
+			if (unlikely(ret <= 0)) {
+				if (ret == 0)
+					return -EIO;
+				return ret;
+			}
+			return 0;
+		}
 	}
 
 	/* reserve a slot */
@@ -146,6 +146,7 @@ static int srpc_recv_one(struct srpc_session *s)
 			return -EIO;
 		return ret;
 	}
+
 	s->slots[idx]->req_len = chdr.len;
 	s->slots[idx]->resp_len = 0;
 	ret = thread_spawn(srpc_worker, s->slots[idx]);
@@ -153,7 +154,26 @@ static int srpc_recv_one(struct srpc_session *s)
 	return ret;
 }
 
-static int srpc_send_one(struct srpc_session *s, struct srpc_ctx *c)
+#define SRPC_RTT	10
+#define SRPC_PROBE_RPS	200000
+
+static atomic_t srpc_conn_count;
+
+static uint64_t srpc_calculate_probe_us(void)
+{
+	/*
+	 * TODO: Could adjust based on actual observed probe rate, not number
+	 * of connections. Should also subtract RTT estimate from delay.
+	 */
+
+	uint64_t delay = ONE_SECOND / SRPC_PROBE_RPS *
+			 atomic_read(&srpc_conn_count);
+	if (delay < SRPC_RTT)
+		delay = SRPC_RTT;
+	return delay - SRPC_RTT;
+}
+
+static int srpc_send_call(struct srpc_session *s, struct srpc_ctx *c)
 {
 	struct iovec vec[2];
 	struct srpc_hdr shdr;
@@ -167,7 +187,9 @@ static int srpc_send_one(struct srpc_session *s, struct srpc_ctx *c)
 	shdr.magic = RPC_RESP_MAGIC;
 	shdr.op = RPC_OP_CALL;
 	shdr.len = c->resp_len;
-	shdr.win = s->win;
+	shdr.delay_us = runtime_standing_queue_us();
+	shdr.probe_us = srpc_calculate_probe_us();
+	shdr.accepted = true;
 
 	/* initialize the SG vector */
 	vec[0].iov_base = &shdr;
@@ -184,18 +206,40 @@ static int srpc_send_one(struct srpc_session *s, struct srpc_ctx *c)
 	return 0;
 }
 
+static int srpc_send_probe(struct srpc_session *s, bool accept)
+{
+	struct srpc_hdr shdr;
+	ssize_t ret;
+
+	/* initialize the header */
+	shdr.magic = RPC_RESP_MAGIC;
+	shdr.op = RPC_OP_PROBE;
+	shdr.len = 0;
+	shdr.delay_us = runtime_standing_queue_us();
+	shdr.probe_us = srpc_calculate_probe_us();
+	shdr.accepted = accept;
+
+	/* send the request */
+	ret = tcp_write_full(s->c, &shdr, sizeof(shdr));
+	if (unlikely(ret < 0))
+		return ret;
+
+	assert(ret == sizeof(shdr));
+	return 0;
+}
+
 static void srpc_sender(void *arg)
 {
 	DEFINE_BITMAP(tmp, SRPC_MAX_WINDOW);
 	struct srpc_session *s = (struct srpc_session *)arg;
 	int ret, i;
-	bool sleep;
+	bool sleep, probe, accepted;
 
 	while (true) {
 		/* find slots that have completed */
 		spin_lock_np(&s->lock);
 		while (true) {
-			sleep = !s->closed &&
+			sleep = !s->closed && !s->probe_pending &&
 				bitmap_popcount(s->completed_slots,
 						SRPC_MAX_WINDOW) == 0;
 			if (!sleep) {
@@ -212,19 +256,27 @@ static void srpc_sender(void *arg)
 		}
 		memcpy(tmp, s->completed_slots, sizeof(tmp));
 		bitmap_init(s->completed_slots, SRPC_MAX_WINDOW, false);
+		probe = s->probe_pending;
+		s->probe_pending = false;
+		accepted = s->probe_accepted;
 		spin_unlock_np(&s->lock);
-		srpc_update_window(s);
+
+		/* send a probe response if requested */
+		/* TODO: okay to only send reject messages? */
+		if (probe && !accepted) {
+			ret = srpc_send_probe(s, accepted);
+			if (unlikely(ret))
+				goto close;
+		}
 
 		/* send a response for each completed slot */
+		ret = 0;
 		bitmap_for_each_set(tmp, SRPC_MAX_WINDOW, i) {
-			ret = srpc_send_one(s, s->slots[i]);
-			if (unlikely(ret)) {
-				bitmap_atomic_or(s->avail_slots, tmp,
-						 SRPC_MAX_WINDOW);
-				goto close;
-			}
+			ret = srpc_send_call(s, s->slots[i]);
 			srpc_put_slot(s, i);
 		}
+		if (unlikely(ret))
+			goto close;
 	}
 
 close:
@@ -237,6 +289,7 @@ close:
 		s->sender_th = thread_self();
 		thread_park_and_unlock_np(&s->lock);
 		spin_lock_np(&s->lock);
+		s->sender_th = NULL;
 	}
 	spin_unlock_np(&s->lock);
 
@@ -256,6 +309,8 @@ static void srpc_server(void *arg)
 	struct srpc_session *s;
 	thread_t *th;
 	int ret;
+
+	atomic_inc(&srpc_conn_count);
 
 	s = smalloc(sizeof(*s));
 	BUG_ON(!s);
@@ -283,6 +338,7 @@ static void srpc_server(void *arg)
 		thread_ready(th);
 
 	waitgroup_wait(&s->send_waiter);
+	atomic_dec(&srpc_conn_count);
 	tcp_close(c);
 	sfree(s);
 }

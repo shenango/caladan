@@ -8,6 +8,7 @@
 #include <base/atomic.h>
 #include <runtime/net.h>
 #include <runtime/tcp.h>
+#include <runtime/sync.h>
 
 
 /*
@@ -38,10 +39,22 @@ extern int srpc_enable(srpc_fn_t handler);
  * Client API
  */
 
+#define CRPC_QLEN		16
+
 struct crpc_session {
 	tcpconn_t		*c;
+	mutex_t			lock;
+	uint64_t		win_update_ts;
 	uint32_t 		win_avail;
-	atomic_t		win_used;
+	uint32_t		win_used;
+	bool			probe_sent;
+	uint64_t		probe_wait_ts;
+
+	/* a queue of pending RPC requests */
+	uint32_t		head;
+	uint32_t		tail;
+	void			*bufs[CRPC_QLEN];
+	size_t			lens[CRPC_QLEN];
 };
 
 extern ssize_t crpc_send_one(struct crpc_session *s,
@@ -57,5 +70,6 @@ extern void crpc_close(struct crpc_session *s);
  */
 static inline bool crpc_is_busy(struct crpc_session *s)
 {
-	return ACCESS_ONCE(s->win_avail) <= atomic_read(&s->win_used);
+	return false;
+	//return ACCESS_ONCE(s->win_avail) <= atomic_read(&s->win_used);
 }

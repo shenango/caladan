@@ -11,7 +11,7 @@
 
 enum {
 	RPC_OP_CALL = 0,  /* performs a procedure call */
-	RPC_OP_WINUPDATE, /* just updates the window (no call) */
+	RPC_OP_PROBE,	  /* offer load to the server */
 	RPC_OP_MAX,	  /* maximum number of opcodes */
 };
 
@@ -25,8 +25,10 @@ struct crpc_hdr {
 
 /* header used for SERVER -> CLIENT */
 struct srpc_hdr {
-	uint32_t	magic; /* must be set to RPC_RESP_MAGIC */
-	uint32_t	op;    /* the opcode */
-	size_t		len;   /* length of response in bytes */
-	uint64_t	win;   /* the offered window size */
+	uint32_t	magic;	 /* must be set to RPC_RESP_MAGIC */
+	uint32_t	op;	 /* the opcode */
+	size_t		len;	 /* length of response in bytes */
+	uint64_t	delay_us;/* the server's queuing delay */
+	uint64_t	probe_us;/* the probe backoff time */
+	bool		accepted;/* was the request accepted by the server? */
 };
