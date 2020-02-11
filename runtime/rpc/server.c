@@ -169,7 +169,7 @@ static uint64_t srpc_calculate_probe_us(void)
 	uint64_t delay = ONE_SECOND / SRPC_PROBE_RPS *
 			 atomic_read(&srpc_conn_count);
 	if (delay < SRPC_RTT)
-		delay = 0;
+		return 0;
 	return delay - SRPC_RTT;
 }
 
