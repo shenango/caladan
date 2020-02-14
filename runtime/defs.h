@@ -375,7 +375,7 @@ struct kthread {
 	uint32_t		rq_tail;
 	struct list_head	rq_overflow;
 	struct lrpc_chan_in	rxq;
-	int			park_efd;
+	pid_t			tid;
 	bool			parked;
 
 	/* 2nd cache-line */

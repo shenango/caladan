@@ -58,7 +58,6 @@ static struct kthread *allock(void)
 	mbufq_init(&k->txpktq_overflow);
 	mbufq_init(&k->txcmdq_overflow);
 	spin_lock_init(&k->timer_lock);
-	BUG_ON(k->park_efd < 0);
 	return k;
 }
 

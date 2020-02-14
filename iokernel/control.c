@@ -91,8 +91,8 @@ static int control_init_hwq(struct shm_region *r,
 	return 0;
 }
 
-static struct proc *control_create_proc(mem_key_t key, size_t len, pid_t pid,
-		int *fds, int n_fds)
+static struct proc *control_create_proc(mem_key_t key, size_t len,
+		 pid_t pid)
 {
 	struct control_hdr hdr;
 	struct shm_region reg = {0};
@@ -120,8 +120,7 @@ static struct proc *control_create_proc(mem_key_t key, size_t len, pid_t pid,
 		goto fail;
 	}
 
-	if (hdr.thread_count > NCPU || hdr.thread_count == 0 ||
-			hdr.thread_count != n_fds)
+	if (hdr.thread_count > NCPU || hdr.thread_count == 0)
 		goto fail;
 
 	if (hdr.sched_cfg.guaranteed_cores + nr_guaranteed >
@@ -182,7 +181,6 @@ static struct proc *control_create_proc(mem_key_t key, size_t len, pid_t pid,
 			goto fail;
 
 		th->tid = s->tid;
-		th->park_efd = fds[i];
 		th->p = p;
 		th->at_idx = UINT_MAX;
 		th->ts_idx = UINT_MAX;
@@ -236,72 +234,10 @@ fail:
 
 static void control_destroy_proc(struct proc *p)
 {
-	int i;
-
-	/* close eventfds */
-	for (i = 0; i < p->thread_count; i++)
-		close(p->threads[i].park_efd);
-
 	nr_guaranteed -= p->sched_cfg.guaranteed_cores;
 	mem_unmap_shm(p->region.base);
 	free(p->overflow_queue);
 	free(p);
-}
-
-/*
- * Receive up to n file descriptors on the unix control socket fd, write them
- * to the array fds. Returns the number of fds on success, < 0 on error.
- */
-static int control_recv_fds(int fd, int *fds, int n)
-{
-	struct msghdr msg;
-	char buf[CMSG_SPACE(sizeof(int) * n)];
-	struct iovec iov[1];
-	char iobuf[1];
-	ssize_t ret;
-	struct cmsghdr *cmptr;
-	int n_fds;
-
-	/* init message header and buffs for control message and iovec */
-	msg.msg_control = buf;
-	msg.msg_controllen = sizeof(buf);
-	msg.msg_name = NULL;
-	msg.msg_namelen = 0;
-
-	iov[0].iov_base = iobuf;
-	iov[0].iov_len = sizeof(iobuf);
-	msg.msg_iov = iov;
-	msg.msg_iovlen = 1;
-
-	ret = recvmsg(fd, &msg, 0);
-	if (ret < 0) {
-		log_debug("control: error with recvmsg %ld", ret);
-		return ret;
-	}
-
-	/* check validity of control message */
-	cmptr = CMSG_FIRSTHDR(&msg);
-	if (cmptr == NULL) {
-		log_debug("control: no cmsg %p", cmptr);
-		return -1;
-	} else if (cmptr->cmsg_len > CMSG_LEN(sizeof(int) * n)) {
-		log_debug("control: cmsg is too long %ld", cmptr->cmsg_len);
-		return -1;
-	} else if (cmptr->cmsg_level != SOL_SOCKET) {
-		log_debug("control: unrecognized cmsg level %d", cmptr->cmsg_level);
-		return -1;
-	} else if (cmptr->cmsg_type != SCM_RIGHTS) {
-		log_debug("control: unrecognized cmsg type %d", cmptr->cmsg_type);
-		return -1;
-	}
-
-	/* determine how many descriptors we received, copy to fds */
-	n_fds = 0;
-	while (CMSG_LEN(sizeof(int) * n_fds) < cmptr->cmsg_len)
-		n_fds++;
-	memcpy(fds, (int *) CMSG_DATA(cmptr), n_fds * sizeof(int));
-
-	return n_fds;
 }
 
 static void control_add_client(void)
@@ -312,8 +248,7 @@ static void control_add_client(void)
 	mem_key_t shm_key;
 	size_t shm_len;
 	ssize_t ret;
-	int fd, n_fds, i;
-	int fds[NCPU];
+	int fd;
 
 	fd = accept(controlfd, NULL, NULL);
 	if (fd == -1) {
@@ -346,16 +281,10 @@ static void control_add_client(void)
 		goto fail;
 	}
 
-	n_fds = control_recv_fds(fd, &fds[0], NCPU);
-	if (n_fds <= 0) {
-		log_err("control: control_recv_fds() failed with ret %d", n_fds);
-		goto fail;
-	}
-
-	p = control_create_proc(shm_key, shm_len, ucred.pid, &fds[0], n_fds);
+	p = control_create_proc(shm_key, shm_len, ucred.pid);
 	if (!p) {
 		log_err("control: failed to create process '%d'", ucred.pid);
-		goto fail_close_fds;
+		goto fail;
 	}
 
 	if (!lrpc_send(&lrpc_control_to_data, DATAPLANE_ADD_CLIENT,
@@ -371,9 +300,6 @@ static void control_add_client(void)
 
 fail_destroy_proc:
 	control_destroy_proc(p);
-fail_close_fds:
-	for (i = 0; i < n_fds; i++)
-		close(fds[i]);
 fail:
 	close(fd);
 }

@@ -224,7 +224,6 @@ static inline void list_add_before(struct list_node *next, struct list_node *n)
  */
 static inline bool list_empty(const struct list_head *h)
 {
-	(void)list_debug(h);
 	return h->n.next == &h->n;
 }
 
