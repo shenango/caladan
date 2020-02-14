@@ -155,6 +155,25 @@ static bool work_available(struct kthread *k)
 	        !list_empty(&k->rq_overflow) || softirq_work_available(k);
 }
 
+static void update_oldest_tsc(struct kthread *k)
+{
+	/* oldest thread in runqueue */
+	thread_t *th;
+	uint64_t oldest_tsc = UINT64_MAX;
+
+	assert_spin_lock_held(&k->lock);
+
+	if (load_acquire(&k->rq_head) - k->rq_tail)
+		th = k->rq[k->rq_tail % RUNTIME_RQ_SIZE];
+	else
+		th = list_top(&k->rq_overflow, struct thread, link);
+
+	if (th)
+		oldest_tsc = th->ready_tsc;
+
+	ACCESS_ONCE(k->q_ptrs->oldest_tsc) = oldest_tsc;
+}
+
 static bool steal_work(struct kthread *l, struct kthread *r)
 {
 	thread_t *th;
@@ -181,6 +200,7 @@ static bool steal_work(struct kthread *l, struct kthread *r)
 			list_add_tail(&l->rq_overflow, &r->rq[rq_tail++ % RUNTIME_RQ_SIZE]->link);
 		store_release(&r->rq_tail, rq_tail);
 		ACCESS_ONCE(r->q_ptrs->rq_tail) += avail;
+		update_oldest_tsc(r);
 		spin_unlock(&r->lock);
 
 		l->rq_head = lrq_head;
@@ -193,6 +213,7 @@ static bool steal_work(struct kthread *l, struct kthread *r)
 	th = list_pop(&r->rq_overflow, thread_t, link);
 	if (th) {
 		ACCESS_ONCE(r->q_ptrs->rq_tail)++;
+		update_oldest_tsc(r);
 		goto done;
 	}
 
@@ -353,6 +374,8 @@ done:
 	if (unlikely(!list_empty(&l->rq_overflow)))
 		drain_overflow(l);
 
+	update_oldest_tsc(l);
+
 	spin_unlock(&l->lock);
 
 	/* update exit stat counters */
@@ -399,6 +422,7 @@ static __always_inline void enter_schedule(thread_t *myth)
 	/* pop the next runnable thread from the queue */
 	th = k->rq[k->rq_tail++ % RUNTIME_RQ_SIZE];
 	ACCESS_ONCE(k->q_ptrs->rq_tail)++;
+	update_oldest_tsc(k);
 	spin_unlock(&k->lock);
 
 	/* increment the RCU generation number (odd is in thread) */
@@ -501,6 +525,7 @@ void thread_ready(thread_t *th)
 		STAT(REMOTE_WAKES)++;
 	rq_tail = load_acquire(&k->rq_tail);
 	ACCESS_ONCE(k->q_ptrs->rq_head)++;
+	th->ready_tsc = rdtsc();
 	if (unlikely(k->rq_head - rq_tail >= RUNTIME_RQ_SIZE)) {
 		assert(k->rq_head - rq_tail == RUNTIME_RQ_SIZE);
 		spin_lock(&k->lock);

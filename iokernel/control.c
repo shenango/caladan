@@ -62,6 +62,7 @@ static int control_init_hwq(struct shm_region *r,
 {
 	if (hs->hwq_type == HWQ_INVALID) {
 		h->enabled = false;
+		h->busy_since = UINT64_MAX;
 		return 0;
 	}
 
@@ -83,6 +84,7 @@ static int control_init_hwq(struct shm_region *r,
 	if (h->parity_byte_offset > (1 << h->descriptor_log_size))
 		return -EINVAL;
 
+	h->busy_since = UINT64_MAX;
 	h->last_head = 0;
 	h->last_tail = 0;
 
@@ -190,6 +192,7 @@ static struct proc *control_create_proc(mem_key_t key, size_t len, pid_t pid,
 				sizeof(struct q_ptrs));
 		if (!th->q_ptrs)
 			goto fail;
+		th->q_ptrs->oldest_tsc = UINT64_MAX;
 
 		ret = control_init_hwq(&reg, &s->direct_rxq, &th->directpath_hwq);
 		if (ret)

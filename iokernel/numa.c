@@ -263,7 +263,8 @@ static int numa_notify_core_needed(struct proc *p)
 }
 
 static void numa_notify_congested(struct proc *p, bitmap_ptr_t threads,
-				    bitmap_ptr_t io)
+				    bitmap_ptr_t io, uint64_t rq_oldest_tsc,
+				    uint64_t pkq_oldest_tsc)
 {
 	struct numa_data *sd = (struct numa_data *)p->policy_data;
 	int ret;
