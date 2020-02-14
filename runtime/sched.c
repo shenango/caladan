@@ -140,6 +140,7 @@ static void drain_overflow(struct kthread *l)
 	thread_t *th;
 
 	assert_spin_lock_held(&l->lock);
+	assert(myk() == l || l->parked);
 
 	while (l->rq_head - l->rq_tail < RUNTIME_RQ_SIZE) {
 		th = list_pop(&l->rq_overflow, thread_t, link);
@@ -151,6 +152,11 @@ static void drain_overflow(struct kthread *l)
 
 static bool work_available(struct kthread *k)
 {
+#ifdef GC
+	if (get_gc_gen() != ACCESS_ONCE(k->local_gc_gen) && ACCESS_ONCE(k->parked))
+		return true;
+#endif
+
 	return ACCESS_ONCE(k->rq_tail) != ACCESS_ONCE(k->rq_head) ||
 	        !list_empty(&k->rq_overflow) || softirq_work_available(k);
 }
@@ -186,6 +192,16 @@ static bool steal_work(struct kthread *l, struct kthread *r)
 	if (!spin_try_lock(&r->lock))
 		return false;
 
+#ifdef GC
+	if (unlikely(get_gc_gen() != r->local_gc_gen)) {
+		if (!ACCESS_ONCE(r->parked)) {
+			spin_unlock(&r->lock);
+			return false;
+		}
+		gc_kthread_report(r);
+		drain_overflow(r);
+	}
+#endif
 	/* try to steal directly from the runqueue */
 	avail = load_acquire(&r->rq_head) - r->rq_tail;
 	if (avail) {
@@ -285,6 +301,11 @@ static __noreturn __noinline void schedule(void)
 	store_release(&l->rcu_gen, l->rcu_gen + 1);
 	assert((l->rcu_gen & 0x1) == 0x0);
 
+#ifdef GC
+	if (unlikely(get_gc_gen() != l->local_gc_gen))
+		gc_kthread_report(l);
+#endif
+
 	/* check if we need to refresh performance counters */
 	if (start_tsc - last_pmc_tsc >= cycles_per_us * RUNTIME_PMC_US) {
 		last_pmc_tsc = start_tsc;
@@ -340,6 +361,11 @@ again:
 		STAT(SOFTIRQS_LOCAL)++;
 		goto done;
 	}
+
+#ifdef GC
+	if (unlikely(get_gc_gen() != l->local_gc_gen))
+		gc_kthread_report(l);
+#endif
 
 	/* keep trying to find work until the polling timeout expires */
 	if (!preempt_cede_needed() &&
@@ -408,6 +434,9 @@ static __always_inline void enter_schedule(thread_t *myth)
 
 	/* slow path: switch from the uthread stack to the runtime stack */
 	if (k->rq_head == k->rq_tail ||
+#ifdef GC
+	    get_gc_gen() != k->local_gc_gen ||
+#endif
 	    (!disable_watchdog &&
 	     unlikely(now - last_watchdog_tsc >
 		      cycles_per_us * RUNTIME_WATCHDOG_US))) {
@@ -629,6 +658,7 @@ thread_t *thread_create(thread_fn_t fn, void *arg)
 	th->tf.rbp = (uint64_t)0; /* just in case base pointers are enabled */
 	th->tf.rip = (uint64_t)fn;
 	th->stack_busy = false;
+	gc_register_thread(th);
 	return th;
 }
 
@@ -655,6 +685,7 @@ thread_t *thread_create_with_buf(thread_fn_t fn, void **buf, size_t buf_len)
 	th->tf.rip = (uint64_t)fn;
 	th->stack_busy = false;
 	*buf = ptr;
+	gc_register_thread(th);
 	return th;
 }
 
@@ -707,6 +738,8 @@ static void thread_finish_exit(void)
 	/* if the main thread dies, kill the whole program */
 	if (unlikely(th->main_thread))
 		init_shutdown(EXIT_SUCCESS);
+
+	gc_remove_thread(th);
 	stack_free(th->stack);
 	tcache_free(&perthread_get(thread_pt), th);
 	__self = NULL;
@@ -738,11 +771,13 @@ static __noreturn void schedule_start(void)
 	 * initially). Update RCU generation so it stays even after entering
 	 * schedule().
 	 */
+	ACCESS_ONCE(k->parked) = true;
 	kthread_wait_to_attach();
 	last_tsc = rdtsc();
 	store_release(&k->rcu_gen, 1);
 
 	spin_lock(&k->lock);
+	k->parked = false;
 	schedule();
 }
 

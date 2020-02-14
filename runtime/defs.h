@@ -16,6 +16,7 @@
 #include <net/ip.h>
 #include <iokernel/control.h>
 #include <net/mbufq.h>
+#include <runtime/gc.h>
 #include <runtime/net.h>
 #include <runtime/runtime.h>
 #include <runtime/thread.h>
@@ -104,6 +105,10 @@ struct thread {
 	unsigned int		stack_busy;
 	unsigned int		last_cpu;
 	uint64_t		ready_tsc;
+#ifdef GC
+	struct list_node	gc_link;
+	unsigned int		onk;
+#endif
 };
 
 typedef void (*runtime_fn_t)(void);
@@ -384,7 +389,12 @@ struct kthread {
 	struct mbufq		txcmdq_overflow;
 	unsigned int		rcu_gen;
 	unsigned int		curr_cpu;
+#ifdef GC
+	uint64_t		local_gc_gen;
+	unsigned long		pad1[1];
+#else
 	unsigned long		pad1[2];
+#endif
 
 	/* 3rd cache-line */
 	struct lrpc_chan_out	txpktq;
@@ -592,6 +602,9 @@ static inline bool softirq_work_available(struct kthread *k)
 {
 	bool work_available;
 
+	if (unlikely(is_world_stopped()))
+		return false;
+
 	work_available = rx_pending(k->directpath_rxq) ||
 	  !lrpc_empty(&k->rxq) || timer_needed(k);
 
@@ -615,6 +628,9 @@ static inline bool timer_available_soon(struct kthread *k, uint64_t now)
  */
 static inline bool softirq_work_soon(struct kthread *k, uint64_t now)
 {
+	if (unlikely(is_world_stopped()))
+		return false;
+
 	return storage_pending_completions(&k->storage_q) ||
 		timer_available_soon(k, now);
 }
@@ -647,6 +663,9 @@ extern int trans_init(void);
 extern int smalloc_init(void);
 extern int storage_init(void);
 extern int directpath_init(void);
+#ifdef GC
+extern int gc_init(void);
+#endif
 
 /* late initialization */
 extern int ioqueues_register_iokernel(void);
