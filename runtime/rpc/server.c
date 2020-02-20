@@ -110,7 +110,7 @@ static int srpc_recv_one(struct srpc_session *s)
 
 		spin_lock_np(&s->lock);
 		s->probe_pending = true;
-		s->probe_accepted = runtime_standing_queue_us() <= 20;
+		s->probe_accepted = runtime_queue_us() <= 20;
 		th = s->sender_th;
 		s->sender_th = NULL;
 		spin_unlock_np(&s->lock);
@@ -187,7 +187,7 @@ static int srpc_send_call(struct srpc_session *s, struct srpc_ctx *c)
 	shdr.magic = RPC_RESP_MAGIC;
 	shdr.op = RPC_OP_CALL;
 	shdr.len = c->resp_len;
-	shdr.delay_us = runtime_standing_queue_us();
+	shdr.delay_us = runtime_queue_us();
 	shdr.probe_us = srpc_calculate_probe_us();
 	shdr.accepted = true;
 
@@ -215,7 +215,7 @@ static int srpc_send_probe(struct srpc_session *s, bool accept)
 	shdr.magic = RPC_RESP_MAGIC;
 	shdr.op = RPC_OP_PROBE;
 	shdr.len = 0;
-	shdr.delay_us = runtime_standing_queue_us();
+	shdr.delay_us = runtime_queue_us();
 	shdr.probe_us = srpc_calculate_probe_us();
 	shdr.accepted = accept;
 

@@ -19,6 +19,11 @@ inline uint64_t RuntimeStandingQueueUS() {
   return runtime_standing_queue_us();
 }
 
+// Gets the queueing delay of runqueue (thread queue) + packet queue
+inline uint64_t RuntimeQueueUS() {
+  return runtime_queue_us();
+}
+
 // Gets an estimate of the instantanious load as measured by the IOKernel.
 inline float RuntimeLoad() {
   return runtime_load();

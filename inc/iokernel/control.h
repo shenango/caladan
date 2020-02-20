@@ -31,11 +31,14 @@ struct q_ptrs {
 	uint32_t		storage_tail;
 	uint64_t		instr;
 	uint64_t		tsc;
+	uint64_t		oldest_tsc;
 };
 
 struct congestion_info {
 	float			load;
 	uint64_t		standing_queue_us;
+	uint64_t		rq_oldest_tsc;
+	uint64_t		pkq_oldest_tsc;
 };
 
 enum {

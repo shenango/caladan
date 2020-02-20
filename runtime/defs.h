@@ -103,6 +103,7 @@ struct thread {
 	unsigned int		state;
 	unsigned int		stack_busy;
 	unsigned int		last_cpu;
+	uint64_t		ready_tsc;
 };
 
 typedef void (*runtime_fn_t)(void);
