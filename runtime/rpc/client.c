@@ -12,16 +12,7 @@
 #include "util.h"
 #include "proto.h"
 
-/* the maximum supported window size */
-#define CRPC_MAX_WINDOW		64
-/* the minimum runtime queuing delay */
-#define CRPC_MIN_DELAY_US	20
-/* the maximum runtime queuing delay */
-#define CRPC_MAX_DELAY_US	60
-/* the credit expiration time */
-#define CRPC_CREDIT_EXPIRE_US	20
-
-static ssize_t crpc_send_raw(struct crpc_session *s, bool probe,
+static ssize_t crpc_send_raw(struct crpc_session *s, bool droppable,
 			     const void *buf, size_t len)
 {
 	struct iovec vec[2];
@@ -30,9 +21,8 @@ static ssize_t crpc_send_raw(struct crpc_session *s, bool probe,
 
 	/* initialize the header */
 	chdr.magic = RPC_REQ_MAGIC;
-	chdr.op = probe ? RPC_OP_PROBE : RPC_OP_CALL;
+	chdr.op = droppable ? RPC_OP_DROPCALL : RPC_OP_CALL;
 	chdr.len = len;
-	chdr.demand = s->head - s->tail;
 
 	/* initialize the SG vector */
 	vec[0].iov_base = &chdr;
@@ -49,54 +39,11 @@ static ssize_t crpc_send_raw(struct crpc_session *s, bool probe,
 	return len;
 }
 
-static void crpc_drain_queue(struct crpc_session *s)
+static bool crpc_get_token(struct crpc_session *s)
 {
-	bool can_probe = !s->probe_sent && s->win_avail == 0 &&
-			 s->win_used == 0 && s->probe_wait_ts <= microtime();
-	bool do_probe = false;
-	ssize_t ret;
-	int pos;
-
-	assert_mutex_held(&s->lock);
-
-	/* try to drain queued requests */
-	while (s->head != s->tail) {
-		/* is the window empty? */
-		if (s->win_used >= s->win_avail) {
-			if (!can_probe)
-				break;
-			do_probe = true;
-		}
-
-		pos = s->tail++ % CRPC_QLEN;
-		ret = crpc_send_raw(s, do_probe, s->bufs[pos], s->lens[pos]);
-		if (ret < 0)
-			break;
-		assert(ret == s->lens[pos]);
-		s->win_used++;
-		if (do_probe)
-			break;
-	}
-}
-
-static bool crpc_enqueue_one(struct crpc_session *s,
-			     const void *buf, size_t len)
-{
-	int pos;
-
-	assert_mutex_held(&s->lock);
-
-	/* is the queue full? */
-	if (s->head - s->tail >= CRPC_QLEN)
+	if (s->tokens < 1.0)
 		return false;
-
-	/* if can't probe, drop the request */
-	if (s->probe_wait_ts > microtime())
-		return false;
-
-	pos = s->head++ % CRPC_QLEN;
-	memcpy(s->bufs[pos], buf, len);
-	s->lens[pos] = len;
+	s->tokens -= 1.0;
 	return true;
 }
 
@@ -122,47 +69,18 @@ ssize_t crpc_send_one(struct crpc_session *s,
 	if (unlikely(len > SRPC_BUF_SIZE))
 		return -E2BIG;
 
-	mutex_lock(&s->lock);
+	spin_lock_np(&s->lock);
 
-	/* expire stale credits */
-	if (microtime() >= s->win_update_ts + CRPC_CREDIT_EXPIRE_US)
-		s->win_avail = s->win_used;
-
-	/* hot path, just send */
-	if (s->win_used < s->win_avail && s->head == s->tail) {
-		s->win_used++;
-		ret = crpc_send_raw(s, false, buf, len);
-		mutex_unlock(&s->lock);
+	/* send the request if the token bucket allows it */
+	if (crpc_get_token(s)) {
+		spin_unlock_np(&s->lock);
+		ret = crpc_send_raw(s, true, buf, len);
 		return ret;
 	}
 
-	/* cold path, enqueue request and drain queue */
-	if (!crpc_enqueue_one(s, buf, len)) {
-		mutex_unlock(&s->lock);
-		return -ENOBUFS;
-	}
-	crpc_drain_queue(s);
-	mutex_unlock(&s->lock);
+	spin_unlock_np(&s->lock);
 
-	return len;
-}
-
-static void crpc_update_window(struct crpc_session *s, uint64_t us)
-{
-	float alpha;
-
-	/* update window (currently AIMD w/ DCTCP tweak) */
-	if (us >= CRPC_MIN_DELAY_US) {
-		us = MIN(CRPC_MAX_DELAY_US, us);
-		alpha = (float)(us - CRPC_MIN_DELAY_US) /
-			(float)(CRPC_MAX_DELAY_US - CRPC_MIN_DELAY_US);
-		s->win_avail = (float)s->win_avail * (1.0 - alpha / 2.0);
-	} else {
-		s->win_avail++;
-	}
-
-	/* clamp to supported values */
-	s->win_avail = MIN(s->win_avail, CRPC_MAX_WINDOW - 1);
+	return -ENOBUFS;
 }
 
 /**
@@ -211,27 +129,12 @@ again:
 		assert(ret == shdr.len);
 	}
 
-	mutex_lock(&s->lock);
-	crpc_update_window(s, shdr.delay_us);
-	assert(s->win_used > 0);
-	s->win_used--;
-	s->probe_sent = false;
+	spin_lock_np(&s->lock);
+	s->tokens += shdr.tokens;
+	/* TODO: handle rejected requests */
+	spin_unlock_np(&s->lock);
 
-	/* drain the queue and send another probe if allowed/needed */
-	if (shdr.delay_us > CRPC_MIN_DELAY_US || !shdr.accepted)
-		s->probe_wait_ts = microtime() + shdr.probe_us;
-	else
-		s->probe_wait_ts = 0;
-	crpc_drain_queue(s);
-
-	/* if the delay was high, drop the remaining queue */
-	if (shdr.delay_us > CRPC_MIN_DELAY_US || !shdr.accepted)
-		s->head = s->tail = 0;
-
-	s->win_update_ts = microtime();
-	mutex_unlock(&s->lock);
-
-	if (shdr.op != RPC_OP_CALL)
+	if (!shdr.accepted)
 		goto again;
 	return shdr.len;
 }
@@ -250,7 +153,7 @@ int crpc_open(struct netaddr raddr, struct crpc_session **sout)
 	struct netaddr laddr;
 	struct crpc_session *s;
 	tcpconn_t *c;
-	int i, ret;
+	int ret;
 
 	/* set up ephemeral IP and port */
 	laddr.ip = 0;
@@ -270,23 +173,11 @@ int crpc_open(struct netaddr raddr, struct crpc_session **sout)
 	}
 	memset(s, 0, sizeof(*s));
 
-	for (i = 0; i < CRPC_QLEN; i++) {
-		s->bufs[i] = smalloc(SRPC_BUF_SIZE);
-		if (!s->bufs[i])
-			goto fail;
-	}
-
 	s->c = c;
-	mutex_init(&s->lock);
+	s->tokens = 1.0;
+	spin_lock_init(&s->lock);
 	*sout = s;
 	return 0;
-
-fail:
-	tcp_close(c);
-	for (i = i - 1; i >= 0; i--)
-		sfree(s->bufs[i]);
-	sfree(s);
-	return -ENOMEM;
 }
 
 /**
@@ -297,10 +188,6 @@ fail:
  */
 void crpc_close(struct crpc_session *s)
 {
-	int i;
-
 	tcp_close(s->c);
-	for (i = 0; i < CRPC_QLEN; i++)
-		sfree(s->bufs[i]);
 	sfree(s);
 }

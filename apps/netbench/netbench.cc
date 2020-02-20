@@ -10,6 +10,7 @@ extern "C" {
 #include "synthetic_worker.h"
 #include "thread.h"
 #include "timer.h"
+#include "rpc.h"
 
 #include <algorithm>
 #include <chrono>
@@ -124,50 +125,41 @@ struct payload {
 
 // The maximum lateness to tolerate before dropping egress samples.
 constexpr uint64_t kMaxCatchUpUS = 5;
+static SyntheticWorker *workers[NCPU];
 
-void ServerWorker(std::unique_ptr<rt::TcpConn> c) {
-  payload p;
-  std::unique_ptr<SyntheticWorker> w(
-      SyntheticWorkerFactory("stridedmem:3200:64"));
-  if (w == nullptr) panic("couldn't create worker");
-
-  while (true) {
-    // Receive a work request.
-    ssize_t ret = c->ReadFull(&p, sizeof(p));
-    if (ret != static_cast<ssize_t>(sizeof(p))) {
-      if (ret == 0 || ret == -ECONNRESET) break;
-      log_err("read failed, ret = %ld", ret);
-      break;
-    }
-
-    // Perform fake work if requested.
-    uint64_t workn = ntoh64(p.work_iterations);
-    if (workn != 0) w->Work(workn);
-    p.tsc_end = hton64(rdtscp(&p.cpu));
-    p.cpu = hton32(p.cpu);
-
-    // Send a work response.
-    ssize_t sret = c->WriteFull(&p, ret);
-    if (sret != ret) {
-      if (sret == -EPIPE || sret == -ECONNRESET) break;
-      log_err("write failed, ret = %ld", sret);
-      break;
-    }
+void RpcServer(struct srpc_ctx *ctx) {
+  // Validate and parse the request.
+  if (unlikely(ctx->req_len != sizeof(payload))) {
+    log_err("got invalid RPC len %ld", ctx->req_len);
+    return;
   }
+  const payload *in = reinterpret_cast<const payload *>(ctx->req_buf);
+
+  // Perform the synthetic work.
+  SyntheticWorker *w = workers[get_current_affinity()];
+  uint64_t workn = ntoh64(in->work_iterations);
+  if (workn != 0) w->Work(workn);
+
+  // Craft a response.
+  ctx->resp_len = sizeof(payload);
+  payload *out = reinterpret_cast<payload *>(ctx->resp_buf);
+  memcpy(out, in, sizeof(*out));
+  out->tsc_end = hton64(rdtscp(&out->cpu));
+  out->cpu = hton32(out->cpu);
 }
 
 void ServerHandler(void *arg) {
   rt::Thread([] { UptimeServer(); }).Detach();
-
-  std::unique_ptr<rt::TcpQueue> q(
-      rt::TcpQueue::Listen({0, kNetbenchPort}, 4096));
-  if (q == nullptr) panic("couldn't listen for connections");
-
-  while (true) {
-    rt::TcpConn *c = q->Accept();
-    if (c == nullptr) panic("couldn't accept a connection");
-    rt::Thread([=] { ServerWorker(std::unique_ptr<rt::TcpConn>(c)); }).Detach();
+  for (int i = 0; i < rt::RuntimeMaxCores(); ++i) {
+    workers[i] = SyntheticWorkerFactory("stridedmem:3200:64");
+    if (workers[i] == nullptr) panic("cannot create worker");
   }
+
+  int ret = rt::RpcServerEnable(RpcServer);
+  if (ret) panic("couldn't enable RPC server");
+
+  // waits forever.
+  rt::WaitGroup(1).Wait();
 }
 
 struct work_unit {
@@ -188,9 +180,8 @@ std::vector<work_unit> GenerateWork(Arrival a, Service s, double cur_us,
 }
 
 std::vector<work_unit> ClientWorker(
-    rt::TcpConn *c, rt::WaitGroup *starter,
+    rt::RpcClient *c, rt::WaitGroup *starter,
     std::function<std::vector<work_unit>()> wf) {
-  constexpr int kBatchSize = 32;
   std::vector<work_unit> w(wf());
   std::vector<time_point<steady_clock>> timings;
   timings.reserve(w.size());
@@ -200,7 +191,7 @@ std::vector<work_unit> ClientWorker(
     payload rp;
 
     while (true) {
-      ssize_t ret = c->ReadFull(&rp, sizeof(rp));
+      ssize_t ret = c->Recv(&rp, sizeof(rp));
       if (ret != static_cast<ssize_t>(sizeof(rp))) {
         if (ret == 0 || ret < 0) break;
         panic("read failed, ret = %ld", ret);
@@ -224,8 +215,7 @@ std::vector<work_unit> ClientWorker(
   auto expstart = steady_clock::now();
   barrier();
 
-  payload p[kBatchSize];
-  int j = 0;
+  payload p;
   auto wsize = w.size();
 
   for (unsigned int i = 0; i < wsize; ++i) {
@@ -233,11 +223,6 @@ std::vector<work_unit> ClientWorker(
     auto now = steady_clock::now();
     barrier();
     if (duration_cast<sec>(now - expstart).count() < w[i].start_us) {
-      ssize_t ret = c->WriteFull(p, sizeof(payload) * j);
-      if (ret != static_cast<ssize_t>(sizeof(payload) * j))
-        panic("write failed, ret = %ld", ret);
-      j = 0;
-      now = steady_clock::now();
       rt::Sleep(w[i].start_us - duration_cast<sec>(now - expstart).count());
     }
     if (duration_cast<sec>(now - expstart).count() - w[i].start_us >
@@ -248,17 +233,13 @@ std::vector<work_unit> ClientWorker(
     timings[i] = steady_clock::now();
     barrier();
 
-    // Enqueue a network request.
-    p[j].work_iterations = hton64(w[i].work_us * kIterationsPerUS);
-    p[j].index = hton64(i);
-    j++;
-
-    if (j >= kBatchSize || i == wsize - 1) {
-      ssize_t ret = c->WriteFull(p, sizeof(payload) * j);
-      if (ret != static_cast<ssize_t>(sizeof(payload) * j))
+    // Send an RPC request.
+    p.work_iterations = hton64(w[i].work_us * kIterationsPerUS);
+    p.index = hton64(i);
+    ssize_t ret = c->Send(&p, sizeof(p));
+    if (ret != static_cast<ssize_t>(sizeof(p)))
+      if (ret != -ENOBUFS)
         panic("write failed, ret = %ld", ret);
-      j = 0;
-    }
   }
 
   // rt::Sleep(1 * rt::kSeconds);
@@ -272,9 +253,9 @@ std::vector<work_unit> RunExperiment(
     int threads, double *reqs_per_sec, double *cpu_usage,
     std::function<std::vector<work_unit>()> wf) {
   // Create one TCP connection per thread.
-  std::vector<std::unique_ptr<rt::TcpConn>> conns;
+  std::vector<std::unique_ptr<rt::RpcClient>> conns;
   for (int i = 0; i < threads; ++i) {
-    std::unique_ptr<rt::TcpConn> outc(rt::TcpConn::Dial({0, 0}, raddr));
+    std::unique_ptr<rt::RpcClient> outc(rt::RpcClient::Dial(raddr));
     if (unlikely(outc == nullptr)) panic("couldn't connect to raddr.");
     conns.emplace_back(std::move(outc));
   }
@@ -309,7 +290,7 @@ std::vector<work_unit> RunExperiment(
   barrier();
   uptime u2 = ReadUptime();
 
-  // Close the connections.
+  // Force the connections to close.
   for (auto &c : conns) c->Abort();
 
   // Aggregate all the samples together.

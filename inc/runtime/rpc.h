@@ -43,18 +43,9 @@ extern int srpc_enable(srpc_fn_t handler);
 
 struct crpc_session {
 	tcpconn_t		*c;
-	mutex_t			lock;
-	uint64_t		win_update_ts;
-	uint32_t 		win_avail;
+	spinlock_t		lock;
 	uint32_t		win_used;
-	bool			probe_sent;
-	uint64_t		probe_wait_ts;
-
-	/* a queue of pending RPC requests */
-	uint32_t		head;
-	uint32_t		tail;
-	void			*bufs[CRPC_QLEN];
-	size_t			lens[CRPC_QLEN];
+	float			tokens;
 };
 
 extern ssize_t crpc_send_one(struct crpc_session *s,
@@ -70,6 +61,5 @@ extern void crpc_close(struct crpc_session *s);
  */
 static inline bool crpc_is_busy(struct crpc_session *s)
 {
-	return false;
-	//return ACCESS_ONCE(s->win_avail) <= atomic_read(&s->win_used);
+	return ACCESS_ONCE(s->tokens) < 1.0;
 }
