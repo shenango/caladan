@@ -26,12 +26,11 @@ static void handle_sigusr1(int s, siginfo_t *si, void *c)
 {
 	STAT(PREEMPTIONS)++;
 	set_preempt_needed();
+	preempt_cede = true;
 
 	/* resume execution if preemption is disabled */
-	if (!preempt_enabled()) {
-		preempt_cede = true;
+	if (!preempt_enabled())
 		return;
-	}
 
 	thread_cede();
 }
@@ -40,14 +39,24 @@ static void handle_sigusr1(int s, siginfo_t *si, void *c)
 static void handle_sigusr2(int s, siginfo_t *si, void *c)
 {
 	STAT(PREEMPTIONS)++;
-	set_preempt_needed();
+
+	/*
+	 * handle the case when SIGUSR1 is delivered while preemption is
+	 * disabled, preemption is reenabled, and a SIGUSR2 is delivered
+	 * before/during a call to preempt
+	 */
+	if (preempt_cede)
+		return;
 
 	/* resume execution if preemption is disabled */
-	if (!preempt_enabled())
+	if (!preempt_enabled()) {
+		set_preempt_needed();
 		return;
+	}
 
 	thread_yield();
 }
+
 
 /**
  * preempt - entry point for preemption
@@ -55,13 +64,14 @@ static void handle_sigusr2(int s, siginfo_t *si, void *c)
 void preempt(void)
 {
 	assert(preempt_needed());
-	if (preempt_cede) {
-		preempt_cede = false;
+	clear_preempt_needed();
+	if (preempt_cede)
 		thread_cede();
-	} else {
+	else
 		thread_yield();
-	}
 }
+
+
 
 /**
  * preempt_init - global initializer for preemption support
@@ -79,18 +89,29 @@ int preempt_init(void)
 		return -errno;
 	}
 
-	act.sa_sigaction = handle_sigusr1;
-	if (sigaction(SIGUSR1, &act, NULL) == -1) {
-		log_err("couldn't register signal handler");
-		return -errno;
-	}
-
 	act.sa_sigaction = handle_sigusr2;
 	if (sigaction(SIGUSR2, &act, NULL) == -1) {
 		log_err("couldn't register signal handler");
 		return -errno;
 	}
 
+	act.sa_sigaction = handle_sigusr1;
+
+	/* block signals during SIGUSR1 */
+	if (sigaddset(&act.sa_mask, SIGUSR2) != 0) {
+		log_err("couldn't set signal handler mask");
+		return -errno;
+	}
+
+	if (sigaddset(&act.sa_mask, SIGUSR1) != 0) {
+		log_err("couldn't set signal handler mask");
+		return -errno;
+	}
+
+	if (sigaction(SIGUSR1, &act, NULL) == -1) {
+		log_err("couldn't register signal handler");
+		return -errno;
+	}
 
 	return 0;
 }

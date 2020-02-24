@@ -54,7 +54,7 @@ static void softirq_gather_work(struct softirq_work *w, struct kthread *k,
 
 	real_budget = MIN(budget, SOFTIRQ_MAX_BUDGET);
 
-	while (!preempt_needed()) {
+	while (!preempt_cede_needed()) {
 		uint64_t cmd;
 		unsigned long payload;
 

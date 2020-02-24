@@ -342,7 +342,7 @@ again:
 	}
 
 	/* keep trying to find work until the polling timeout expires */
-	if (!preempt_needed() &&
+	if (!preempt_cede_needed() &&
 	    (++iters < RUNTIME_SCHED_POLL_ITERS ||
 	     rdtsc() - start_tsc < cycles_per_us * RUNTIME_SCHED_MIN_POLL_US ||
 	     softirq_work_soon(l, start_tsc)))
@@ -354,7 +354,7 @@ again:
 	/* did not find anything to run, park this kthread */
 	STAT(SCHED_CYCLES) += rdtsc() - start_tsc;
 	/* we may have got a preempt signal before voluntarily yielding */
-	kthread_park(!preempt_needed());
+	kthread_park(!preempt_cede_needed());
 	start_tsc = rdtsc();
 	iters = 0;
 

@@ -31,6 +31,7 @@
 #include <linux/sched/task.h>
 #include <linux/smp.h>
 #include <linux/uaccess.h>
+#include <linux/signal.h>
 
 #include "ksched.h"
 #include "../iokernel/pmc.h"
@@ -225,10 +226,15 @@ static long ksched_park(void)
 	unsigned long gen;
 	pid_t tid;
 	int cpu;
+	sigset_t em;
 
 	cpu = get_cpu();
 	p = this_cpu_ptr(&kp);
 	s = &shm[cpu];
+
+	/* clear blocked signals */
+	sigemptyset(&em);
+	WARN_ON_ONCE(sigprocmask(SIG_SETMASK, &em, NULL));
 
 	local_set(&p->busy, false);
 
