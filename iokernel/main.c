@@ -129,7 +129,7 @@ void dataplane_loop(void)
 
 static void print_usage(void)
 {
-	printf("usage: POLICY [noht/core_list]\n");
+	printf("usage: POLICY [noht/core_list/nobw/mutualpair]\n");
 	printf("\tsimple: the standard, basic scheduler policy\n");
 	printf("\tmis: a policy aware of microarchitectural interference\n");
 	printf("\tnuma: a policy aware of NUMA architectures\n");
@@ -137,21 +137,7 @@ static void print_usage(void)
 
 int main(int argc, char *argv[])
 {
-	int ret;
-
-	if (argc >= 3) {
-		if (!strcmp(argv[2], "noht"))
-			cfg.noht = true;
-		else {
-			allowed_cores_supplied = true;
-			ret = string_to_bitmap(argv[2], input_allowed_cores, NCPU);
-			if (ret) {
-				fprintf(stderr, "invalid cpu list: %s\n", argv[1]);
-				fprintf(stderr, "example list: 0-24,26-48:2,49-255\n");
-				return ret;
-			}
-		}
-	}
+	int i, ret;
 
 	if (argc >= 2) {
 		if (!strcmp(argv[1], "simple")) {
@@ -161,10 +147,6 @@ int main(int argc, char *argv[])
 		} else if (!strcmp(argv[1], "numa")) {
 			sched_ops = &numa_ops;
 		} else if (!strcmp(argv[1], "ias")) {
-			if (cfg.noht) {
-				fprintf(stderr, "ias can't be used w/ noht\n");
-				return -EINVAL;
-			}
 			sched_ops = &ias_ops;
 		} else {
 			print_usage();
@@ -172,6 +154,26 @@ int main(int argc, char *argv[])
 		}
 	} else {
 		sched_ops = &simple_ops;
+	}
+
+	for (i = 2; i < argc; i++) {
+		if (!strcmp(argv[i], "noht")) {
+			if (sched_ops == &ias_ops) {
+				fprintf(stderr, "ias can't be used w/ noht\n");
+				return -EINVAL;
+			}
+			cfg.noht = true;
+		} else if (!strcmp(argv[i], "nobw")) {
+			cfg.nobw = true;
+		} else if (!strcmp(argv[i], "mutualpair")) {
+			cfg.mutualpair = true;
+		} else if (string_to_bitmap(argv[i], input_allowed_cores, NCPU)) {
+			fprintf(stderr, "invalid cpu list: %s\n", argv[i]);
+			fprintf(stderr, "example list: 0-24,26-48:2,49-255\n");
+			return -EINVAL;
+		} else {
+			allowed_cores_supplied = true;
+		}
 	}
 
 	ret = run_init_handlers("iokernel", iok_init_handlers,

@@ -25,6 +25,8 @@
 
 struct iokernel_cfg {
 	bool	noht; /* disable hyperthreads */
+	bool	nobw; /* disable bandwidth controller */
+	bool	mutualpair; /* prefer mutual pairings */
 };
 
 extern struct iokernel_cfg cfg;

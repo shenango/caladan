@@ -267,6 +267,9 @@ static float ias_core_score(struct ias_data *sd, unsigned int core,
 	if (bitmap_test(sd->reserved_cores, core))
 		score += 2.0f;
 
+	if (cfg.mutualpair && cores[sched_siblings[core]] != sd)
+		score += 3.0f;
+
 	return score;
 }
 
@@ -473,7 +476,7 @@ static void ias_sched_poll(uint64_t now, int idle_cnt, bitmap_ptr_t idle)
 	unsigned int core;
 
 	now_us = now;
-	if (now - last_bw_us >= IAS_BW_INTERVAL_US) {
+	if (!cfg.nobw && now - last_bw_us >= IAS_BW_INTERVAL_US) {
 		last_bw_us = now;
 		ias_bw_poll(now);
 	}
