@@ -24,7 +24,7 @@ static void ias_bw_sample_pmc(uint64_t sel)
 	struct ias_data *sd;
 	int core, sib, tmp;
 
-	bitmap_clear(ias_sampled_cores, NCPU);
+	bitmap_init(ias_sampled_cores, NCPU, false);
 	ias_for_each_proc(sd) {
 		sd->bw_threads_monitored = 0;
 		sd->bw_llc_misses = 0;

@@ -418,7 +418,7 @@ static int mis_sample_pmc(uint64_t sel)
 	int core, sib, tmp;
 	int sampled_num = 0;
 
-	bitmap_clear(mis_sampled_cores, NCPU);
+	bitmap_init(mis_sampled_cores, NCPU, false);
 	list_for_each(&all_procs, sd, all_link) {
 		sd->threads_monitored = 0;
 		sd->llc_misses = 0;
