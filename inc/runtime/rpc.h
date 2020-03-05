@@ -22,6 +22,7 @@ struct srpc_session;
 
 struct srpc_ctx {
 	struct srpc_session	*s;
+	bool			drop;
 	int			idx;
 	uint64_t		ident;
 	size_t			req_len;

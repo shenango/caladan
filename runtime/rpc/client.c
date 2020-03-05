@@ -39,14 +39,6 @@ static ssize_t crpc_send_raw(struct crpc_session *s, bool droppable,
 	return len;
 }
 
-static bool crpc_get_token(struct crpc_session *s)
-{
-	if (s->tokens < 1.0)
-		return false;
-	s->tokens -= 1.0;
-	return true;
-}
-
 /**
  * crpc_send_one - sends one RPC request
  * @s: the RPC session to send to
@@ -72,7 +64,8 @@ ssize_t crpc_send_one(struct crpc_session *s,
 	spin_lock_np(&s->lock);
 
 	/* send the request if the token bucket allows it */
-	if (crpc_get_token(s)) {
+	if (s->win_used + 1 <= s->tokens) {
+		s->win_used++;
 		spin_unlock_np(&s->lock);
 		ret = crpc_send_raw(s, true, buf, len);
 		return ret;
@@ -130,7 +123,9 @@ again:
 	}
 
 	spin_lock_np(&s->lock);
-	s->tokens += shdr.tokens;
+	s->tokens = shdr.tokens;
+	if (shdr.op == RPC_OP_CALL)
+		s->win_used--;
 	/* TODO: handle rejected requests */
 	spin_unlock_np(&s->lock);
 
