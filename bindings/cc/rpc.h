@@ -44,6 +44,27 @@ class RpcClient {
     return crpc_recv_one(s_, buf, len);
   }
 
+  // Client-siide stats
+  uint64_t StatRespRx() {
+    return crpc_stat_resp_rx(s_);
+  }
+
+  uint64_t StatOfferRx() {
+    return crpc_stat_offer_rx(s_);
+  }
+
+  float StatTokenRx() {
+    return crpc_stat_token_rx(s_);
+  }
+
+  uint64_t StatReqTx() {
+    return crpc_stat_req_tx(s_);
+  }
+
+  uint64_t StatReqDropped() {
+    return crpc_stat_req_dropped(s_);
+  }
+
   // Shuts down the RPC connection.
   int Shutdown(int how) { return tcp_shutdown(s_->c, how); }
   // Aborts the RPC connection.
@@ -59,5 +80,12 @@ class RpcClient {
 // Enables the RPC server, listening for new sessions.
 // Can only be called once.
 int RpcServerEnable(std::function<void(struct srpc_ctx *)> f);
+
+// RPC Server Stat counters
+uint64_t RpcServerStatReqDropped();
+uint64_t RpcServerStatReqRx();
+uint64_t RpcServerStatDreqRx();
+uint64_t RpcServerStatRespTx();
+uint64_t RpcServerStatOfferTx();
 
 } // namespace rt

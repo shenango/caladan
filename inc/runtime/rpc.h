@@ -34,7 +34,11 @@ struct srpc_ctx {
 typedef void (*srpc_fn_t)(struct srpc_ctx *ctx);
 
 extern int srpc_enable(srpc_fn_t handler);
-
+extern uint64_t srpc_stat_req_dropped();
+extern uint64_t srpc_stat_req_rx();
+extern uint64_t srpc_stat_dreq_rx();
+extern uint64_t srpc_stat_resp_tx();
+extern uint64_t srpc_stat_offer_tx();
 
 /*
  * Client API
@@ -47,6 +51,13 @@ struct crpc_session {
 	spinlock_t		lock;
 	uint32_t		win_used;
 	float			tokens;
+
+	/* client-side stats */
+	uint64_t		resp_rx_;
+	uint64_t		offer_rx_;
+	float			token_rx_;
+	uint64_t		req_tx_;
+	uint64_t		req_dropped_;
 };
 
 extern ssize_t crpc_send_one(struct crpc_session *s,
@@ -63,4 +74,30 @@ extern void crpc_close(struct crpc_session *s);
 static inline bool crpc_is_busy(struct crpc_session *s)
 {
 	return ACCESS_ONCE(s->tokens) < 1.0;
+}
+
+/* client-side stats */
+static inline uint64_t crpc_stat_resp_rx(struct crpc_session *s)
+{
+	return ACCESS_ONCE(s->resp_rx_);
+}
+
+static inline uint64_t crpc_stat_offer_rx(struct crpc_session *s)
+{
+	return ACCESS_ONCE(s->offer_rx_);
+}
+
+static inline float crpc_stat_token_rx(struct crpc_session *s)
+{
+	return ACCESS_ONCE(s->token_rx_);
+}
+
+static inline uint64_t crpc_stat_req_tx(struct crpc_session *s)
+{
+	return ACCESS_ONCE(s->req_tx_);
+}
+
+static inline uint64_t crpc_stat_req_dropped(struct crpc_session *s)
+{
+	return ACCESS_ONCE(s->req_dropped_);
 }

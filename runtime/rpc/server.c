@@ -52,6 +52,18 @@ struct srpc_session {
 	struct srpc_ctx		*slots[SRPC_MAX_WINDOW];
 };
 
+/** server-side stats **/
+/* # dropped requests */
+atomic64_t srpc_stat_req_dropped_;
+/* # rx requests */
+atomic64_t srpc_stat_req_rx_;
+/* # droppable rx requests */
+atomic64_t srpc_stat_dreq_rx_;
+/* # tx responses (completions) */
+atomic64_t srpc_stat_resp_tx_;
+/* # tx offers */
+atomic64_t srpc_stat_offer_tx_;
+
 static int srpc_get_slot(struct srpc_session *s)
 {
 	int slot = __builtin_ffsl(s->avail_slots[0]) - 1;
@@ -133,6 +145,10 @@ static int srpc_recv_one(struct srpc_session *s)
 		return ret;
 	}
 
+	atomic64_inc(&srpc_stat_req_rx_);
+	atomic64_fetch_and_add(&srpc_stat_dreq_rx_,
+			       (long)(chdr.op == RPC_OP_DROPCALL));
+
 	/* should this request be dropped? */
 	if (chdr.op == RPC_OP_DROPCALL &&
 	    runtime_queue_us() >= SRPC_TARGET_DELAY_US) {
@@ -146,6 +162,7 @@ static int srpc_recv_one(struct srpc_session *s)
 		spin_unlock_np(&s->lock);
 		if (th)
 			thread_ready(th);
+		atomic64_inc(&srpc_stat_req_dropped_);
 		return 0;
 	}
 
@@ -212,6 +229,8 @@ static int srpc_send_completion_vector(struct srpc_session *s,
 			v[nriov++].iov_len = c->resp_len;
 		}
 	}
+
+	atomic64_fetch_and_add(&srpc_stat_resp_tx_, nrhdr);
 
 	/* don't undrain if it would cause this session to drain */
 	if (nriov == 0)
@@ -393,6 +412,13 @@ static void srpc_listener(void *arg)
 	tcpqueue_t *q;
 	int ret;
 
+	/* init stats */
+	atomic64_write(&srpc_stat_req_dropped_, 0);
+	atomic64_write(&srpc_stat_req_rx_, 0);
+	atomic64_write(&srpc_stat_dreq_rx_, 0);
+	atomic64_write(&srpc_stat_resp_tx_, 0);
+	atomic64_write(&srpc_stat_offer_tx_, 0);
+
 	laddr.ip = 0;
 	laddr.port = SRPC_PORT;
 
@@ -430,4 +456,25 @@ int srpc_enable(srpc_fn_t handler)
 	ret = thread_spawn(srpc_listener, NULL);
 	BUG_ON(ret);
 	return 0;
+}
+
+uint64_t srpc_stat_req_dropped()
+{
+	return atomic64_read(&srpc_stat_req_dropped_);
+}
+
+uint64_t srpc_stat_req_rx() {
+	return atomic64_read(&srpc_stat_req_rx_);
+}
+
+uint64_t srpc_stat_dreq_rx() {
+	return atomic64_read(&srpc_stat_dreq_rx_);
+}
+
+uint64_t srpc_stat_resp_tx() {
+	return atomic64_read(&srpc_stat_resp_tx_);
+}
+
+uint64_t srpc_stat_offer_tx() {
+	return atomic64_read(&srpc_stat_offer_tx_);
 }

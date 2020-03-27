@@ -19,4 +19,24 @@ int RpcServerEnable(std::function<void(struct srpc_ctx *)> f) {
   return ret;
 }
 
+uint64_t RpcServerStatReqDropped() {
+  return srpc_stat_req_dropped();
+}
+
+uint64_t RpcServerStatReqRx() {
+  return srpc_stat_req_rx();
+}
+
+uint64_t RpcServerStatDreqRx() {
+  return srpc_stat_dreq_rx();
+}
+
+uint64_t RpcServerStatRespTx() {
+  return srpc_stat_resp_tx();
+}
+
+uint64_t RpcServerStatOfferTx() {
+  return srpc_stat_offer_tx();
+}
+
 } // namespace rt

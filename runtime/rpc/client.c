@@ -36,6 +36,7 @@ static ssize_t crpc_send_raw(struct crpc_session *s, bool droppable,
 		return ret;
 	assert(ret == sizeof(chdr) + len);
 
+	s->req_tx_++;
 	return len;
 }
 
@@ -71,6 +72,7 @@ ssize_t crpc_send_one(struct crpc_session *s,
 		return ret;
 	}
 
+	s->req_dropped_++;
 	spin_unlock_np(&s->lock);
 
 	return -ENOBUFS;
@@ -124,8 +126,13 @@ again:
 
 	spin_lock_np(&s->lock);
 	s->tokens = shdr.tokens;
-	if (shdr.op == RPC_OP_CALL)
+	s->token_rx_ += s->tokens;
+	if (shdr.op == RPC_OP_CALL) {
 		s->win_used--;
+		s->resp_rx_++;
+	} else if (shdr.op == RPC_OP_OFFER) {
+		s->offer_rx_++;
+	}
 	/* TODO: handle rejected requests */
 	spin_unlock_np(&s->lock);
 
