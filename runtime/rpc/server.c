@@ -192,6 +192,7 @@ static int srpc_send_offer(struct srpc_session *s)
 		return ret;
 
 	assert(ret == sizeof(shdr));
+	atomic64_inc(&srpc_stat_offer_tx_);
 	return 0;
 }
 
