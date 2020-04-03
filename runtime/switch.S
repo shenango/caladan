@@ -74,7 +74,12 @@ __jmp_thread:
 1:	/* cold-path, save RIP and park the kthread */
 	pushq	%rsi
 	pushq	%rdi
+	pushq	%r15
+	movq	%rsp, %r15
+	andq	$0xfffffffffffffff0, %rsp /* ensure correct stack alignment */
 	call	preempt
+	movq	%r15, %rsp /* restore SP */
+	popq	%r15
 	popq	%rdi
 	popq	%rsi
 	jmpq	*%rsi
@@ -136,7 +141,12 @@ __jmp_thread_direct:
 1:	/* cold-path, save RIP and park the kthread */
 	pushq	%rcx
 	pushq	%rdi
+	pushq	%r15
+	movq	%rsp, %r15
+	andq	$0xfffffffffffffff0, %rsp /* ensure correct stack alignment */
 	call	preempt
+	movq	%r15, %rsp /* restore SP */
+	popq	%r15
 	popq	%rdi
 	popq	%rcx
 	jmpq	*%rcx
