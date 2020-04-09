@@ -157,6 +157,38 @@ static int parse_runtime_guaranteed_kthreads(const char *name, const char *val)
 	return 0;
 }
 
+static int parse_runtime_priority(const char *name, const char *val)
+{
+	if (!strcmp(val, "lc")) {
+		cfg_prio_is_lc = true;
+	} else if (!strcmp(val, "be")) {
+		cfg_prio_is_lc = false;
+	} else {
+		log_err("invalid runtime priority");
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static int parse_runtime_ht_punish_us(const char *name, const char *val)
+{
+	long tmp;
+	int ret;
+
+	ret = str_to_long(val, &tmp);
+	if (ret)
+		return ret;
+
+	if (tmp < 0) {
+		log_err("ht_punish_us must be positive");
+		return -EINVAL;
+	}
+
+	cfg_ht_punish_us = tmp;
+	return 0;
+}
+
 static int parse_mac_address(const char *name, const char *val)
 {
 	int ret = str_to_mac(val, &netcfg.mac);
@@ -276,6 +308,8 @@ static const struct cfg_handler cfg_handlers[] = {
 	{ "runtime_spinning_kthreads", parse_runtime_spinning_kthreads, false },
 	{ "runtime_guaranteed_kthreads", parse_runtime_guaranteed_kthreads,
 			false },
+	{ "runtime_priority", parse_runtime_priority, false },
+	{ "runtime_ht_punish_us", parse_runtime_ht_punish_us, false },
 	{ "static_arp", parse_static_arp_entry, false },
 	{ "log_level", parse_log_level, false },
 	{ "disable_watchdog", parse_watchdog_flag, false },
@@ -295,8 +329,9 @@ int cfg_load(const char *path)
 	FILE *f;
 	char buf[BUFSIZ];
 	DEFINE_BITMAP(parsed, ARRAY_SIZE(cfg_handlers));
-	const char *name, *val;
+	char *name, *val;
 	int i, ret = 0, line = 0;
+	size_t len;
 
 	bitmap_init(parsed, ARRAY_SIZE(cfg_handlers), 0);
 
@@ -315,6 +350,9 @@ int cfg_load(const char *path)
 		if (!name)
 			break;
 		val = strtok(NULL, " ");
+		len = strlen(val);
+		if (val[len - 1] == '\n')
+			val[len - 1] = '\0';
 
 		for (i = 0; i < ARRAY_SIZE(cfg_handlers); i++) {
 			const struct cfg_handler *h = &cfg_handlers[i];

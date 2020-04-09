@@ -8,116 +8,116 @@
 #include "defs.h"
 #include "sched.h"
 #include "ksched.h"
-#include "pmc.h"
 #include "ias.h"
 
-#define WARMUP_US 10
+/* statistics */
+uint64_t ias_ht_punish_count;
+uint64_t ias_ht_relax_count;
 
-static void ias_ht_poll_one(struct ias_data *sd, struct thread *th)
+/* a bitmap of cores that are currently punished */
+DEFINE_BITMAP(ias_ht_punished_cores, NCPU);
+
+static void ias_ht_punish(struct ias_data *sd, unsigned int core)
 {
-	float ipc, us, run_us, idle_us;
-	uint64_t last_tsc, last_instr, cur_tsc, cur_instr;
-	int core, sib;
+	unsigned int sib = sched_siblings[core];
+	bool idle = cores[sib] == NULL;
 
-	core = th->core;
-	sib = sched_siblings[core];
-
-	/* calculate IPC and update counters */
-	last_tsc = sd->ht_last_tsc[core];
-	last_instr = sd->ht_last_instr[core];
-	cur_tsc = th->q_ptrs->tsc;
-	cur_instr = th->q_ptrs->instr;
-	sd->ht_last_tsc[core] = cur_tsc;
-	sd->ht_last_instr[core] = cur_instr;
-	if (cur_tsc == last_tsc)
+	/* check if the core is already punished */
+	if (sd != cores[core] || bitmap_test(ias_ht_punished_cores, core) ||
+	    bitmap_test(ias_ht_punished_cores, sib))
 		return;
-	if (ias_gen[core] != sd->ht_last_gen[core]) {
-		sd->ht_last_gen[core] = ias_gen[core];
+
+	/* don't preempt an LC task if we can't add back a different core */
+	if (!idle && cores[sib]->is_lc && !ias_can_add_kthread(cores[sib]))
+		return;
+
+	/* idle the core, but mark it as in use by the process */
+	if (ias_idle_placeholder_on_core(sd, sib)) {
+		WARN();
 		return;
 	}
 
-	ipc = (float)(cur_instr - last_instr) / (float)(cur_tsc - last_tsc);
-	if (ipc > 5.0)
-		return; /* bad sample */
-	us = (float)(cur_tsc - last_tsc) / (float)cycles_per_us;
+	/* mark the core as punished */
+	ias_ht_punish_count++;
+	sd->ht_punish_count++;
+	bitmap_set(ias_ht_punished_cores, sib);
 
-	/* update unpaired IPC metrics */
-	run_us = ((double)cur_tsc - sd->ht_start_running_tsc[core]) /
-		 cycles_per_us;
-	if (run_us - us < WARMUP_US)
+	/* try to allocate another core to the preempted task (best effort) */
+	if (!idle)
+		ias_add_kthread(cores[sib]);
+
+}
+
+static void ias_ht_relax(struct ias_data *sd, unsigned int core)
+{
+	unsigned int sib = sched_siblings[core];
+
+	/* check if core is already relaxed */
+	if (!bitmap_test(ias_ht_punished_cores, sib))
 		return;
-	if (!cores[sib]) {
-		idle_us = ((double)cur_tsc - cores_idle_tsc[sib]) /
-			cycles_per_us;
-		if (idle_us - us < WARMUP_US)
+
+	/* mark the core as relaxed */
+	ias_ht_relax_count++;
+	bitmap_clear(ias_ht_punished_cores, sib);
+
+	/* find something else to run on the core (or mark it idle) */
+	if (ias_add_kthread_on_core(sib)) {
+		if (ias_idle_on_core(sib)) {
+			WARN();
 			return;
-		ias_ewma(&sd->ht_unpaired_ipc, ipc,
-			 MIN(100.0, us) * IAS_EWMA_FACTOR);
-		return;
+		}
 	}
-
-	/* update paired IPC metrics */
-	run_us = ((double)cur_tsc - cores[sib]->ht_start_running_tsc[sib]) /
-		 cycles_per_us;
-	if (run_us - us < WARMUP_US)
-		return;
-	ias_ewma(&sd->ht_pairing_ipc[cores[sib]->idx], ipc,
-		 MIN(100.0, us) * IAS_EWMA_FACTOR);
 }
 
-/**
- * ias_bad_sibling - detect if we should migrate sib_sd
- * @sd: cannot be NULL
- * @sib_sd: cannot be MULL
- */
-static inline bool is_bad_sibling(struct ias_data *sd, struct ias_data *sib_sd)
+static void ias_ht_poll_one(struct ias_data *sd, struct thread *th,
+			    uint64_t now_us)
 {
-	/* never migrate an LC kthread */
-	if (is_lc(sib_sd))
-		return false;	
-	double ipc = sd->ht_pairing_ipc[sib_sd->idx];
-	double ratio = (ipc > 1E-3) ? ipc / sd->ht_max_ipc : 1;
-	return ratio <= 1 - GET_MAX_IPC_DEGRADE_RATIO(sd);
-}
+	uint64_t rcugen, last_rcugen;
+	ptrdiff_t idx = th - sd->p->threads;
 
-/**
- * ias_ht_detect_bad_pairing - detect the bad pairing and kicked out the 
- * culprit sibling.
- */
-void ias_ht_detect_bad_pairing() {
-	int core, tmp;
-	uint64_t now_tsc = rdtsc();
-	sched_for_each_allowed_core(core, tmp) {
- 		struct ias_data *sd = cores[core];
-		int sib = sched_siblings[core];
-		struct ias_data *sib_sd = cores[sib];
-		if (!sd || !sib_sd || !is_bad_sibling(sd, sib_sd))
-			continue;
-		sib_sd->ht_last_banned_tsc[sd->idx] = now_tsc;
-		/* try to migrate it to anywhere else */
-		ias_migrate_kthread_on_core(sib);
+	rcugen = ACCESS_ONCE(th->q_ptrs->rcu_gen);
+	last_rcugen = sd->ht_last_rcugen[idx];
+
+	/* check if we should relax this hyperthread lane */
+	if (rcugen != last_rcugen) {
+		sd->ht_last_rcugen[idx] = rcugen;
+		sd->ht_last_us[idx] = now_us;
+		ias_ht_relax(sd, th->core);
+		return;
+	}
+
+	/* check if we should punish this hyperthread lane */
+	if ((rcugen & 0x1) == 0x1 &&
+	    now_us - sd->ht_last_us[idx] >= sd->ht_punish_us) {
+		ias_ht_punish(sd, th->core);
 	}
 }
 
+/**
+ * ias_ht_poll - runs the hyperthread controller
+ * now_us: the current time
+ */
 void ias_ht_poll(uint64_t now_us)
 {
-	struct ias_data *sd, *sd2;
+	struct ias_data *sd;
+	struct proc *p;
+	struct thread *th;
 	int i;
 
-	/* update the IPC estimation for each core */
 	ias_for_each_proc(sd) {
-		for (i = 0; i < sd->p->active_thread_count; i++)
-			ias_ht_poll_one(sd, sd->p->active_threads[i]);
-	}
+		/* only LC tasks are eligible for HT control */
+		if (!sd->is_lc)
+			continue;
+		/* skip tasks without an HT punish deadline */
+		if (sd->ht_punish_us == 0)
+			continue;
 
-	/* refresh the maximum IPC for each process */
-	ias_for_each_proc(sd) {
-		sd->ht_max_ipc = 0;
-		ias_for_each_proc(sd2) {
-			sd->ht_max_ipc = MAX(sd->ht_max_ipc,
-					     sd->ht_pairing_ipc[sd2->idx]);
+		/* check each thread */
+		/* FIXME: can we constrain this to active threads? */
+		p = sd->p;
+		for (i = 0; i < p->thread_count; i++) {
+			th = &p->threads[i];
+			ias_ht_poll_one(sd, th, now_us);
 		}
-		sd->ht_max_ipc = MAX(sd->ht_max_ipc, sd->ht_unpaired_ipc);
 	}
-	ias_ht_detect_bad_pairing();
 }

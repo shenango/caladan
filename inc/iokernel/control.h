@@ -29,9 +29,9 @@ struct q_ptrs {
 	uint32_t		directpath_rx_tail;
 	uint64_t		next_timer_tsc;
 	uint32_t		storage_tail;
-	uint64_t		instr;
-	uint64_t		tsc;
+	uint32_t		pad;
 	uint64_t		oldest_tsc;
+	uint64_t		rcu_gen;
 };
 
 struct congestion_info {
@@ -73,15 +73,14 @@ struct thread_spec {
 	pid_t			tid;
 	int32_t			park_efd;
 
-	struct hardware_queue_spec		direct_rxq;
-	struct hardware_queue_spec		storage_hwq;
+	struct hardware_queue_spec	direct_rxq;
+	struct hardware_queue_spec	storage_hwq;
 	struct timer_spec		timer_heap;
 };
 
 enum {
-	SCHED_PRIORITY_SYSTEM = 0, /* high priority, system-level services */
-	SCHED_PRIORITY_NORMAL,     /* normal priority, typical tasks */
-	SCHED_PRIORITY_BATCH,      /* low priority, batch processing */
+	SCHED_PRIO_LC = 0, /* high priority, latency-critical task */
+	SCHED_PRIO_BE,     /* low priority, best-effort task */
 };
 
 /* describes scheduler options */
@@ -92,6 +91,7 @@ struct sched_spec {
 	unsigned int		congestion_latency_us;
 	unsigned int		scaleout_latency_us;
 	unsigned int		preferred_socket;
+	uint64_t		ht_punish_us;
 };
 
 #define CONTROL_HDR_MAGIC	0x696f6b3a /* "iok:" */

@@ -80,13 +80,32 @@ static __read_mostly struct ksched_shm_cpu *shm;
 #define SHM_SIZE (NR_CPUS * sizeof(struct ksched_shm_cpu))
 
 struct ksched_percpu {
-	unsigned int	last_gen;
-	local_t		busy;
-	struct task_struct		*running_task;
+	unsigned int		last_gen;
+	local_t			busy;
+	u64			last_sel;
+	struct task_struct	*running_task;
 };
 
 /* per-cpu data to coordinate context switching and signal delivery */
 static DEFINE_PER_CPU(struct ksched_percpu, kp);
+
+/**
+ * ksched_measure_pmc - read a performance counter
+ * @sel: selects an x86 performance counter
+ */
+static u64 ksched_measure_pmc(u64 sel)
+{
+	struct ksched_percpu *p = this_cpu_ptr(&kp);
+	u64 val;
+
+	if (p->last_sel != sel) {
+		wrmsrl(MSR_P6_EVNTSEL0, sel);
+		p->last_sel = sel;
+	}
+	rdmsrl(MSR_P6_PERFCTR0, val);
+
+	return val;
+}
 
 /**
  * ksched_lookup_task - retreives a task from a pid number
@@ -186,15 +205,15 @@ static int __cpuidle ksched_idle(struct cpuidle_device *dev,
 	s = &shm[cpu];
 
 	/* check if we entered the idle loop with a process still active */
-	if (p->running_task) {
-			if (unlikely(p->running_task->flags & PF_EXITING)) {
-				put_task_struct(p->running_task);
-				p->running_task = NULL;
-			} else {
-				ksched_mwait_on_addr(&s->gen, 0, s->gen);
-				put_cpu();
-				return index;
-			}
+	if (unlikely(p->running_task)) {
+		if (p->running_task->flags & PF_EXITING) {
+			put_task_struct(p->running_task);
+			p->running_task = NULL;
+		} else {
+			ksched_mwait_on_addr(&s->gen, 0, s->gen);
+			put_cpu();
+			return index;
+		}
 	}
 
 	/* mark the core as idle if a new request isn't waiting */
@@ -291,16 +310,6 @@ static void ksched_deliver_signal(struct ksched_percpu *p, unsigned int signum)
 
 	if (p->running_task)
 		send_sig(signum, p->running_task, 0);
-}
-
-static u64 ksched_measure_pmc(u64 sel)
-{
-	u64 start, end;
-
-	rdmsrl(MSR_P6_PERFCTR0, start);
-	udelay(KSCHED_PMC_PROBE_DELAY);
-	rdmsrl(MSR_P6_PERFCTR0, end);
-	return end - start;
 }
 
 static void ipi_handler(void)
@@ -554,7 +563,6 @@ static void __exit ksched_cpuidle_unhijack(void)
 
 static void __init ksched_init_pmc(void *arg)
 {
-        wrmsrl(MSR_P6_EVNTSEL0, PMC_LLC_MISSES);
 	wrmsrl(MSR_CORE_PERF_FIXED_CTR_CTRL, 0x333);
         wrmsrl(MSR_CORE_PERF_GLOBAL_CTRL,
 	       CORE_PERF_GLOBAL_CTRL_ENABLE_PMC_0 |

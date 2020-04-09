@@ -39,8 +39,6 @@ static DEFINE_PERTHREAD(struct tcache_perthread, thread_pt);
 static __thread uint64_t last_tsc;
 /* used to force timer and network processing after a timeout */
 static __thread uint64_t last_watchdog_tsc;
-/* used to update performance counters */
-static __thread uint64_t last_pmc_tsc;
 
 /**
  * In inc/runtime/thread.h, this function is declared inline (rather than static
@@ -299,18 +297,13 @@ static __noreturn __noinline void schedule(void)
 
 	/* increment the RCU generation number (even is in scheduler) */
 	store_release(&l->rcu_gen, l->rcu_gen + 1);
+	ACCESS_ONCE(l->q_ptrs->rcu_gen) += 1;
 	assert((l->rcu_gen & 0x1) == 0x0);
 
 #ifdef GC
 	if (unlikely(get_gc_gen() != l->local_gc_gen))
 		gc_kthread_report(l);
 #endif
-
-	/* check if we need to refresh performance counters */
-	if (start_tsc - last_pmc_tsc >= cycles_per_us * RUNTIME_PMC_US) {
-		last_pmc_tsc = start_tsc;
-		pmc_periodic(l);
-	}
 
 	/* if it's been too long, run the softirq handler */
 	if (!disable_watchdog &&
@@ -415,6 +408,7 @@ done:
 
 	/* increment the RCU generation number (odd is in thread) */
 	store_release(&l->rcu_gen, l->rcu_gen + 1);
+	ACCESS_ONCE(l->q_ptrs->rcu_gen) += 1;
 	assert((l->rcu_gen & 0x1) == 0x1);
 
 	/* and jump into the next thread */
@@ -456,6 +450,7 @@ static __always_inline void enter_schedule(thread_t *myth)
 
 	/* increment the RCU generation number (odd is in thread) */
 	store_release(&k->rcu_gen, k->rcu_gen + 2);
+	ACCESS_ONCE(k->q_ptrs->rcu_gen) += 2;
 	assert((k->rcu_gen & 0x1) == 0x1);
 
 	/* check for misuse of preemption disabling */
@@ -585,6 +580,7 @@ static void thread_finish_cede(void)
 
 	/* increment the RCU generation number (even - pretend in sched) */
 	store_release(&k->rcu_gen, k->rcu_gen + 1);
+	ACCESS_ONCE(k->q_ptrs->rcu_gen) += 1;
 	assert((k->rcu_gen & 0x1) == 0x0);
 
 	/* cede this kthread to the iokernel */
@@ -594,6 +590,7 @@ static void thread_finish_cede(void)
 
 	/* increment the RCU generation number (odd - back in thread) */
 	store_release(&k->rcu_gen, k->rcu_gen + 1);
+	ACCESS_ONCE(k->q_ptrs->rcu_gen) += 1;
 	assert((k->rcu_gen & 0x1) == 0x1);
 
 	/* re-enter the scheduler */
@@ -775,6 +772,7 @@ static __noreturn void schedule_start(void)
 	kthread_wait_to_attach();
 	last_tsc = rdtsc();
 	store_release(&k->rcu_gen, 1);
+	ACCESS_ONCE(k->q_ptrs->rcu_gen) = 1;
 
 	spin_lock(&k->lock);
 	k->parked = false;

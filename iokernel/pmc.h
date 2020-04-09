@@ -30,4 +30,6 @@
 
 /* this performance counter measures LLC misses as a proxy for mem bandwidth */
 #define PMC_LLC_MISSES (PMC_ARCH_LLC_MISSES | PMC_ESEL_USR | PMC_ESEL_OS | \
-			PMC_ESEL_ANY | PMC_ESEL_ENABLE)
+			PMC_ESEL_ENABLE)
+#define PMC_LLC_MISSES_ANY (PMC_ARCH_LLC_MISSES | PMC_ESEL_USR | PMC_ESEL_OS | \
+			    PMC_ESEL_ANY | PMC_ESEL_ENABLE)

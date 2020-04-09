@@ -32,6 +32,8 @@
 	(PACKET_QUEUE_MCOUNT * MBUF_DEFAULT_LEN * MAX(1, guaranteedks) * 16UL)
 
 struct iokernel_control iok;
+bool cfg_prio_is_lc;
+uint64_t cfg_ht_punish_us;
 
 static int generate_random_mac(struct eth_addr *mac)
 {
@@ -238,7 +240,9 @@ int ioqueues_register_iokernel(void)
 	hdr->thread_count = maxks;
 	hdr->mac = netcfg.mac;
 
-	hdr->sched_cfg.priority = SCHED_PRIORITY_NORMAL;
+	hdr->sched_cfg.priority = cfg_prio_is_lc ?
+				  SCHED_PRIO_LC : SCHED_PRIO_BE;
+	hdr->sched_cfg.ht_punish_us = cfg_ht_punish_us;
 	hdr->sched_cfg.max_cores = maxks;
 	hdr->sched_cfg.guaranteed_cores = guaranteedks;
 	hdr->sched_cfg.congestion_latency_us = 0;
