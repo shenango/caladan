@@ -210,8 +210,6 @@ static bool steal_work(struct kthread *l, struct kthread *r)
 			list_add_tail(&l->rq_overflow, &r->rq[rq_tail++ % RUNTIME_RQ_SIZE]->link);
 		store_release(&r->rq_tail, rq_tail);
 		ACCESS_ONCE(r->q_ptrs->rq_tail) += avail;
-		if (unlikely(!list_empty(&r->rq_overflow)))
-			drain_overflow(r);
 		update_oldest_tsc(r);
 		spin_unlock(&r->lock);
 
@@ -219,6 +217,14 @@ static bool steal_work(struct kthread *l, struct kthread *r)
 		ACCESS_ONCE(l->q_ptrs->rq_head) += avail;
 		STAT(THREADS_STOLEN) += avail;
 		return true;
+	}
+
+	/* check for overflow tasks */
+	th = list_pop(&r->rq_overflow, thread_t, link);
+	if (th) {
+		ACCESS_ONCE(r->q_ptrs->rq_tail)++;
+		update_oldest_tsc(r);
+		goto done;
 	}
 
 	/* check for softirqs */

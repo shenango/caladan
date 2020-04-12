@@ -328,7 +328,7 @@ static int ias_notify_core_needed(struct proc *p)
 
 static void ias_notify_congested(struct proc *p, bitmap_ptr_t threads,
 				 bitmap_ptr_t io, uint64_t rq_oldest_tsc,
-				 uint64_t pkq_oldest_tsc)
+				 uint64_t pkq_oldest_tsc, bool timeout)
 {
 	struct ias_data *sd = (struct ias_data *)p->policy_data;
 	int ret;
@@ -347,7 +347,7 @@ static void ias_notify_congested(struct proc *p, bitmap_ptr_t threads,
 	}
 
 	/* stop if there is no congestion */
-	if (norq && noio) {
+	if (norq && noio && !timeout) {
 		sd->is_congested = false;
 		return;
 	}

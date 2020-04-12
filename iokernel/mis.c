@@ -315,7 +315,7 @@ static void mis_update_congestion_info(struct mis_data *sd)
 
 static void mis_notify_congested(struct proc *p, bitmap_ptr_t threads,
 				 bitmap_ptr_t io, uint64_t rq_oldest_tsc,
-				 uint64_t pkq_oldest_tsc)
+				 uint64_t pkq_oldest_tsc, bool timeout)
 {
 	struct mis_data *sd = (struct mis_data *)p->policy_data;
 	int ret;
@@ -328,7 +328,7 @@ static void mis_notify_congested(struct proc *p, bitmap_ptr_t threads,
 
 	/* check if congested */
 	if (bitmap_popcount(threads, NCPU) +
-            bitmap_popcount(io, NCPU) == 0) {
+            bitmap_popcount(io, NCPU) + timeout == 0) {
 		mis_unmark_congested(sd);
 		goto done;
 	}

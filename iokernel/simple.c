@@ -246,7 +246,7 @@ static void simple_update_congestion_info(struct simple_data *sd)
 
 static void simple_notify_congested(struct proc *p, bitmap_ptr_t threads,
 				    bitmap_ptr_t io, uint64_t rq_oldest_tsc,
-				    uint64_t pkq_oldest_tsc)
+				    uint64_t pkq_oldest_tsc, bool timeout)
 {
 	struct simple_data *sd = (struct simple_data *)p->policy_data;
 	int ret;
@@ -262,7 +262,7 @@ static void simple_notify_congested(struct proc *p, bitmap_ptr_t threads,
 
 	/* check if congested */
 	if (bitmap_popcount(threads, NCPU) +
-            bitmap_popcount(io, NCPU) == 0) {
+            bitmap_popcount(io, NCPU) + timeout == 0) {
 		simple_unmark_congested(sd);
 		goto done;
 	}

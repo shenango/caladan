@@ -281,13 +281,13 @@ static void sched_detect_congestion(struct proc *p)
 	struct thread *th;
 	uint32_t cur_tail, cur_head, last_head, last_tail;
 	uint64_t now, timer_tsc;
+	uint64_t rq_oldest_tsc = UINT64_MAX;
+	uint64_t pkq_oldest_tsc = UINT64_MAX;
 	int i;
+	bool timeout = false;
 
 	bitmap_init(threads, NCPU, false);
 	bitmap_init(ios, NCPU, false);
-
-	uint64_t rq_oldest_tsc = UINT64_MAX;
-	uint64_t pkq_oldest_tsc = UINT64_MAX;
 
 	/* detect uthread runqueue congestion */
 	for (i = 0; i < p->thread_count; i++) {
@@ -341,16 +341,17 @@ static void sched_detect_congestion(struct proc *p)
 	for (i = 0; i < p->thread_count; i++) {
 		th = &p->threads[i];
 		timer_tsc = ACCESS_ONCE(*th->timer_heap.next_tsc);
-
 		if (!timer_tsc || timer_tsc > now)
 			continue;
-
-		if (!th->active || timer_tsc + IOKERNEL_POLL_INTERVAL * cycles_per_us < now)
-			bitmap_set(ios, i);
+		if (timer_tsc + IOKERNEL_POLL_INTERVAL * cycles_per_us <= now) {
+			timeout = true;
+			break;
+		}
 	}
 
 	/* notify the scheduler policy of the current congestion */
-	sched_ops->notify_congested(p, threads, ios, rq_oldest_tsc, pkq_oldest_tsc);
+	sched_ops->notify_congested(p, threads, ios, rq_oldest_tsc,
+				    pkq_oldest_tsc, timeout);
 }
 
 /*
