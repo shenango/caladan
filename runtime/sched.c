@@ -161,20 +161,16 @@ static bool work_available(struct kthread *k)
 
 static void update_oldest_tsc(struct kthread *k)
 {
-	/* oldest thread in runqueue */
 	thread_t *th;
 	uint64_t oldest_tsc = UINT64_MAX;
 
 	assert_spin_lock_held(&k->lock);
 
-	if (load_acquire(&k->rq_head) - k->rq_tail)
+	/* find the oldest thread in the runqueue */
+	if (load_acquire(&k->rq_head) != k->rq_tail) {
 		th = k->rq[k->rq_tail % RUNTIME_RQ_SIZE];
-	else
-		th = list_top(&k->rq_overflow, struct thread, link);
-
-	if (th)
 		oldest_tsc = th->ready_tsc;
-
+	}
 	ACCESS_ONCE(k->q_ptrs->oldest_tsc) = oldest_tsc;
 }
 
@@ -214,6 +210,8 @@ static bool steal_work(struct kthread *l, struct kthread *r)
 			list_add_tail(&l->rq_overflow, &r->rq[rq_tail++ % RUNTIME_RQ_SIZE]->link);
 		store_release(&r->rq_tail, rq_tail);
 		ACCESS_ONCE(r->q_ptrs->rq_tail) += avail;
+		if (unlikely(!list_empty(&r->rq_overflow)))
+			drain_overflow(r);
 		update_oldest_tsc(r);
 		spin_unlock(&r->lock);
 
@@ -221,14 +219,6 @@ static bool steal_work(struct kthread *l, struct kthread *r)
 		ACCESS_ONCE(l->q_ptrs->rq_head) += avail;
 		STAT(THREADS_STOLEN) += avail;
 		return true;
-	}
-
-	/* check for overflow tasks */
-	th = list_pop(&r->rq_overflow, thread_t, link);
-	if (th) {
-		ACCESS_ONCE(r->q_ptrs->rq_tail)++;
-		update_oldest_tsc(r);
-		goto done;
 	}
 
 	/* check for softirqs */
@@ -394,7 +384,6 @@ done:
 		drain_overflow(l);
 
 	update_oldest_tsc(l);
-
 	spin_unlock(&l->lock);
 
 	/* update exit stat counters */
@@ -560,6 +549,8 @@ void thread_ready(thread_t *th)
 		return;
 	}
 
+	if (k->rq_head == rq_tail)
+		ACCESS_ONCE(k->q_ptrs->oldest_tsc) = th->ready_tsc;
 	k->rq[k->rq_head % RUNTIME_RQ_SIZE] = th;
 	store_release(&k->rq_head, k->rq_head + 1);
 	putk();
@@ -768,6 +759,8 @@ static __noreturn void schedule_start(void)
 	 * initially). Update RCU generation so it stays even after entering
 	 * schedule().
 	 */
+	if (k->q_ptrs->oldest_tsc == 0)
+		ACCESS_ONCE(k->q_ptrs->oldest_tsc) = UINT64_MAX;
 	ACCESS_ONCE(k->parked) = true;
 	kthread_wait_to_attach();
 	last_tsc = rdtsc();

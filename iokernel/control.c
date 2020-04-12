@@ -190,7 +190,6 @@ static struct proc *control_create_proc(mem_key_t key, size_t len,
 				sizeof(struct q_ptrs));
 		if (!th->q_ptrs)
 			goto fail;
-		th->q_ptrs->oldest_tsc = UINT64_MAX;
 
 		ret = control_init_hwq(&reg, &s->direct_rxq, &th->directpath_hwq);
 		if (ret)

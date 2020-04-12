@@ -36,7 +36,8 @@ static void ias_bw_request_pmc(uint64_t sel)
 
 	sched_for_each_allowed_core(core, tmp) {
 		sd = cores[core];
-		if (!sd || sd->is_lc) {
+		if (!sd || sd->is_lc ||
+		    bitmap_test(ias_ht_punished_cores, core)) {
 			ias_bw_gens[core] = ias_gen[core] - 1;
 			continue;
 		}
@@ -201,9 +202,9 @@ void ias_bw_poll(uint64_t now_us)
 		break;
 
 	case IAS_BW_STATE_PUNISH1:
+		state = IAS_BW_STATE_PUNISH2;
 		ias_bw_gather_pmc(start);
 		ias_bw_request_pmc(PMC_LLC_MISSES);
-		state = IAS_BW_STATE_PUNISH2;
 		break;
 
 	case IAS_BW_STATE_PUNISH2:

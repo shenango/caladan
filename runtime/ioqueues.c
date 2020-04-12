@@ -34,6 +34,7 @@
 struct iokernel_control iok;
 bool cfg_prio_is_lc;
 uint64_t cfg_ht_punish_us;
+uint64_t cfg_qdelay_us;
 
 static int generate_random_mac(struct eth_addr *mac)
 {
@@ -243,10 +244,9 @@ int ioqueues_register_iokernel(void)
 	hdr->sched_cfg.priority = cfg_prio_is_lc ?
 				  SCHED_PRIO_LC : SCHED_PRIO_BE;
 	hdr->sched_cfg.ht_punish_us = cfg_ht_punish_us;
+	hdr->sched_cfg.qdelay_us = cfg_qdelay_us;
 	hdr->sched_cfg.max_cores = maxks;
 	hdr->sched_cfg.guaranteed_cores = guaranteedks;
-	hdr->sched_cfg.congestion_latency_us = 0;
-	hdr->sched_cfg.scaleout_latency_us = 0;
 	hdr->sched_cfg.preferred_socket = preferred_socket;
 
 	hdr->thread_specs = ptr_to_shmptr(r, iok.threads, sizeof(*iok.threads) * maxks);

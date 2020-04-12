@@ -70,6 +70,7 @@ static int ias_attach(struct proc *p, struct sched_spec *cfg)
 	sd->threads_limit = cfg->max_cores;
 	sd->is_lc = cfg->priority == SCHED_PRIO_LC;
 	sd->ht_punish_us = cfg->ht_punish_us;
+	sd->qdelay_us = cfg->qdelay_us;
 	sd->threads_active = 0;
 	p->policy_data = (unsigned long)sd;
 	list_add(&all_procs, &sd->all_link);
@@ -331,10 +332,22 @@ static void ias_notify_congested(struct proc *p, bitmap_ptr_t threads,
 {
 	struct ias_data *sd = (struct ias_data *)p->policy_data;
 	int ret;
+	bool norq, noio;
 
-	/* check if congested */
-	if (bitmap_popcount(threads, NCPU) +
-            bitmap_popcount(io, NCPU) == 0) {
+	/* detect congestion */
+	if (sd->qdelay_us == 0) {
+		norq = bitmap_popcount(threads, NCPU) == 0;
+		noio = bitmap_popcount(io, NCPU) == 0;
+	} else {
+		uint64_t tsc = rdtsc();
+		norq = rq_oldest_tsc == UINT64_MAX ||
+		       tsc - rq_oldest_tsc < sd->qdelay_us * cycles_per_us;
+		noio = pkq_oldest_tsc == UINT64_MAX ||
+		       tsc - pkq_oldest_tsc < sd->qdelay_us * cycles_per_us;
+	}
+
+	/* stop if there is no congestion */
+	if (norq && noio) {
 		sd->is_congested = false;
 		return;
 	}

@@ -189,6 +189,24 @@ static int parse_runtime_ht_punish_us(const char *name, const char *val)
 	return 0;
 }
 
+static int parse_runtime_qdelay_us(const char *name, const char *val)
+{
+	long tmp;
+	int ret;
+
+	ret = str_to_long(val, &tmp);
+	if (ret)
+		return ret;
+
+	if (tmp < 0) {
+		log_err("runtime_qdelay_us must be positive");
+		return -EINVAL;
+	}
+
+	cfg_qdelay_us = tmp;
+	return 0;
+}
+
 static int parse_mac_address(const char *name, const char *val)
 {
 	int ret = str_to_mac(val, &netcfg.mac);
@@ -310,6 +328,7 @@ static const struct cfg_handler cfg_handlers[] = {
 			false },
 	{ "runtime_priority", parse_runtime_priority, false },
 	{ "runtime_ht_punish_us", parse_runtime_ht_punish_us, false },
+	{ "runtime_qdelay_us", parse_runtime_qdelay_us, false },
 	{ "static_arp", parse_static_arp_entry, false },
 	{ "log_level", parse_log_level, false },
 	{ "disable_watchdog", parse_watchdog_flag, false },

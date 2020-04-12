@@ -296,7 +296,8 @@ static void sched_detect_congestion(struct proc *p)
 		cur_tail = load_acquire(&th->q_ptrs->rq_tail);
 		last_head = th->last_rq_head;
 		cur_head = ACCESS_ONCE(th->q_ptrs->rq_head);
-		rq_oldest_tsc = MIN(rq_oldest_tsc, ACCESS_ONCE(th->q_ptrs->oldest_tsc));
+		rq_oldest_tsc = MIN(rq_oldest_tsc,
+				    ACCESS_ONCE(th->q_ptrs->oldest_tsc));
 		th->last_rq_head = cur_head;
 		th->last_rq_tail = cur_tail;
 		if (th->active ? wraps_lt(cur_tail, last_head) :
