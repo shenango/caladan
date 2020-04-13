@@ -467,7 +467,7 @@ static struct mis_data *mis_choose_bandwidth_victim(bool *has_not_ready)
 {
 	struct mis_data *sd, *victim = NULL;
 	float highest_l3miss;
-	uint64_t pmc;
+	uint64_t pmc, tsc;
 	int i;
 	static int invoked_cnt = 0;
 	static int not_ready_cnt = 0;
@@ -486,7 +486,7 @@ static struct mis_data *mis_choose_bandwidth_victim(bool *has_not_ready)
 	*has_not_ready = false;
 	bitmap_for_each_set(mis_sampled_cores, NCPU, i) {
 		sd = cores[sched_siblings[i]];
-		if (unlikely(!ksched_poll_pmc(i, &pmc))) {
+		if (unlikely(!ksched_poll_pmc(i, &pmc, &tsc))) {
 			if (sd) {
 				*has_not_ready = true;
 				sd->threads_monitored--;

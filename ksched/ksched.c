@@ -333,6 +333,7 @@ static void ipi_handler(void)
 	tmp = smp_load_acquire(&s->pmc);
 	if (tmp != 0) {
 		s->pmcval = ksched_measure_pmc(READ_ONCE(s->pmcsel));
+		s->pmctsc = rdtsc();
 		smp_store_release(&s->pmc, 0);
 	}
 

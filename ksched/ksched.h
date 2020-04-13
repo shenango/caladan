@@ -39,9 +39,10 @@ struct ksched_shm_cpu {
 	unsigned int		busy;
 	unsigned int		last_gen;
 	__u64			pmcval;
+	__u64			pmctsc;
 
 	/* extra space for future features (and cache alignment) */
-	unsigned long		rsv[2];
+	unsigned long		rsv[1];
 };
 
 #define KSCHED_MAGIC		0xF0

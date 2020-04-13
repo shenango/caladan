@@ -49,7 +49,7 @@ struct ias_data {
 	uint64_t		ht_punish_count;
 
 	/* memory bandwidth subcontroller */
-	uint64_t		bw_llc_misses;
+	float			bw_llc_miss_rate;
 };
 
 extern struct list_head all_procs;

@@ -17,8 +17,11 @@ uint64_t ias_bw_relax_count;
 uint64_t ias_bw_sample_failures;
 float	 ias_bw_estimate;
 
-/* the generation number of the last requested PMC (to detect rescheds) */
-static uint64_t ias_bw_gens[NCPU];
+struct pmc_sample {
+	uint64_t gen;
+	uint64_t val;
+	uint64_t tsc;
+};
 
 static void ias_bw_throttle_core(int core)
 {
@@ -29,7 +32,7 @@ static void ias_bw_throttle_core(int core)
                 ias_idle_on_core(core);
 }
 
-static void ias_bw_request_pmc(uint64_t sel)
+static void ias_bw_request_pmc(uint64_t sel, struct pmc_sample *samples)
 {
 	struct ias_data *sd;
 	int core, tmp;
@@ -38,49 +41,55 @@ static void ias_bw_request_pmc(uint64_t sel)
 		sd = cores[core];
 		if (!sd || sd->is_lc ||
 		    bitmap_test(ias_ht_punished_cores, core)) {
-			ias_bw_gens[core] = ias_gen[core] - 1;
+			samples[core].gen = ias_gen[core] - 1;
 			continue;
 		}
 
-		ias_bw_gens[core] = ias_gen[core];
+		samples[core].gen = ias_gen[core];
 		ksched_enqueue_pmc(core, sel);
 	}
 }
 
-static void ias_bw_gather_pmc(uint64_t *samples)
+static void ias_bw_gather_pmc(struct pmc_sample *samples)
 {
-	uint64_t pmc;
 	int core, tmp;
+	struct pmc_sample *s;
 
-	memset(samples, 0, sizeof(uint64_t) * NCPU);
 	sched_for_each_allowed_core(core, tmp) {
-		if (ias_bw_gens[core] != ias_gen[core])
+		s = &samples[core];
+		if (s->gen != ias_gen[core])
 			continue;
-		if (!ksched_poll_pmc(core, &pmc)) {
+		if (!ksched_poll_pmc(core, &s->val, &s->tsc)) {
+			s->gen = ias_gen[core] - 1;
 			ias_bw_sample_failures++;
 			continue;
 		}
-
-		samples[core] = pmc;
 	}
 }
 
 static struct ias_data *
-ias_bw_choose_victim(uint64_t *start, uint64_t *end, unsigned int *worst_core)
+ias_bw_choose_victim(struct pmc_sample *start, struct pmc_sample *end, unsigned int *worst_core)
 {
 	struct ias_data *sd, *victim = NULL;
 	uint64_t highest_l3miss = 0;
+	float highest_l3miss_rate = 0.0, bw_estimate;
 	int core, tmp;
 
 	/* zero per-task llc miss counts */
 	ias_for_each_proc(sd)
-		sd->bw_llc_misses = 0;
+		sd->bw_llc_miss_rate = 0.0;
 
 	/* convert per-core llc miss counts into per-task llc miss counts */
 	sched_for_each_allowed_core(core, tmp) {
-		if (cores[core] == NULL || start[core] == 0 || end[core] == 0)
+
+		if (cores[core] == NULL || start[core].gen != end[core].gen ||
+			  start[core].gen != ias_gen[core])
 			continue;
-		cores[core]->bw_llc_misses += end[core] - start[core];
+
+		bw_estimate = (float)(end[core].val - start[core].val) /
+						  (float)(end[core].tsc - start[core].tsc);
+
+		cores[core]->bw_llc_miss_rate += bw_estimate;
 	}
 
 	/* find an eligible task with the highest overall llc miss count */
@@ -88,11 +97,15 @@ ias_bw_choose_victim(uint64_t *start, uint64_t *end, unsigned int *worst_core)
 		if (sd->threads_limit == 0 ||
 		    sd->threads_limit <= sd->threads_guaranteed)
 			continue;
-		if (sd->bw_llc_misses <= highest_l3miss)
+
+		if (sd->bw_llc_miss_rate < IAS_BW_LIMIT / 22)
+			continue;
+
+		if (sd->bw_llc_miss_rate <= highest_l3miss_rate)
 			continue;
 
 		victim = sd;
-		highest_l3miss = sd->bw_llc_misses;
+		highest_l3miss_rate = sd->bw_llc_miss_rate;
 	}
 	if (!victim)
 		return NULL;
@@ -101,7 +114,7 @@ ias_bw_choose_victim(uint64_t *start, uint64_t *end, unsigned int *worst_core)
 	highest_l3miss = 0;
 	*worst_core = NCPU;
 	sched_for_each_allowed_core(core, tmp) {
-		uint64_t l3miss = end[core] - start[core];
+		uint64_t l3miss = end[core].val - start[core].val;
 		if (l3miss <= highest_l3miss)
 			continue;
 		if (cores[core] != victim)
@@ -113,11 +126,11 @@ ias_bw_choose_victim(uint64_t *start, uint64_t *end, unsigned int *worst_core)
 	if (*worst_core == NCPU)
 		return NULL;
 
-	start[*worst_core] = 0;
+	start[*worst_core].gen = ias_gen[core] - 1;
 	return victim;
 }
 
-static int ias_bw_punish(uint64_t *start, uint64_t *end)
+static int ias_bw_punish(struct pmc_sample *start, struct pmc_sample *end)
 {
 	struct ias_data *sd;
 	unsigned int core;
@@ -174,8 +187,9 @@ enum {
 	IAS_BW_STATE_RELAX = 0,
 	IAS_BW_STATE_PUNISH1,
 	IAS_BW_STATE_PUNISH2,
-	IAS_BW_STATE_PUNISH3,
 };
+
+static struct pmc_sample arr_1[NCPU], arr_2[NCPU];
 
 /**
  * ias_bw_poll - runs the bandwidth controller
@@ -183,7 +197,7 @@ enum {
  */
 void ias_bw_poll(uint64_t now_us)
 {
-	static uint64_t start[NCPU], end[NCPU];
+	static struct pmc_sample *start = arr_1, *end = arr_2;
 	static int state;
 	bool throttle;
 
@@ -194,7 +208,7 @@ void ias_bw_poll(uint64_t now_us)
 	switch (state) {
 	case IAS_BW_STATE_RELAX:
 		if (throttle) {
-			ias_bw_request_pmc(PMC_LLC_MISSES);
+			ias_bw_request_pmc(PMC_LLC_MISSES, start);
 			state = IAS_BW_STATE_PUNISH1;
 			break;
 		}
@@ -204,23 +218,18 @@ void ias_bw_poll(uint64_t now_us)
 	case IAS_BW_STATE_PUNISH1:
 		state = IAS_BW_STATE_PUNISH2;
 		ias_bw_gather_pmc(start);
-		ias_bw_request_pmc(PMC_LLC_MISSES);
+		ias_bw_request_pmc(PMC_LLC_MISSES, end);
 		break;
 
 	case IAS_BW_STATE_PUNISH2:
-		state = IAS_BW_STATE_PUNISH3;
 		ias_bw_gather_pmc(end);
-		if (unlikely(ias_bw_punish(start, end)))
-			state = IAS_BW_STATE_RELAX;
-		break;
-
-	case IAS_BW_STATE_PUNISH3:
-		if (!throttle) {
+		if (!throttle ||
+			   unlikely(ias_bw_punish(start, end))) {
 			state = IAS_BW_STATE_RELAX;
 			break;
 		}
-		if (unlikely(ias_bw_punish(start, end)))
-			state = IAS_BW_STATE_RELAX;
+		swapvars(start, end);
+		ias_bw_request_pmc(PMC_LLC_MISSES, end);
 		break;
 
 	default:

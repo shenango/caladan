@@ -146,14 +146,16 @@ static inline void ksched_enqueue_pmc(unsigned int core, uint64_t sel)
  * ksched_poll_pmc - polls for a performance counter result
  * @core: the core to poll
  * @val: a pointer to store the result
+ * @tsc: a pointer to store the timestamp of the result
  *
  * Returns true if succesful, otherwise counter is still being measured.
  */
-static inline bool ksched_poll_pmc(unsigned int core, uint64_t *val)
+static inline bool ksched_poll_pmc(unsigned int core, uint64_t *val, uint64_t *tsc)
 {
 	if (load_acquire(&ksched_shm[core].pmc) != 0)
 		return false;
 	*val = ACCESS_ONCE(ksched_shm[core].pmcval);
+	*tsc = ACCESS_ONCE(ksched_shm[core].pmctsc);
 	return true;
 }
 
