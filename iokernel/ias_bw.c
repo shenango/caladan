@@ -81,14 +81,12 @@ ias_bw_choose_victim(struct pmc_sample *start, struct pmc_sample *end, unsigned 
 
 	/* convert per-core llc miss counts into per-task llc miss counts */
 	sched_for_each_allowed_core(core, tmp) {
-
 		if (cores[core] == NULL || start[core].gen != end[core].gen ||
 			  start[core].gen != ias_gen[core])
 			continue;
 
 		bw_estimate = (float)(end[core].val - start[core].val) /
 						  (float)(end[core].tsc - start[core].tsc);
-
 		cores[core]->bw_llc_miss_rate += bw_estimate;
 	}
 
@@ -97,10 +95,8 @@ ias_bw_choose_victim(struct pmc_sample *start, struct pmc_sample *end, unsigned 
 		if (sd->threads_limit == 0 ||
 		    sd->threads_limit <= sd->threads_guaranteed)
 			continue;
-
-		if (sd->bw_llc_miss_rate < IAS_BW_LIMIT / 22)
+		if (sd->bw_llc_miss_rate < IAS_BW_LIMIT / sched_cores_nr)
 			continue;
-
 		if (sd->bw_llc_miss_rate <= highest_l3miss_rate)
 			continue;
 
@@ -185,8 +181,8 @@ static float ias_measure_bw(void)
 
 enum {
 	IAS_BW_STATE_RELAX = 0,
-	IAS_BW_STATE_PUNISH1,
-	IAS_BW_STATE_PUNISH2,
+	IAS_BW_STATE_SAMPLE,
+	IAS_BW_STATE_PUNISH,
 };
 
 static struct pmc_sample arr_1[NCPU], arr_2[NCPU];
@@ -209,22 +205,21 @@ void ias_bw_poll(uint64_t now_us)
 	case IAS_BW_STATE_RELAX:
 		if (throttle) {
 			ias_bw_request_pmc(PMC_LLC_MISSES, start);
-			state = IAS_BW_STATE_PUNISH1;
+			state = IAS_BW_STATE_SAMPLE;
 			break;
 		}
 		ias_bw_relax();
 		break;
 
-	case IAS_BW_STATE_PUNISH1:
-		state = IAS_BW_STATE_PUNISH2;
+	case IAS_BW_STATE_SAMPLE:
+		state = IAS_BW_STATE_PUNISH;
 		ias_bw_gather_pmc(start);
 		ias_bw_request_pmc(PMC_LLC_MISSES, end);
 		break;
 
-	case IAS_BW_STATE_PUNISH2:
+	case IAS_BW_STATE_PUNISH:
 		ias_bw_gather_pmc(end);
-		if (!throttle ||
-			   unlikely(ias_bw_punish(start, end))) {
+		if (!throttle || unlikely(ias_bw_punish(start, end))) {
 			state = IAS_BW_STATE_RELAX;
 			break;
 		}
