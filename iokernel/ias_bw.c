@@ -15,6 +15,7 @@
 uint64_t ias_bw_punish_count;
 uint64_t ias_bw_relax_count;
 uint64_t ias_bw_sample_failures;
+uint64_t ias_bw_sample_aborts;
 float	 ias_bw_estimate;
 
 struct pmc_sample {
@@ -68,10 +69,10 @@ static void ias_bw_gather_pmc(struct pmc_sample *samples)
 }
 
 static struct ias_data *
-ias_bw_choose_victim(struct pmc_sample *start, struct pmc_sample *end, unsigned int *worst_core)
+ias_bw_choose_victim(struct pmc_sample *start, struct pmc_sample *end,
+		     unsigned int *worst_core)
 {
 	struct ias_data *sd, *victim = NULL;
-	uint64_t highest_l3miss = 0;
 	float highest_l3miss_rate = 0.0, bw_estimate;
 	int core, tmp;
 
@@ -81,12 +82,14 @@ ias_bw_choose_victim(struct pmc_sample *start, struct pmc_sample *end, unsigned 
 
 	/* convert per-core llc miss counts into per-task llc miss counts */
 	sched_for_each_allowed_core(core, tmp) {
-		if (cores[core] == NULL || start[core].gen != end[core].gen ||
-			  start[core].gen != ias_gen[core])
+		if (cores[core] == NULL ||
+		    start[core].gen != end[core].gen ||
+		    start[core].gen != ias_gen[core]) {
 			continue;
+		}
 
 		bw_estimate = (float)(end[core].val - start[core].val) /
-						  (float)(end[core].tsc - start[core].tsc);
+			      (float)(end[core].tsc - start[core].tsc);
 		cores[core]->bw_llc_miss_rate += bw_estimate;
 	}
 
@@ -107,17 +110,18 @@ ias_bw_choose_victim(struct pmc_sample *start, struct pmc_sample *end, unsigned 
 		return NULL;
 
 	/* find that task's core with the highest llc miss count */
-	highest_l3miss = 0;
+	highest_l3miss_rate = 0.0;
 	*worst_core = NCPU;
 	sched_for_each_allowed_core(core, tmp) {
-		uint64_t l3miss = end[core].val - start[core].val;
-		if (l3miss <= highest_l3miss)
+		bw_estimate = (float)(end[core].val - start[core].val) /
+			      (float)(end[core].tsc - start[core].tsc);
+		if (bw_estimate <= highest_l3miss_rate)
 			continue;
 		if (cores[core] != victim)
 			continue;
 
 		*worst_core = core;
-		highest_l3miss = l3miss;
+		highest_l3miss_rate = bw_estimate;
 	}
 	if (*worst_core == NCPU)
 		return NULL;
@@ -220,6 +224,7 @@ void ias_bw_poll(uint64_t now_us)
 	case IAS_BW_STATE_PUNISH:
 		ias_bw_gather_pmc(end);
 		if (!throttle || unlikely(ias_bw_punish(start, end))) {
+			ias_bw_sample_aborts++;
 			state = IAS_BW_STATE_RELAX;
 			break;
 		}

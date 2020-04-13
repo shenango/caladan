@@ -442,9 +442,10 @@ static void ias_print_debug_info(void)
 			 (double)sd->ht_punish_count / (double)rescheds);
 	}
 
-	log_info("bw_cur %f bw_punish %ld bw_relax %ld bw_sample_failures %ld",
+	log_info("bw_cur %f bw_punish %ld bw_relax %ld bw_sample_failures %ld "
+		 "bw_sample_aborts %ld",
 		 ias_bw_estimate, ias_bw_punish_count, ias_bw_relax_count,
-		 ias_bw_sample_failures);
+		 ias_bw_sample_failures, ias_bw_sample_aborts);
 	log_info("ht_punish %ld ht_relax %ld", ias_ht_punish_count,
 		 ias_ht_relax_count);
 
