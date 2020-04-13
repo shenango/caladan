@@ -4,6 +4,7 @@
 
 #include <fcntl.h>
 #include <pthread.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -227,6 +228,7 @@ fail:
 	free(p);
 	if (reg.base)
 		mem_unmap_shm(shbuf);
+	kill(pid, SIGINT);
 	log_err("control: couldn't attach pid %d", pid);
 	return NULL;
 }
