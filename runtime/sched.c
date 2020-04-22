@@ -578,15 +578,33 @@ void thread_ready(thread_t *th)
 static void thread_finish_cede(void)
 {
 	struct kthread *k = myk();
-	thread_t *myth = thread_self();
+	thread_t *th, *myth = thread_self();
 
 	assert(myth->state == THREAD_STATE_RUNNING);
 	myth->state = THREAD_STATE_SLEEPING;
 	myth->last_cpu = k->curr_cpu;
-	thread_ready(myth);
 	__self = NULL;
 
 	STAT(PROGRAM_CYCLES) += rdtsc() - last_tsc;
+
+	if (k->rq_head == ACCESS_ONCE(k->rq_tail)) {
+		/* if the runqueue is empty, use lockless thread wake */
+		thread_ready(myth);
+	} else {
+		/* ensure preempted thread cuts the line,
+		 * possibly displacing the newest element in a full runqueue
+		 * into the overflow queue
+		 */
+		ACCESS_ONCE(k->q_ptrs->rq_head)++;
+		spin_lock(&k->lock);
+		th = k->rq[--k->rq_tail % RUNTIME_RQ_SIZE];
+		k->rq[k->rq_tail % RUNTIME_RQ_SIZE] = myth;
+		if (unlikely(k->rq_head - k->rq_tail > RUNTIME_RQ_SIZE)) {
+			list_add(&k->rq_overflow, &th->link);
+			k->rq_head--;
+		}
+		spin_unlock(&k->lock);
+	}
 
 	/* increment the RCU generation number (even - pretend in sched) */
 	store_release(&k->rcu_gen, k->rcu_gen + 1);
