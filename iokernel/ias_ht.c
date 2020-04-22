@@ -19,8 +19,8 @@ DEFINE_BITMAP(ias_ht_punished_cores, NCPU);
 
 static void ias_ht_punish(struct ias_data *sd, unsigned int core)
 {
+	struct ias_data *sib_sd;
 	unsigned int sib = sched_siblings[core];
-	bool idle = cores[sib] == NULL;
 
 	/* check if the core is already punished */
 	if (sd != cores[core] || bitmap_test(ias_ht_punished_cores, core) ||
@@ -28,7 +28,8 @@ static void ias_ht_punish(struct ias_data *sd, unsigned int core)
 		return;
 
 	/* don't preempt an LC task if we can't add back a different core */
-	if (!idle && cores[sib]->is_lc && !ias_can_add_kthread(cores[sib]))
+	sib_sd = cores[sib];
+	if (sib_sd && sib_sd->is_lc && !ias_can_add_kthread(sib_sd))
 		return;
 
 	/* idle the core, but mark it as in use by the process */
@@ -43,8 +44,8 @@ static void ias_ht_punish(struct ias_data *sd, unsigned int core)
 	bitmap_set(ias_ht_punished_cores, sib);
 
 	/* try to allocate another core to the preempted task (best effort) */
-	if (!idle)
-		ias_add_kthread(cores[sib]);
+	if (sib_sd)
+		ias_add_kthread(sib_sd);
 
 }
 
