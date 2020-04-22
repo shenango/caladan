@@ -47,6 +47,19 @@ static __thread uint64_t last_watchdog_tsc;
  */
 thread_t *thread_self(void);
 
+uint64_t get_uthread_specific(void)
+{
+	BUG_ON(!__self);
+	return __self->tlsvar;
+}
+
+void set_uthread_specific(uint64_t val)
+{
+	BUG_ON(!__self);
+	__self->tlsvar = val;
+}
+
+
 /**
  * cores_have_affinity - returns true if two cores have cache affinity
  * @cpua: the first core

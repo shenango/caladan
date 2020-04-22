@@ -41,6 +41,10 @@ inline thread_t *thread_self(void)
 }
 
 
+extern uint64_t get_uthread_specific(void);
+extern void set_uthread_specific(uint64_t val);
+
+
 /*
  * High-level routines, use this API most of the time.
  */
