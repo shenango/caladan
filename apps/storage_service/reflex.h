@@ -66,4 +66,5 @@ typedef struct __attribute__((__packed__)) {
   void* req_handle;
   unsigned long lba;
   unsigned int lba_count;
+  uint64_t tsc;
 } binary_header_blk_t;

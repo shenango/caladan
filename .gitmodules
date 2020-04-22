@@ -7,3 +7,6 @@
 [submodule "rdma-core"]
 	path = rdma-core
 	url = https://github.com/linux-rdma/rdma-core
+[submodule "apps/storage_service/snappy"]
+	path = apps/storage_service/snappy
+	url = https://github.com/google/snappy.git

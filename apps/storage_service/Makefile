@@ -8,6 +8,10 @@ INC += -I$(ROOT_PATH)/bindings/cc
 storage_server_src = storage_server.cc
 storage_server_obj = $(storage_server_src:.cc=.o)
 
+
+INC += -Isnappy/ -Isnappy/build/
+LIBS += snappy/build/libsnappy.a -lcrypto
+
 src = $(storage_server_src)
 obj = $(src:.cc=.o)
 dep = $(obj:.o=.d)
@@ -16,7 +20,7 @@ dep = $(obj:.o=.d)
 all: storage_server
 
 storage_server: $(storage_server_obj) $(librt_libs) $(RUNTIME_DEPS)
-	$(LDXX) -o $@ $(LDFLAGS) $(obj) $(librt_libs) $(RUNTIME_LIBS)
+	$(LDXX) -o $@ $(LDFLAGS) ../../shim/libshim.a -ldl  $(obj) $(librt_libs) $(RUNTIME_LIBS) $(LIBS)
 
 ifneq ($(MAKECMDGOALS),clean)
 -include $(dep)   # include all dep files in the makefile
