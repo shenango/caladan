@@ -466,15 +466,17 @@ static void ias_print_debug_info(void)
 
 static void ias_sched_poll(uint64_t now, int idle_cnt, bitmap_ptr_t idle)
 {
-	static unsigned int div;
+	static uint64_t last_bw_us;
 #ifdef IAS_DEBUG
 	static uint64_t debug_ts = 0;
 #endif
 	unsigned int core;
 
 	now_us = now;
-	if (div++ % 4 == 0)
+	if (now - last_bw_us >= IAS_BW_INTERVAL_US) {
+		last_bw_us = now;
 		ias_bw_poll(now);
+	}
 	ias_ht_poll(now);
 
 #ifdef IAS_DEBUG
