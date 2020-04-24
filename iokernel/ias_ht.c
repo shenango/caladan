@@ -29,7 +29,7 @@ static void ias_ht_punish(struct ias_data *sd, unsigned int core)
 
 	/* don't preempt an LC task if we can't add back a different core */
 	sib_sd = cores[sib];
-	if (sib_sd && sib_sd->is_lc && !ias_can_add_kthread(sib_sd))
+	if (sib_sd && sib_sd->is_lc && !ias_can_add_kthread(sib_sd, true))
 		return;
 
 	/* idle the core, but mark it as in use by the process */
@@ -121,4 +121,29 @@ void ias_ht_poll(uint64_t now_us)
 			ias_ht_poll_one(sd, th, now_us);
 		}
 	}
+}
+
+/**
+ * ias_ht_relinquish_core - try to unpunished a core to alleviate congestion
+ * @sd: the task that is congested
+ *
+ * Returns a core to allocate or NCPU if no core is available.
+ */
+unsigned int ias_ht_relinquish_core(struct ias_data *sd)
+{
+	unsigned int core, tmp;
+
+	sched_for_each_allowed_core(core, tmp) {
+		if (cores[core] != sd)
+			continue;
+		if (!bitmap_test(ias_ht_punished_cores, core))
+			continue;
+
+		/* mark the core as relaxed */
+		ias_ht_relax_count++;
+		bitmap_clear(ias_ht_punished_cores, core);
+		return core;
+	}
+
+	return NCPU;
 }

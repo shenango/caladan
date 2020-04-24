@@ -295,11 +295,17 @@ static unsigned int ias_choose_core(struct ias_data *sd)
 	return best_core;
 }
 
-bool ias_can_add_kthread(struct ias_data *sd)
+bool ias_can_add_kthread(struct ias_data *sd, bool new_phys_core)
 {
-	unsigned int core, tmp;
+	unsigned int core, tmp, sib;
 
 	sched_for_each_allowed_core(core, tmp) {
+		sib = sched_siblings[core];
+
+		/* skip a core whose sibling is already running this process */
+		if (new_phys_core && cores[sib] == sd)
+			continue;
+
 		if (ias_can_preempt_core(sd, core))
 			return true;
 	}
@@ -316,8 +322,11 @@ int ias_add_kthread(struct ias_data *sd)
 
 	/* choose the best core to run the process on */
 	core = ias_choose_core(sd);
-	if (core == NCPU)
-		return -ENOENT;
+	if (core == NCPU) {
+		core = ias_ht_relinquish_core(sd);
+		if (core == NCPU)
+			return -ENOENT;
+	}
 
 	/* finally, wake up the thread on the chosen core */
 	return ias_run_kthread_on_core(sd, core);
