@@ -439,6 +439,7 @@ static void ias_print_debug_info(void)
 	struct ias_data *sd;
 	int core, sib, i;
 	uint64_t rescheds = 0;
+	uint64_t now = rdtsc();
 
 	ias_for_each_proc(sd) {
 		for (i = 0; i < NCPU; i++)
@@ -454,11 +455,11 @@ static void ias_print_debug_info(void)
 			 (double)sd->ht_punish_count / (double)rescheds);
 	}
 
-	log_info("bw_cur %f bw_punish %ld bw_relax %ld bw_sample_failures %ld "
+	log_info("tsc %lu bw_cur %f bw_punish %ld bw_relax %ld bw_sample_failures %ld "
 		 "bw_sample_aborts %ld",
-		 ias_bw_estimate, ias_bw_punish_count, ias_bw_relax_count,
+		 now, ias_bw_estimate, ias_bw_punish_count, ias_bw_relax_count,
 		 ias_bw_sample_failures, ias_bw_sample_aborts);
-	log_info("ht_punish %ld ht_relax %ld", ias_ht_punish_count,
+	log_info("tsc %lu ht_punish %ld ht_relax %ld", now, ias_ht_punish_count,
 		 ias_ht_relax_count);
 
 	memset(printed, 0, sizeof(printed));

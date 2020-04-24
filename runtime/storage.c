@@ -33,7 +33,7 @@ static __thread unsigned int nrcb_ths;
 
 /* 4KB storage request buffers */
 #define REQUEST_BUF_POOL_SZ (PGSIZE_2MB * 20)
-#define REQUEST_BUF_SZ (4 * KB)
+#define REQUEST_BUF_SZ (16 * KB)
 struct mempool storage_buf_mp;
 static struct tcache *storage_buf_tcache;
 static DEFINE_PERTHREAD(struct tcache_perthread, storage_buf_pt);

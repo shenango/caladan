@@ -173,6 +173,8 @@ int runtime_init(const char *cfgpath, thread_fn_t main_fn, void *arg)
 	if (ret)
 		return ret;
 
+	log_info("process pid: %u", getpid());
+
 	pthread_barrier_init(&init_barrier, NULL, maxks);
 
 	ret = run_init_handlers("global", global_init_handlers,

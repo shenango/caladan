@@ -170,9 +170,10 @@ fn socket_worker(socket: &mut Connection, worker: Arc<FakeWorker>) {
     let mut v = vec![0; PAYLOAD_SIZE];
     let mut r = || {
         socket.read_exact(&mut v[..PAYLOAD_SIZE])?;
-        let payload = Payload::deserialize(&mut &v[..PAYLOAD_SIZE])?;
+        let mut payload = Payload::deserialize(&mut &v[..PAYLOAD_SIZE])?;
         v.clear();
         worker.work(payload.work_iterations, payload.randomness);
+        payload.randomness = shenango::rdtsc();
         payload.serialize_into(&mut v)?;
         Ok(socket.write_all(&v[..])?)
     };

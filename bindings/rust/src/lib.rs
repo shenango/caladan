@@ -95,6 +95,7 @@ where
     })
 }
 
+#[derive(Clone)]
 pub struct WaitGroup {
     inner: Arc<ffi::waitgroup>,
 }
