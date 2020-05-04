@@ -267,8 +267,12 @@ static float ias_core_score(struct ias_data *sd, unsigned int core,
 	if (bitmap_test(sd->reserved_cores, core))
 		score += 2.0f;
 
-	if (cfg.mutualpair && cores[sched_siblings[core]] != sd)
+	if (cfg.mutualpair && cores[sched_siblings[core]] != sd) {
 		score += 3.0f;
+		if (cores[sched_siblings[core]] == NULL && cores[core] == NULL)
+			score += 2.0f;
+	}
+
 
 	return score;
 }
