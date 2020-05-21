@@ -262,17 +262,18 @@ static float ias_core_score(struct ias_data *sd, unsigned int core,
 			    uint64_t now_us)
 {
 	float score;
+	struct ias_data *sib_task = cores[sched_siblings[core]];
 
 	score = ias_locality_score(sd, core, now_us);
-	if (bitmap_test(sd->reserved_cores, core))
-		score += 2.0f;
 
-	if (cfg.mutualpair && cores[sched_siblings[core]] != sd) {
+	if (bitmap_test(sd->reserved_cores, core))
+		score += 6.0f;
+
+	if (cfg.mutualpair && sib_task != sd) {
 		score += 3.0f;
-		if (cores[sched_siblings[core]] == NULL && cores[core] == NULL)
+		if (sib_task == NULL && cores[core] == NULL)
 			score += 2.0f;
 	}
-
 
 	return score;
 }
@@ -483,7 +484,7 @@ static void ias_print_debug_info(void)
 
 static void ias_sched_poll(uint64_t now, int idle_cnt, bitmap_ptr_t idle)
 {
-	static uint64_t last_bw_us;
+	static uint64_t last_bw_us, last_ht_us;
 #ifdef IAS_DEBUG
 	static uint64_t debug_ts = 0;
 #endif
@@ -494,7 +495,11 @@ static void ias_sched_poll(uint64_t now, int idle_cnt, bitmap_ptr_t idle)
 		last_bw_us = now;
 		ias_bw_poll(now);
 	}
-	ias_ht_poll(now);
+
+	if (now - last_ht_us >= IAS_HT_INTERVAL_US) {
+		last_ht_us = now;
+		ias_ht_poll(now);
+	}
 
 #ifdef IAS_DEBUG
 	if (now - debug_ts >= IAS_DEBUG_PRINT_US) {
