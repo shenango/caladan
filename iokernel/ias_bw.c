@@ -149,17 +149,22 @@ static int ias_bw_punish(struct pmc_sample *start, struct pmc_sample *end)
 
 static void ias_bw_relax(void)
 {
-	struct ias_data *sd;
+	struct ias_data *sd, *best_sd = NULL;
 
 	ias_for_each_proc(sd) {
-		if (!sd->is_bwlimited)
+		if (!sd->is_bwlimited || !sd->is_congested)
+			continue;
+		if (best_sd && sd->threads_limit <= best_sd->threads_limit)
 			continue;
 
-		sd->threads_limit++;
-		if (sd->threads_limit >= sd->threads_max)
-			sd->is_bwlimited = false;
+		best_sd = sd;
+	}
+
+	if (best_sd) {
+		best_sd->threads_limit++;
+		if (best_sd->threads_limit >= best_sd->threads_max)
+			best_sd->is_bwlimited = false;
 		ias_bw_relax_count++;
-		break;
 	}
 }
 
@@ -228,7 +233,7 @@ void ias_bw_poll(uint64_t now_us)
 			state = IAS_BW_STATE_RELAX;
 			break;
 		}
-		swapvars(start, end);
+		memcpy(start, end, sizeof(start));
 		ias_bw_request_pmc(PMC_LLC_MISSES, end);
 		break;
 
