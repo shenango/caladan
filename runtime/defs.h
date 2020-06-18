@@ -519,7 +519,7 @@ struct net_cfg {
 	uint32_t		gateway;
 	struct eth_addr		mac;
 	uint8_t			pad[14];
-} __packed;
+};
 
 BUILD_ASSERT(sizeof(struct net_cfg) == CACHE_LINE_SIZE);
 

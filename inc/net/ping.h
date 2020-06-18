@@ -6,7 +6,7 @@
 
 struct ping_payload {
 	struct timeval tx_time;
-} __packed;
+};
 
 int net_ping_init();
 void net_send_ping(uint16_t seq_num, uint32_t daddr);

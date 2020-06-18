@@ -13,7 +13,7 @@
 
 static uint16_t ping_id;
 
-int net_ping_init()
+int net_ping_init(void)
 {
 	ping_id = rand();
 	return 0;

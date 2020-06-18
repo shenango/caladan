@@ -48,6 +48,17 @@ static int thread_alloc_perthread(void)
 }
 
 /**
+ * thread_gettid - gets the tid of the current kernel thread
+ */
+pid_t thread_gettid(void)
+{
+#ifndef SYS_gettid
+	#error "SYS_gettid unavailable on this system"
+#endif
+	return syscall(SYS_gettid);
+}
+
+/**
  * thread_init_perthread - initializes a thread
  *
  * Returns 0 if successful, otherwise fail.

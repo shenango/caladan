@@ -233,7 +233,7 @@ void ias_bw_poll(uint64_t now_us)
 			state = IAS_BW_STATE_RELAX;
 			break;
 		}
-		memcpy(start, end, sizeof(start));
+		memcpy(start, end, sizeof(*start));
 		ias_bw_request_pmc(PMC_LLC_MISSES, end);
 		break;
 
