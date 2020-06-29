@@ -24,28 +24,39 @@ static int pci_scan_dev_info(struct pci_dev *dev, const char *dir_path)
 {
 	char file_path[PATH_MAX];
 	uint64_t tmp;
+	int ret;
 
-	snprintf(file_path, sizeof(file_path), "%s/vendor", dir_path);
+	ret = snprintf(file_path, sizeof(file_path), "%s/vendor", dir_path);
+	if (ret >= sizeof(file_path) || ret < 0)
+		return -EIO;
 	if (sysfs_parse_val(file_path, &tmp))
 		return -EIO;
 	dev->vendor_id = (uint16_t)tmp;
 
-	snprintf(file_path, sizeof(file_path), "%s/device", dir_path);
+	ret = snprintf(file_path, sizeof(file_path), "%s/device", dir_path);
+	if (ret >= sizeof(file_path) || ret < 0)
+		return -EIO;
 	if (sysfs_parse_val(file_path, &tmp))
 		return -EIO;
 	dev->device_id = (uint16_t)tmp;
 
-	snprintf(file_path, sizeof(file_path), "%s/subsystem_vendor", dir_path);
+	ret = snprintf(file_path, sizeof(file_path), "%s/subsystem_vendor", dir_path);
+	if (ret >= sizeof(file_path) || ret < 0)
+		return -EIO;
 	if (sysfs_parse_val(file_path, &tmp))
 		return -EIO;
 	dev->subsystem_vendor_id = (uint16_t)tmp;
 
-	snprintf(file_path, sizeof(file_path), "%s/subsystem_device", dir_path);
+	ret = snprintf(file_path, sizeof(file_path), "%s/subsystem_device", dir_path);
+	if (ret >= sizeof(file_path) || ret < 0)
+		return -EIO;
 	if (sysfs_parse_val(file_path, &tmp))
 		return -EIO;
 	dev->subsystem_device_id = (uint16_t)tmp;
 
-	snprintf(file_path, sizeof(file_path), "%s/numa_node", dir_path);
+	ret = snprintf(file_path, sizeof(file_path), "%s/numa_node", dir_path);
+	if (ret >= sizeof(file_path) || ret < 0)
+		return -EIO;
 	if (access(file_path, R_OK)) {
 		dev->numa_node = -1;
 	} else {
@@ -54,7 +65,9 @@ static int pci_scan_dev_info(struct pci_dev *dev, const char *dir_path)
 		dev->numa_node = tmp;
 	}
 
-	snprintf(file_path, sizeof(file_path), "%s/max_vfs", dir_path);
+	ret = snprintf(file_path, sizeof(file_path), "%s/max_vfs", dir_path);
+	if (ret >= sizeof(file_path) || ret < 0)
+		return -EIO;
 	if (access(file_path, R_OK)) {
 		dev->max_vfs = 0;
 	} else {
@@ -71,14 +84,17 @@ static int pci_scan_dev_resources(struct pci_dev *dev, const char *dir_path)
 	char file_path[PATH_MAX];
 	char buf[BUFSIZ];
 	FILE *f;
-	int i, ret = 0;
+	int i, ret;
 	uint64_t start, end, flags;
 
-	snprintf(file_path, sizeof(file_path), "%s/resource", dir_path);
+	ret = snprintf(file_path, sizeof(file_path), "%s/resource", dir_path);
+	if (ret >= sizeof(file_path) || ret < 0)
+		return -EIO;
 	f = fopen(file_path, "r");
 	if (f == NULL)
 		return -EIO;
 
+	ret = 0;
 	for (i = 0; i < PCI_MAX_BARS; i++) {
 		if (!fgets(buf, sizeof(buf), f)) {
 			ret = -EIO;

@@ -433,7 +433,7 @@ static void *control_thread(void *data)
 	int ret;
 
 	/* pin to our assigned core */
-	ret = control_pin_thread(gettid(), sched_ctrl_core);
+	ret = control_pin_thread(thread_gettid(), sched_ctrl_core);
 	if (ret < 0) {
 		log_err("control: failed to pin control thread to core %d",
 			sched_ctrl_core);
