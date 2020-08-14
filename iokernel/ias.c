@@ -442,22 +442,16 @@ static void ias_print_debug_info(void)
 {
 	bool printed[NCPU];
 	struct ias_data *sd;
-	int core, sib, i;
-	uint64_t rescheds = 0;
+	int core, sib;
 	uint64_t now = rdtsc();
 
 	ias_for_each_proc(sd) {
-		for (i = 0; i < NCPU; i++)
-			rescheds += sd->ht_last_rcugen[i];
-		rescheds /= 2;
-
-		log_info("PID %d: %s%s ACTIVE %d, LIMIT %d, MAX %d HT %f",
+		log_info("PID %d: %s%s ACTIVE %d, LIMIT %d, MAX %d",
 			 sd->p->pid,
 			 sd->is_congested ? "C" : "_",
 			 sd->is_bwlimited ? "B" : "_",
 			 sd->threads_active, sd->threads_limit,
-			 sd->threads_max,
-			 (double)sd->ht_punish_count / (double)rescheds);
+			 sd->threads_max);
 	}
 
 	log_info("tsc %lu bw_cur %f bw_punish %ld bw_relax %ld bw_sample_failures %ld "

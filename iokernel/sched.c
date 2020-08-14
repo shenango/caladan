@@ -225,6 +225,18 @@ int sched_idle_on_core(uint32_t mwait_hint, unsigned int core)
 	return __sched_run(s, NULL, core);
 }
 
+/**
+ * sched_get_thread_on_core - retrieves the thread currently on a core
+ * @core: the core number to get the thread for
+ *
+ * Returns a pointer to a thread, or NULL if none is present.
+ */
+struct thread *sched_get_thread_on_core(unsigned int core)
+{
+	struct core_state *s = &state[core];
+	return s->pending ? s->pending_th : s->cur_th;
+}
+
 static uint32_t hwq_find_head(struct hwq *h, uint32_t cur_tail, uint32_t last_head)
 {
 	uint32_t i = 0;
@@ -291,19 +303,27 @@ static void sched_detect_congestion(struct proc *p)
 
 	/* detect uthread runqueue congestion */
 	for (i = 0; i < p->thread_count; i++) {
+		uint64_t oldest_tsc;
+
 		th = &p->threads[i];
 		last_tail = th->last_rq_tail;
 		cur_tail = load_acquire(&th->q_ptrs->rq_tail);
 		last_head = th->last_rq_head;
 		cur_head = ACCESS_ONCE(th->q_ptrs->rq_head);
-		rq_oldest_tsc = MIN(rq_oldest_tsc,
-				    ACCESS_ONCE(th->q_ptrs->oldest_tsc));
 		th->last_rq_head = cur_head;
 		th->last_rq_tail = cur_tail;
+
+		/* update old standing queue time signal */
 		if (th->active ? wraps_lt(cur_tail, last_head) :
 				 cur_head != cur_tail) {
 			bitmap_set(threads, i);
 		}
+
+		/* update new queueing delay signal */
+		if (cur_head == cur_tail)
+			continue;
+		oldest_tsc = ACCESS_ONCE(th->q_ptrs->oldest_tsc);
+		rq_oldest_tsc = MIN(rq_oldest_tsc, oldest_tsc);
 	}
 
 	/* detect RX queue congestion */

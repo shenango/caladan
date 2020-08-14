@@ -47,8 +47,6 @@ struct ias_data {
 	uint64_t		loc_last_us[NCPU];
 
 	/* the hyperthread subcontroller */
-	uint64_t		ht_last_rcugen[NCPU];
-	uint64_t		ht_last_us[NCPU];
 	uint64_t		ht_punish_us;
 	uint64_t		ht_punish_count;
 

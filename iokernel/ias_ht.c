@@ -17,14 +17,25 @@ uint64_t ias_ht_relax_count;
 /* a bitmap of cores that are currently punished */
 DEFINE_BITMAP(ias_ht_punished_cores, NCPU);
 
+struct ias_ht_data {
+	/* the scheduler's generation counter */
+	uint64_t	sgen;
+	/* the runtime's generation counter */
+	uint64_t	rgen;
+	/* the last time these counters were updated */
+	uint64_t	last_us;
+};
+
+/* per-core data for this subcontroller */
+static struct ias_ht_data ias_ht_percore[NCPU];
+
 static void ias_ht_punish(struct ias_data *sd, unsigned int core)
 {
 	struct ias_data *sib_sd;
 	unsigned int sib = sched_siblings[core];
 
 	/* check if the core is already punished */
-	if (sd != cores[core] || bitmap_test(ias_ht_punished_cores, core) ||
-	    bitmap_test(ias_ht_punished_cores, sib))
+	if (bitmap_test(ias_ht_punished_cores, sib))
 		return;
 
 	/* don't preempt an LC task if we can't add back a different core */
@@ -46,7 +57,6 @@ static void ias_ht_punish(struct ias_data *sd, unsigned int core)
 	/* try to allocate another core to the preempted task (best effort) */
 	if (sib_sd)
 		ias_add_kthread(sib_sd);
-
 }
 
 static void ias_ht_relax(struct ias_data *sd, unsigned int core)
@@ -70,28 +80,34 @@ static void ias_ht_relax(struct ias_data *sd, unsigned int core)
 	}
 }
 
-static void ias_ht_poll_one(struct ias_data *sd, struct thread *th,
-			    uint64_t now_us)
+static void ias_ht_poll_one(unsigned int core, uint64_t now_us)
 {
-	uint64_t rcugen, last_rcugen;
-	ptrdiff_t idx = th - sd->p->threads;
+	struct ias_ht_data *htd = &ias_ht_percore[core];
+	struct ias_data *sd = cores[core];
+	struct thread *th = sched_get_thread_on_core(core);
+	uint64_t sgen, rgen;
 
-	rcugen = ACCESS_ONCE(th->q_ptrs->rcu_gen);
-	last_rcugen = sd->ht_last_rcugen[idx];
+	/* check if we might be able to punish the sibling's HT lane */
+	if (sd && sd->is_lc && sd->ht_punish_us > 0 && th != NULL) {
+		/* update generation counters */
+		sgen = ias_gen[core];
+		rgen = ACCESS_ONCE(th->q_ptrs->rcu_gen);
+		if (htd->sgen != sgen || htd->rgen != rgen) {
+			htd->sgen = sgen;
+			htd->rgen = rgen;
+			htd->last_us = now_us;
+		}
 
-	/* check if we should relax this hyperthread lane */
-	if (rcugen != last_rcugen) {
-		sd->ht_last_rcugen[idx] = rcugen;
-		sd->ht_last_us[idx] = now_us;
-		ias_ht_relax(sd, th->core);
-		return;
+		/* punish if deadline has expired and a thread is running */
+		if (now_us - htd->last_us >= sd->ht_punish_us &&
+		    (rgen & 0x1) == 0x1) {
+			ias_ht_punish(sd, core);
+			return;
+		}
 	}
 
-	/* check if we should punish this hyperthread lane */
-	if ((rcugen & 0x1) == 0x1 &&
-	    now_us - sd->ht_last_us[idx] >= sd->ht_punish_us) {
-		ias_ht_punish(sd, th->core);
-	}
+	/* otherwise relax the sibling's HT lane */
+	ias_ht_relax(sd, core);
 }
 
 /**
@@ -100,26 +116,11 @@ static void ias_ht_poll_one(struct ias_data *sd, struct thread *th,
  */
 void ias_ht_poll(uint64_t now_us)
 {
-	struct ias_data *sd;
-	struct proc *p;
-	struct thread *th;
-	int i;
+	unsigned int core, tmp;
 
-	ias_for_each_proc(sd) {
-		/* only LC tasks are eligible for HT control */
-		if (!sd->is_lc)
-			continue;
-		/* skip tasks without an HT punish deadline */
-		if (sd->ht_punish_us == 0)
-			continue;
-
-		/* check each thread */
-		/* FIXME: can we constrain this to active threads? */
-		p = sd->p;
-		for (i = 0; i < p->thread_count; i++) {
-			th = &p->threads[i];
-			ias_ht_poll_one(sd, th, now_us);
-		}
+	/* loop over cores and check if each should be punished or relaxed */
+	sched_for_each_allowed_core(core, tmp) {
+		ias_ht_poll_one(core, now_us);
 	}
 }
 

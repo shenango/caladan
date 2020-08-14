@@ -175,16 +175,14 @@ static bool work_available(struct kthread *k)
 static void update_oldest_tsc(struct kthread *k)
 {
 	thread_t *th;
-	uint64_t oldest_tsc = UINT64_MAX;
 
 	assert_spin_lock_held(&k->lock);
 
 	/* find the oldest thread in the runqueue */
 	if (load_acquire(&k->rq_head) != k->rq_tail) {
 		th = k->rq[k->rq_tail % RUNTIME_RQ_SIZE];
-		oldest_tsc = th->ready_tsc;
+		ACCESS_ONCE(k->q_ptrs->oldest_tsc) = th->ready_tsc;
 	}
-	ACCESS_ONCE(k->q_ptrs->oldest_tsc) = oldest_tsc;
 }
 
 static bool steal_work(struct kthread *l, struct kthread *r)
@@ -568,10 +566,11 @@ void thread_ready(thread_t *th)
 		return;
 	}
 
-	if (k->rq_head == rq_tail)
-		ACCESS_ONCE(k->q_ptrs->oldest_tsc) = th->ready_tsc;
 	k->rq[k->rq_head % RUNTIME_RQ_SIZE] = th;
 	store_release(&k->rq_head, k->rq_head + 1);
+
+	if (load_acquire(&k->rq_tail) == k->rq_head - 1)
+		ACCESS_ONCE(k->q_ptrs->oldest_tsc) = th->ready_tsc;
 	putk();
 }
 
