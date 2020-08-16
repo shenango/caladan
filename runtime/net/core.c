@@ -45,6 +45,8 @@ static DEFINE_PERTHREAD(struct tcache_perthread, net_tx_buf_pt);
  */
 static uint32_t compute_flow_affinity(uint8_t ipproto, uint16_t local_port, struct netaddr remote)
 {
+	log_warn_ratelimited("flow affinity not enabled for iokernel datapath");
+	return 0;
 	const uint8_t *rss_key = iok.iok_info->rss_key;
 
 	uint32_t i, j, map, ret = 0, input_tuple[] = {

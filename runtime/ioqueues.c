@@ -191,7 +191,9 @@ int ioqueues_init(void)
 		return -1;
 	}
 	netcfg.rx_region.len = INGRESS_MBUF_SHM_SIZE;
+#if 0
 	iok.iok_info = (struct iokernel_info *)netcfg.rx_region.base;
+#endif
 
 	/* set up queues in shared memory */
 	iok.hdr = iok_shm_alloc(sizeof(*iok.hdr), 0, NULL);

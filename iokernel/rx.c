@@ -89,12 +89,12 @@ static bool rx_send_pkt_to_runtime(struct proc *p, struct rx_net_hdr *hdr)
 
 static void rx_one_pkt(struct rte_mbuf *buf)
 {
-	struct ether_hdr *ptr_mac_hdr;
-	struct ether_addr *ptr_dst_addr;
+	struct rte_ether_hdr *ptr_mac_hdr;
+	struct rte_ether_addr *ptr_dst_addr;
 	struct rx_net_hdr *net_hdr;
 	int i, ret;
 
-	ptr_mac_hdr = rte_pktmbuf_mtod(buf, struct ether_hdr *);
+	ptr_mac_hdr = rte_pktmbuf_mtod(buf, struct rte_ether_hdr *);
 	ptr_dst_addr = &ptr_mac_hdr->d_addr;
 	log_debug("rx: rx packet with MAC %02" PRIx8 " %02" PRIx8 " %02"
 		  PRIx8 " %02" PRIx8 " %02" PRIx8 " %02" PRIx8,
@@ -103,7 +103,7 @@ static void rx_one_pkt(struct rte_mbuf *buf)
 		  ptr_dst_addr->addr_bytes[4], ptr_dst_addr->addr_bytes[5]);
 
 	/* handle unicast destinations (send to a single runtime) */
-	if (likely(is_unicast_ether_addr(ptr_dst_addr))) {
+	if (likely(rte_is_unicast_ether_addr(ptr_dst_addr))) {
 		void *data;
 		struct proc *p;
 
@@ -128,7 +128,7 @@ static void rx_one_pkt(struct rte_mbuf *buf)
 	}
 
 	/* handle broadcast destinations (send to all runtimes) */
-	if (is_broadcast_ether_addr(ptr_dst_addr) && dp.nr_clients > 0) {
+	if (rte_is_broadcast_ether_addr(ptr_dst_addr) && dp.nr_clients > 0) {
 		bool success;
 		int n_sent = 0;
 
@@ -236,14 +236,12 @@ static struct rte_mempool *rx_pktmbuf_pool_create_in_shm(const char *name,
 	pg_size = PGSIZE_2MB;
 	pg_shift = rte_bsf32(pg_size);
 	len = rte_mempool_ops_calc_mem_size(mp, n, pg_shift, &min_chunk_size, &align);
-	/* reserve 4KB for iokernel information */
-	BUILD_ASSERT(sizeof(struct iokernel_info) <= PGSIZE_4KB);
-	if (len > INGRESS_MBUF_SHM_SIZE - PGSIZE_4KB) {
+	if (len > INGRESS_MBUF_SHM_SIZE) {
 		log_err("rx: shared memory is too small for number of mbufs");
 		goto fail_free_mempool;
 	}
 
-	shbuf = dp.ingress_mbuf_region.base + PGSIZE_4KB;
+	shbuf = dp.ingress_mbuf_region.base;
 
 	/* hack to make sure that this memory area is registered in DPDK */
 	/* use rte_extmem_* and rte_dev_dma_map in the future */
@@ -253,7 +251,7 @@ static struct rte_mempool *rx_pktmbuf_pool_create_in_shm(const char *name,
 	if (ret < 0)
 		goto fail_unmap_memory;
 
-	ret = rte_malloc_heap_memory_add("rx_buf_heap", shbuf, INGRESS_MBUF_SHM_SIZE - PGSIZE_4KB, NULL, 0, PGSIZE_2MB);
+	ret = rte_malloc_heap_memory_add("rx_buf_heap", shbuf, INGRESS_MBUF_SHM_SIZE, NULL, 0, PGSIZE_2MB);
 	if (ret < 0)
 		goto fail_unmap_memory;
 

@@ -1,7 +1,7 @@
-From 259b356cf3cc236fd98f2b7cb083c2976681f659 Mon Sep 17 00:00:00 2001
+From ebbd221eed4d4a283d5d48eef14754bd106167d1 Mon Sep 17 00:00:00 2001
 From: Josh Fried <joshuafried@gmail.com>
-Date: Sun, 19 May 2019 03:06:31 -0400
-Subject: [PATCH] MLX5 support for the iokernel
+Date: Sun, 16 Aug 2020 00:53:28 -0400
+Subject: [PATCH] MLX5 support for the iokernel datapath
 
 ---
  config/common_base                        |  2 +-
@@ -17,31 +17,31 @@ Subject: [PATCH] MLX5 support for the iokernel
  create mode 100644 drivers/net/mlx5/mlx5_custom.h
 
 diff --git a/config/common_base b/config/common_base
-index d12ae98bc..616b15fed 100644
+index 7dec7ed45..d58d7e06f 100644
 --- a/config/common_base
 +++ b/config/common_base
-@@ -317,7 +317,7 @@ CONFIG_RTE_LIBRTE_MLX4_DLOPEN_DEPS=n
- # Compile burst-oriented Mellanox ConnectX-4, ConnectX-5 & Bluefield
- # (MLX5) PMD
+@@ -354,7 +354,7 @@ CONFIG_RTE_LIBRTE_MLX4_DEBUG=n
+ # Compile burst-oriented Mellanox ConnectX-4, ConnectX-5,
+ # ConnectX-6 & Bluefield (MLX5) PMD
  #
 -CONFIG_RTE_LIBRTE_MLX5_PMD=n
 +CONFIG_RTE_LIBRTE_MLX5_PMD=y
  CONFIG_RTE_LIBRTE_MLX5_DEBUG=n
- CONFIG_RTE_LIBRTE_MLX5_DLOPEN_DEPS=n
  
+ # Linking method for mlx4/5 dependency on ibverbs and related libraries
 diff --git a/drivers/net/mlx5/Makefile b/drivers/net/mlx5/Makefile
-index 895cdfeed..a9f25ff5c 100644
+index c5cf4397a..c64f778ca 100644
 --- a/drivers/net/mlx5/Makefile
 +++ b/drivers/net/mlx5/Makefile
 @@ -10,6 +10,8 @@ LIB_GLUE = $(LIB_GLUE_BASE).$(LIB_GLUE_VERSION)
  LIB_GLUE_BASE = librte_pmd_mlx5_glue.so
- LIB_GLUE_VERSION = 18.11.0
+ LIB_GLUE_VERSION = 19.08.0
  
 +SYMLINK-$(CONFIG_RTE_LIBRTE_MLX5_PMD)-include += mlx5_custom.h
 +
  # Sources.
  SRCS-$(CONFIG_RTE_LIBRTE_MLX5_PMD) += mlx5.c
- ifneq ($(CONFIG_RTE_LIBRTE_MLX5_DLOPEN_DEPS),y)
+ ifneq ($(CONFIG_RTE_IBVERBS_LINK_DLOPEN),y)
 diff --git a/drivers/net/mlx5/mlx5_custom.h b/drivers/net/mlx5/mlx5_custom.h
 new file mode 100644
 index 000000000..925721de9
@@ -57,20 +57,20 @@ index 000000000..925721de9
 +
 +#endif /* RTE_PMD_MLX5_CUSTOM_H */
 diff --git a/drivers/net/mlx5/mlx5_mr.c b/drivers/net/mlx5/mlx5_mr.c
-index 442b2d232..00ef98ab6 100644
+index 0d549b68e..962c875bb 100644
 --- a/drivers/net/mlx5/mlx5_mr.c
 +++ b/drivers/net/mlx5/mlx5_mr.c
-@@ -1368,3 +1368,20 @@ mlx5_mr_release(struct rte_eth_dev *dev)
+@@ -1614,3 +1614,20 @@ mlx5_mr_release(struct mlx5_ibv_shared *sh)
  	/* Free all remaining MRs. */
- 	mlx5_mr_garbage_collect(dev);
+ 	mlx5_mr_garbage_collect(sh);
  }
 +
 +void *
 +mlx5_manual_reg_mr(uint8_t port_id, void *addr, size_t length, uint32_t *lkey_out)
 +{
 +	struct rte_eth_dev *dev = &rte_eth_devices[port_id];
-+	struct priv *priv = dev->data->dev_private;
-+	struct ibv_mr *ibv_mr = mlx5_glue->reg_mr(priv->pd, addr, length, IBV_ACCESS_LOCAL_WRITE);
++	struct mlx5_priv *priv = dev->data->dev_private;
++	struct ibv_mr *ibv_mr = mlx5_glue->reg_mr(priv->sh->pd, addr, length, IBV_ACCESS_LOCAL_WRITE);
 +	if (ibv_mr && lkey_out) *lkey_out = rte_cpu_to_be_32(ibv_mr->lkey);
 +
 +	return ibv_mr;
@@ -82,10 +82,10 @@ index 442b2d232..00ef98ab6 100644
 +	mlx5_glue->dereg_mr(ibv_mr);
 +}
 diff --git a/drivers/net/mlx5/mlx5_mr.h b/drivers/net/mlx5/mlx5_mr.h
-index a57003fe9..9db10045e 100644
+index 48264c829..46535d2c1 100644
 --- a/drivers/net/mlx5/mlx5_mr.h
 +++ b/drivers/net/mlx5/mlx5_mr.h
-@@ -26,6 +26,8 @@
+@@ -25,6 +25,8 @@
  #include <rte_rwlock.h>
  #include <rte_bitmap.h>
  
@@ -95,44 +95,46 @@ index a57003fe9..9db10045e 100644
  struct mlx5_mr {
  	LIST_ENTRY(mlx5_mr) mr; /**< Pointer to the prev/next entry. */
 diff --git a/drivers/net/mlx5/mlx5_rxq.c b/drivers/net/mlx5/mlx5_rxq.c
-index 183da0e28..b61bd83b0 100644
+index 986ec016d..7d482aa54 100644
 --- a/drivers/net/mlx5/mlx5_rxq.c
 +++ b/drivers/net/mlx5/mlx5_rxq.c
-@@ -870,9 +870,9 @@ mlx5_rxq_ibv_new(struct rte_eth_dev *dev, uint16_t idx)
- 		.pd = priv->pd,
- 		.cq = tmpl->cq,
- 		.comp_mask =
--			IBV_WQ_FLAGS_CVLAN_STRIPPING |
-+			IBV_WQ_INIT_ATTR_FLAGS | IBV_WQ_FLAGS_CVLAN_STRIPPING |
- 			0,
+@@ -1058,8 +1058,8 @@ mlx5_ibv_wq_new(struct rte_eth_dev *dev, struct mlx5_priv *priv,
+ 		.max_sge = 1 << rxq_data->sges_n,
+ 		.pd = priv->sh->pd,
+ 		.cq = rxq_obj->cq,
+-		.comp_mask = IBV_WQ_FLAGS_CVLAN_STRIPPING | 0,
 -		.create_flags = (rxq_data->vlan_strip ?
-+		.create_flags = IBV_WQ_FLAGS_DELAY_DROP | (rxq_data->vlan_strip ?
- 				 IBV_WQ_FLAGS_CVLAN_STRIPPING :
- 				 0),
++		.comp_mask = IBV_WQ_INIT_ATTR_FLAGS | IBV_WQ_FLAGS_CVLAN_STRIPPING | 0,
++		.create_flags =  (rxq_data->vlan_strip ?
+ 				 IBV_WQ_FLAGS_CVLAN_STRIPPING : 0),
  	};
+ 	/* By default, FCS (CRC) is stripped by hardware. */
 diff --git a/drivers/net/mlx5/mlx5_rxtx.c b/drivers/net/mlx5/mlx5_rxtx.c
-index 6eceea5fe..e06f1b3d8 100644
+index acf0fd794..9b70e2020 100644
 --- a/drivers/net/mlx5/mlx5_rxtx.c
 +++ b/drivers/net/mlx5/mlx5_rxtx.c
-@@ -2405,7 +2405,7 @@ removed_rx_burst(void *dpdk_txq __rte_unused,
+@@ -1823,7 +1823,7 @@ removed_rx_burst(void *dpdk_txq __rte_unused,
   * stubs are needed for linkage when those are not included outside of this file
   * (e.g.  mlx5_rxtx_vec_sse.c for x86).
   */
 -
 +#if 0
  __rte_weak uint16_t
- mlx5_tx_burst_raw_vec(void *dpdk_txq __rte_unused,
- 		      struct rte_mbuf **pkts __rte_unused,
-@@ -2453,3 +2453,4 @@ mlx5_check_vec_rx_support(struct rte_eth_dev *dev __rte_unused)
+ mlx5_rx_burst_vec(void *dpdk_txq __rte_unused,
+ 		  struct rte_mbuf **pkts __rte_unused,
+@@ -1843,6 +1843,7 @@ mlx5_check_vec_rx_support(struct rte_eth_dev *dev __rte_unused)
  {
  	return -ENOTSUP;
  }
 +#endif
+ 
+ /**
+  * Free the mbufs from the linear array of pointers.
 diff --git a/drivers/net/mlx5/mlx5_rxtx.h b/drivers/net/mlx5/mlx5_rxtx.h
-index f47d327cf..18612cc2d 100644
+index e927343f7..57e6a9a29 100644
 --- a/drivers/net/mlx5/mlx5_rxtx.h
 +++ b/drivers/net/mlx5/mlx5_rxtx.h
-@@ -656,6 +656,10 @@ mlx5_rx_addr2mr(struct mlx5_rxq_data *rxq, uintptr_t addr)
+@@ -632,6 +632,10 @@ mlx5_rx_addr2mr(struct mlx5_rxq_data *rxq, uintptr_t addr)
  
  #define mlx5_rx_mb2mr(rxq, mb) mlx5_rx_addr2mr(rxq, (uintptr_t)((mb)->buf_addr))
  
@@ -143,7 +145,7 @@ index f47d327cf..18612cc2d 100644
  /**
   * Query LKey from a packet buffer for Tx. If not found, add the mempool.
   *
-@@ -668,22 +672,10 @@ mlx5_rx_addr2mr(struct mlx5_rxq_data *rxq, uintptr_t addr)
+@@ -644,22 +648,10 @@ mlx5_rx_addr2mr(struct mlx5_rxq_data *rxq, uintptr_t addr)
   *   Searched LKey on success, UINT32_MAX on no match.
   */
  static __rte_always_inline uint32_t
@@ -170,11 +172,11 @@ index f47d327cf..18612cc2d 100644
  
  /**
 diff --git a/drivers/net/mlx5/rte_pmd_mlx5_version.map b/drivers/net/mlx5/rte_pmd_mlx5_version.map
-index ad607bbed..eb819010c 100644
+index f9f17e4f6..d5039691d 100644
 --- a/drivers/net/mlx5/rte_pmd_mlx5_version.map
 +++ b/drivers/net/mlx5/rte_pmd_mlx5_version.map
 @@ -1,3 +1,7 @@
- DPDK_2.2 {
+ DPDK_20.0 {
  	local: *;
 +
 +	global:
@@ -182,5 +184,5 @@ index ad607bbed..eb819010c 100644
 +	mlx5_manual_dereg_mr;
  };
 -- 
-2.17.1
+2.25.1
 

@@ -161,7 +161,7 @@ int dp_clients_init(void)
 	/* initialize the hash table for mapping MACs to runtimes */
 	hash_params.name = "mac_to_proc_hash_table";
 	hash_params.entries = MAC_TO_PROC_ENTRIES;
-	hash_params.key_len = ETHER_ADDR_LEN;
+	hash_params.key_len = ETH_ADDR_LEN;
 	hash_params.hash_func = rte_jhash;
 	hash_params.hash_func_init_val = 0;
 	hash_params.socket_id = rte_socket_id();

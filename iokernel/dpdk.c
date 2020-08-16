@@ -54,14 +54,14 @@
 
 static const struct rte_eth_conf port_conf_default = {
 	.rxmode = {
-		.max_rx_pkt_len = ETHER_MAX_LEN,
+		.max_rx_pkt_len = ETH_MAX_LEN,
 		.offloads = DEV_RX_OFFLOAD_IPV4_CKSUM,
 		.mq_mode = ETH_MQ_RX_RSS | ETH_MQ_RX_RSS_FLAG,
 	},
 	.rx_adv_conf = {
 		.rss_conf = {
 			.rss_key = NULL,
-			.rss_hf = ETH_RSS_TCP | ETH_RSS_UDP,
+			.rss_hf = ETH_RSS_NONFRAG_IPV4_TCP | ETH_RSS_NONFRAG_IPV4_UDP,
 		},
 	},
 	.txmode = {
@@ -82,7 +82,9 @@ static inline int dpdk_port_init(uint8_t port, struct rte_mempool *mbuf_pool)
 	int retval;
 	uint16_t q;
 	struct rte_eth_dev_info dev_info;
+#if 0
 	struct rte_eth_rss_conf rss_conf;
+#endif
 	struct rte_eth_txconf *txconf;
 	struct rte_eth_rxconf *rxconf;
 
@@ -136,7 +138,7 @@ static inline int dpdk_port_init(uint8_t port, struct rte_mempool *mbuf_pool)
 		return retval;
 
 	/* Display the port MAC address. */
-	struct ether_addr addr;
+	struct rte_ether_addr addr;
 	rte_eth_macaddr_get(port, &addr);
 	log_info("dpdk: driver: %s port %u MAC: %02" PRIx8 " %02" PRIx8 " %02" PRIx8
 			" %02" PRIx8 " %02" PRIx8 " %02" PRIx8 "",
@@ -147,7 +149,7 @@ static inline int dpdk_port_init(uint8_t port, struct rte_mempool *mbuf_pool)
 
 	/* Enable RX in promiscuous mode for the Ethernet device. */
 	rte_eth_promiscuous_enable(port);
-
+#if 0
 	/* record the RSS hash key */
 	rss_conf.rss_key = iok_info->rss_key;
 	rss_conf.rss_key_len = ARRAY_SIZE(iok_info->rss_key);
@@ -156,9 +158,11 @@ static inline int dpdk_port_init(uint8_t port, struct rte_mempool *mbuf_pool)
 		if (retval < 0)
 			return retval;
 
-		if (rss_conf.rss_key_len != ARRAY_SIZE(iok_info->rss_key))
-			return -EINVAL;
+		if (rss_conf.rss_key_len != ARRAY_SIZE(iok_info->rss_key)) {
+			log_warn("WARNING: unexpected key length %d, advanced flow steering may not work");
+		}
 	}
+#endif
 
 	return 0;
 }
