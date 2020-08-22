@@ -198,9 +198,8 @@ static struct pmc_sample arr_1[NCPU], arr_2[NCPU];
 
 /**
  * ias_bw_poll - runs the bandwidth controller
- * now_us: the current time
  */
-void ias_bw_poll(uint64_t now_us)
+void ias_bw_poll(void)
 {
 	static struct pmc_sample *start = arr_1, *end = arr_2;
 	static int state;

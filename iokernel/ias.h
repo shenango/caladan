@@ -57,6 +57,7 @@ struct ias_data {
 extern struct list_head all_procs;
 extern struct ias_data *cores[NCPU];
 extern uint64_t ias_gen[NCPU];
+extern uint64_t now_us;
 
 /**
  * ias_for_each_proc - iterates through all processes
@@ -78,7 +79,7 @@ extern int ias_add_kthread_on_core(unsigned int core);
 
 DECLARE_BITMAP(ias_ht_punished_cores, NCPU);
 
-extern void ias_ht_poll(uint64_t now_us);
+extern void ias_ht_poll(void);
 extern unsigned int ias_ht_relinquish_core(struct ias_data *sd);
 
 
@@ -86,7 +87,7 @@ extern unsigned int ias_ht_relinquish_core(struct ias_data *sd);
  * Bandwidth (BW) subcontroller definitions
  */
 
-extern void ias_bw_poll(uint64_t now_us);
+extern void ias_bw_poll(void);
 
 
 /*

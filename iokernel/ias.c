@@ -28,10 +28,10 @@ static struct ias_data *ias_procs[IAS_NPROC];
 static unsigned int ias_procs_nr;
 /* the current process running on each core */
 struct ias_data *cores[NCPU];
-/* the current time in microseconds */
-static uint64_t now_us;
 /* the generation number (to detect context switches on a core) */
 uint64_t ias_gen[NCPU];
+/* the current time in microseconds */
+uint64_t now_us;
 
 #ifdef IAS_DEBUG
 static int owners[NCPU];
@@ -487,12 +487,12 @@ static void ias_sched_poll(uint64_t now, int idle_cnt, bitmap_ptr_t idle)
 	now_us = now;
 	if (!cfg.nobw && now - last_bw_us >= IAS_BW_INTERVAL_US) {
 		last_bw_us = now;
-		ias_bw_poll(now);
+		ias_bw_poll();
 	}
 
 	if (now - last_ht_us >= IAS_HT_INTERVAL_US) {
 		last_ht_us = now;
-		ias_ht_poll(now);
+		ias_ht_poll();
 	}
 
 #ifdef IAS_DEBUG

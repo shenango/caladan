@@ -80,16 +80,17 @@ static void ias_ht_relax(struct ias_data *sd, unsigned int core)
 	}
 }
 
-static void ias_ht_poll_one(unsigned int core, uint64_t now_us)
+static void ias_ht_poll_one(unsigned int core)
 {
 	struct ias_ht_data *htd = &ias_ht_percore[core];
 	struct ias_data *sd = cores[core];
-	struct thread *th = sched_get_thread_on_core(core);
+	struct thread *th;
 	uint64_t sgen, rgen;
 
 	/* check if we might be able to punish the sibling's HT lane */
-	if (sd && sd->is_lc && sd->ht_punish_us > 0 && th != NULL) {
+	if (sd && sd->is_lc && sd->ht_punish_us > 0) {
 		/* update generation counters */
+		th = sched_get_thread_on_core(core);
 		sgen = ias_gen[core];
 		rgen = ACCESS_ONCE(th->q_ptrs->rcu_gen);
 		if (htd->sgen != sgen || htd->rgen != rgen) {
@@ -112,15 +113,14 @@ static void ias_ht_poll_one(unsigned int core, uint64_t now_us)
 
 /**
  * ias_ht_poll - runs the hyperthread controller
- * now_us: the current time
  */
-void ias_ht_poll(uint64_t now_us)
+void ias_ht_poll(void)
 {
 	unsigned int core, tmp;
 
 	/* loop over cores and check if each should be punished or relaxed */
 	sched_for_each_allowed_core(core, tmp) {
-		ias_ht_poll_one(core, now_us);
+		ias_ht_poll_one(core);
 	}
 }
 
@@ -132,7 +132,9 @@ void ias_ht_poll(uint64_t now_us)
  */
 unsigned int ias_ht_relinquish_core(struct ias_data *sd)
 {
-	unsigned int core, tmp;
+	struct ias_ht_data *htd;
+	uint64_t service_us, shortest_service_us = UINT64_MAX;
+	unsigned int core, tmp, best_core;
 
 	sched_for_each_allowed_core(core, tmp) {
 		if (cores[core] != sd)
@@ -140,10 +142,19 @@ unsigned int ias_ht_relinquish_core(struct ias_data *sd)
 		if (!bitmap_test(ias_ht_punished_cores, core))
 			continue;
 
-		/* mark the core as relaxed */
+		htd = &ias_ht_percore[sched_siblings[core]];
+		service_us = now_us - htd->last_us;
+		if (service_us < shortest_service_us) {
+			best_core = core;
+			shortest_service_us = service_us;
+		}
+	}
+
+	/* relax a core if we found one */
+	if (shortest_service_us < UINT64_MAX) {
 		ias_ht_relax_count++;
-		bitmap_clear(ias_ht_punished_cores, core);
-		return core;
+		bitmap_clear(ias_ht_punished_cores, best_core);
+		return best_core;
 	}
 
 	return NCPU;
