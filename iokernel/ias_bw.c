@@ -232,7 +232,7 @@ void ias_bw_poll(void)
 			state = IAS_BW_STATE_RELAX;
 			break;
 		}
-		memcpy(start, end, sizeof(*start));
+		swapvars(start, end);
 		ias_bw_request_pmc(PMC_LLC_MISSES, end);
 		break;
 
