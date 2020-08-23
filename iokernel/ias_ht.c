@@ -84,13 +84,12 @@ static void ias_ht_poll_one(unsigned int core)
 {
 	struct ias_ht_data *htd = &ias_ht_percore[core];
 	struct ias_data *sd = cores[core];
-	struct thread *th;
+	struct thread *th = sched_get_thread_on_core(core);
 	uint64_t sgen, rgen;
 
 	/* check if we might be able to punish the sibling's HT lane */
-	if (sd && sd->is_lc && sd->ht_punish_us > 0) {
+	if (sd && sd->is_lc && sd->ht_punish_us > 0 && th != NULL) {
 		/* update generation counters */
-		th = sched_get_thread_on_core(core);
 		sgen = ias_gen[core];
 		rgen = ACCESS_ONCE(th->q_ptrs->rcu_gen);
 		if (htd->sgen != sgen || htd->rgen != rgen) {
