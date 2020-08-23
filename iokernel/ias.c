@@ -300,20 +300,21 @@ static unsigned int ias_choose_core(struct ias_data *sd)
 	return best_core;
 }
 
-bool ias_can_add_kthread(struct ias_data *sd, bool new_phys_core)
+/**
+ * ias_can_add_kthread - determines if a core can be added to the process
+ * @sd: the process to check
+ *
+ * Returns true if a core can be added.
+ */
+bool ias_can_add_kthread(struct ias_data *sd)
 {
-	unsigned int core, tmp, sib;
+	unsigned int core, tmp;
 
 	sched_for_each_allowed_core(core, tmp) {
-		sib = sched_siblings[core];
-
-		/* skip a core whose sibling is already running this process */
-		if (new_phys_core && cores[sib] == sd)
-			continue;
-
 		if (ias_can_preempt_core(sd, core))
 			return true;
 	}
+
 	return false;
 }
 

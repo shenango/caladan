@@ -2,6 +2,8 @@
  * ias_ht.c - the hyperthread subcontroller
  */
 
+#include <stdlib.h>
+
 #include <base/stddef.h>
 #include <base/log.h>
 
@@ -40,7 +42,7 @@ static void ias_ht_punish(struct ias_data *sd, unsigned int core)
 
 	/* don't preempt an LC task if we can't add back a different core */
 	sib_sd = cores[sib];
-	if (sib_sd && sib_sd->is_lc && !ias_can_add_kthread(sib_sd, true))
+	if (sib_sd && sib_sd->is_lc && !ias_can_add_kthread(sib_sd))
 		return;
 
 	/* idle the core, but mark it as in use by the process */
@@ -53,10 +55,6 @@ static void ias_ht_punish(struct ias_data *sd, unsigned int core)
 	ias_ht_punish_count++;
 	sd->ht_punish_count++;
 	bitmap_set(ias_ht_punished_cores, sib);
-
-	/* try to allocate another core to the preempted task (best effort) */
-	if (sib_sd)
-		ias_add_kthread(sib_sd);
 }
 
 static void ias_ht_relax(struct ias_data *sd, unsigned int core)
@@ -80,7 +78,7 @@ static void ias_ht_relax(struct ias_data *sd, unsigned int core)
 	}
 }
 
-static void ias_ht_poll_one(unsigned int core)
+static uint64_t ias_ht_poll_one(unsigned int core)
 {
 	struct ias_ht_data *htd = &ias_ht_percore[core];
 	struct ias_data *sd = cores[core];
@@ -97,17 +95,33 @@ static void ias_ht_poll_one(unsigned int core)
 			htd->rgen = rgen;
 			htd->last_us = now_us;
 		}
+		/* skip if stuck in the runtime scheduler */
+		if ((rgen & 0x1) != 0x1)
+			return 0;
 
-		/* punish if deadline has expired and a thread is running */
-		if (now_us - htd->last_us >= sd->ht_punish_us &&
-		    (rgen & 0x1) == 0x1) {
-			ias_ht_punish(sd, core);
-			return;
-		}
+		return now_us - htd->last_us;
 	}
 
-	/* otherwise relax the sibling's HT lane */
-	ias_ht_relax(sd, core);
+	return 0;
+}
+
+struct tarr {
+	uint64_t service_us;
+	unsigned int core;
+};
+
+static int cmptarr(const void *p1, const void *p2)
+{
+	const struct tarr *t1 = p1;
+	const struct tarr *t2 = p2;
+
+	if (t1->service_us < t2->service_us) {
+		return 1;
+	} else if (t1->service_us > t2->service_us) {
+		return -1;
+	} else {
+		return 0;
+	}
 }
 
 /**
@@ -115,11 +129,29 @@ static void ias_ht_poll_one(unsigned int core)
  */
 void ias_ht_poll(void)
 {
-	unsigned int core, tmp;
+	struct tarr arr[NCPU];
+	unsigned int core, tmp, num = 0;
 
-	/* loop over cores and check if each should be punished or relaxed */
+	/* loop over cores to update service times */
 	sched_for_each_allowed_core(core, tmp) {
-		ias_ht_poll_one(core);
+		arr[num].service_us = ias_ht_poll_one(core);
+		arr[num++].core = core;
+	}
+
+	/* sort by longest service time */
+	qsort(arr, NCPU, sizeof(struct tarr), cmptarr);
+
+	/* adjust which cores are punished and relaxed */
+	for (tmp = 0; tmp < num; tmp++) {
+		const struct tarr *ta = &arr[tmp];
+		struct ias_data *sd = cores[ta->core];
+
+		if (sd && sd->is_lc && sd->ht_punish_us > 0 &&
+		    ta->service_us >= sd->ht_punish_us) {
+			ias_ht_punish(sd, ta->core);
+		} else {
+			ias_ht_relax(sd, ta->core);
+		}
 	}
 }
 
