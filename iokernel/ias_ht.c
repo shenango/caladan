@@ -40,6 +40,10 @@ static void ias_ht_punish(struct ias_data *sd, unsigned int core)
 	if (bitmap_test(ias_ht_punished_cores, sib))
 		return;
 
+	/* check if the sibling is punishing this core */
+	if (bitmap_test(ias_ht_punished_cores, core))
+		return;
+
 	/* don't preempt an LC task if we can't add back a different core */
 	sib_sd = cores[sib];
 	if (sib_sd && sib_sd->is_lc && !ias_can_add_kthread(sib_sd))
@@ -135,11 +139,12 @@ void ias_ht_poll(void)
 	/* loop over cores to update service times */
 	sched_for_each_allowed_core(core, tmp) {
 		arr[num].service_us = ias_ht_poll_one(core);
-		arr[num++].core = core;
+		if (arr[num].service_us)
+			arr[num++].core = core;
 	}
 
 	/* sort by longest service time */
-	qsort(arr, NCPU, sizeof(struct tarr), cmptarr);
+	qsort(arr, num, sizeof(struct tarr), cmptarr);
 
 	/* adjust which cores are punished and relaxed */
 	for (tmp = 0; tmp < num; tmp++) {
