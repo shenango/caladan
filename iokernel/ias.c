@@ -486,6 +486,22 @@ static void ias_sched_poll(uint64_t now, int idle_cnt, bitmap_ptr_t idle)
 	unsigned int core;
 
 	now_us = now;
+
+	/* mark cores idle */
+	if (idle_cnt != 0)
+		bitmap_or(ias_idle_cores, ias_idle_cores, idle, NCPU);
+
+
+	/* try to allocate any idle cores */
+	bitmap_for_each_set(ias_idle_cores, NCPU, core) {
+		if (bitmap_test(ias_ht_punished_cores, core))
+			continue;
+		if (cores[core] != NULL)
+			cores[core]->is_congested = false;
+		ias_cleanup_core(core);
+		ias_add_kthread_on_core(core);
+	}
+
 	if (!cfg.nobw && now - last_bw_us >= IAS_BW_INTERVAL_US) {
 		last_bw_us = now;
 		ias_bw_poll();
@@ -502,20 +518,6 @@ static void ias_sched_poll(uint64_t now, int idle_cnt, bitmap_ptr_t idle)
 		ias_print_debug_info();
 	}
 #endif
-	
-	/* mark cores idle */
-	if (idle_cnt != 0)
-		bitmap_or(ias_idle_cores, ias_idle_cores, idle, NCPU);
-
-	/* try to allocate any idle cores */
-	bitmap_for_each_set(ias_idle_cores, NCPU, core) {
-		if (bitmap_test(ias_ht_punished_cores, core))
-			continue;
-		if (cores[core] != NULL)
-			cores[core]->is_congested = false;
-		ias_cleanup_core(core);
-		ias_add_kthread_on_core(core);
-	}
 }
 
 struct sched_ops ias_ops = {

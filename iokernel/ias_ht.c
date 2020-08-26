@@ -73,13 +73,8 @@ static void ias_ht_relax(struct ias_data *sd, unsigned int core)
 	ias_ht_relax_count++;
 	bitmap_clear(ias_ht_punished_cores, sib);
 
-	/* find something else to run on the core (or mark it idle) */
-	if (ias_add_kthread_on_core(sib)) {
-		if (ias_idle_on_core(sib)) {
-			WARN();
-			return;
-		}
-	}
+	/* mark the core as idle */
+	WARN_ON(ias_idle_on_core(sib));
 }
 
 static uint64_t ias_ht_poll_one(unsigned int core)
@@ -139,8 +134,7 @@ void ias_ht_poll(void)
 	/* loop over cores to update service times */
 	sched_for_each_allowed_core(core, tmp) {
 		arr[num].service_us = ias_ht_poll_one(core);
-		if (arr[num].service_us)
-			arr[num++].core = core;
+		arr[num++].core = core;
 	}
 
 	/* sort by longest service time */
@@ -188,8 +182,7 @@ unsigned int ias_ht_relinquish_core(struct ias_data *sd)
 
 	/* relax a core if we found one */
 	if (shortest_service_us < UINT64_MAX) {
-		ias_ht_relax_count++;
-		bitmap_clear(ias_ht_punished_cores, best_core);
+		ias_ht_relax(sd, best_core);
 		return best_core;
 	}
 
