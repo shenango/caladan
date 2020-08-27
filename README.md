@@ -29,7 +29,7 @@ directpath with MLX4 or MLX5, respectively).
 ```
 make clean && make
 pushd ksched
-make clean & make
+make clean && make
 popd
 sudo ./scripts/setup_machine.sh
 ```
