@@ -16,10 +16,10 @@
 #include <runtime/timer.h>
 #include <runtime/runtime.h>
 
-#include <rpc.h>
+#include <breakwater.h>
 
 #include "util.h"
-#include "proto.h"
+#include "bw_proto.h"
 
 /* time-series output */
 #define SRPC_TS_OUT		false
@@ -99,9 +99,9 @@ static struct srpc_drained_ srpc_drained[NCPU]
 		__attribute__((aligned(CACHE_LINE_SIZE)));
 
 
-struct srpc_session {
+struct sbw_session {
+	struct srpc_session	cmn;
 	int			id;
-	tcpconn_t		*c;
 	struct list_node	drained_link;
 	/* drained_list's core number. -1 if not in the drained list */
 	int			drained_core;
@@ -126,7 +126,7 @@ struct srpc_session {
 	DEFINE_BITMAP(completed_slots, SRPC_MAX_WINDOW);
 
 	/* worker slots (one for each credit issued) */
-	struct srpc_ctx		*slots[SRPC_MAX_WINDOW];
+	struct sbw_ctx		*slots[SRPC_MAX_WINDOW];
 };
 
 /* credit-related stats */
@@ -177,26 +177,26 @@ static void record(int win_avail, uint64_t delay)
 }
 #endif
 
-static int srpc_get_slot(struct srpc_session *s)
+static int srpc_get_slot(struct sbw_session *s)
 {
 	int slot = __builtin_ffsl(s->avail_slots[0]) - 1;
 	if (slot >= 0) {
 		bitmap_atomic_clear(s->avail_slots, slot);
-		s->slots[slot] = smalloc(sizeof(struct srpc_ctx));
-		s->slots[slot]->s = s;
-		s->slots[slot]->idx = slot;
+		s->slots[slot] = smalloc(sizeof(struct sbw_ctx));
+		s->slots[slot]->cmn.s = (struct srpc_session *)s;
+		s->slots[slot]->cmn.idx = slot;
 	}
 	return slot;
 }
 
-static void srpc_put_slot(struct srpc_session *s, int slot)
+static void srpc_put_slot(struct sbw_session *s, int slot)
 {
 	sfree(s->slots[slot]);
 	s->slots[slot] = NULL;
 	bitmap_atomic_set(s->avail_slots, slot);
 }
 
-static int srpc_winupdate(struct srpc_session *s)
+static int srpc_winupdate(struct sbw_session *s)
 {
 	struct srpc_hdr shdr;
 	int ret;
@@ -208,7 +208,7 @@ static int srpc_winupdate(struct srpc_session *s)
 	shdr.win = (uint64_t)s->win;
 
 	/* send the packet */
-	ret = tcp_write_full(s->c, &shdr, sizeof(shdr));
+	ret = tcp_write_full(s->cmn.c, &shdr, sizeof(shdr));
 	if (unlikely(ret < 0))
 		return ret;
 
@@ -225,7 +225,7 @@ static int srpc_winupdate(struct srpc_session *s)
 	return 0;
 }
 
-static int srpc_send_completion_vector(struct srpc_session *s,
+static int srpc_send_completion_vector(struct sbw_session *s,
 				       unsigned long *slots)
 {
 	struct srpc_hdr shdr[SRPC_MAX_WINDOW];
@@ -236,12 +236,12 @@ static int srpc_send_completion_vector(struct srpc_session *s,
 	ssize_t ret = 0;
 
 	bitmap_for_each_set(slots, SRPC_MAX_WINDOW, i) {
-		struct srpc_ctx *c = s->slots[i];
+		struct sbw_ctx *c = s->slots[i];
 
 		shdr[nrhdr].magic = RPC_RESP_MAGIC;
 		shdr[nrhdr].op = RPC_OP_CALL;
-		shdr[nrhdr].len = c->resp_len;
-		shdr[nrhdr].id = c->id;
+		shdr[nrhdr].len = c->cmn.resp_len;
+		shdr[nrhdr].id = c->cmn.id;
 		shdr[nrhdr].win = (uint64_t)s->win;
 
 		v[nriov].iov_base = &shdr[nrhdr];
@@ -249,16 +249,16 @@ static int srpc_send_completion_vector(struct srpc_session *s,
 		nrhdr++;
 		nriov++;
 
-		if (c->resp_len > 0) {
-			v[nriov].iov_base = c->resp_buf;
-			v[nriov++].iov_len = c->resp_len;
+		if (c->cmn.resp_len > 0) {
+			v[nriov].iov_base = c->cmn.resp_buf;
+			v[nriov++].iov_len = c->cmn.resp_len;
 		}
 	}
 
 	/* send the completion(s) */
 	if (nriov == 0)
 		return 0;
-	ret = tcp_writev_full(s->c, v, nriov);
+	ret = tcp_writev_full(s->cmn.c, v, nriov);
 	bitmap_for_each_set(slots, SRPC_MAX_WINDOW, i)
 		srpc_put_slot(s, i);
 
@@ -277,7 +277,7 @@ static int srpc_send_completion_vector(struct srpc_session *s,
 	return 0;
 }
 
-static void srpc_update_window(struct srpc_session *s, bool req_dropped)
+static void srpc_update_window(struct sbw_session *s, bool req_dropped)
 {
 	int win_avail = atomic_read(&srpc_win_avail);
 	int win_used = atomic_read(&srpc_win_used);
@@ -328,9 +328,9 @@ static void srpc_update_window(struct srpc_session *s, bool req_dropped)
 #endif
 }
 
-static struct srpc_session *srpc_choose_drained_session(int core_id)
+static struct sbw_session *srpc_choose_drained_session(int core_id)
 {
-	struct srpc_session *ret;
+	struct sbw_session *ret;
 
 	assert(core_id >= 0);
 	assert(core_id < runtime_max_cores());
@@ -347,7 +347,7 @@ static struct srpc_session *srpc_choose_drained_session(int core_id)
 	}
 
 	ret = list_pop(&srpc_drained[core_id].list,
-		       struct srpc_session,
+		       struct sbw_session,
 		       drained_link);
 
 	assert(ret->is_linked);
@@ -366,7 +366,7 @@ static struct srpc_session *srpc_choose_drained_session(int core_id)
 	return ret;
 }
 
-static void srpc_remove_from_drained_list(struct srpc_session *s)
+static void srpc_remove_from_drained_list(struct sbw_session *s)
 {
 	assert_spin_lock_held(&s->lock);
 
@@ -391,15 +391,15 @@ static void srpc_remove_from_drained_list(struct srpc_session *s)
 
 static void srpc_worker(void *arg)
 {
-	struct srpc_ctx *c = (struct srpc_ctx *)arg;
-	struct srpc_session *s = c->s;
+	struct sbw_ctx *c = (struct sbw_ctx *)arg;
+	struct sbw_session *s = (struct sbw_session *)c->cmn.s;
 	thread_t *th;
 
 	c->drop = false;
-	srpc_handler(c);
+	srpc_handler((struct srpc_ctx *)c);
 
 	spin_lock_np(&s->lock);
-	bitmap_set(s->completed_slots, c->idx);
+	bitmap_set(s->completed_slots, c->cmn.idx);
 	th = s->sender_th;
 	s->sender_th = NULL;
 	spin_unlock_np(&s->lock);
@@ -407,7 +407,7 @@ static void srpc_worker(void *arg)
 		thread_ready(th);
 }
 
-static int srpc_recv_one(struct srpc_session *s)
+static int srpc_recv_one(struct sbw_session *s)
 {
 	struct crpc_hdr chdr;
 	int idx, ret;
@@ -419,7 +419,7 @@ static int srpc_recv_one(struct srpc_session *s)
 again:
 	th = NULL;
 	/* read the client header */
-	ret = tcp_read_full(s->c, &chdr, sizeof(chdr));
+	ret = tcp_read_full(s->cmn.c, &chdr, sizeof(chdr));
 	if (unlikely(ret <= 0)) {
 		if (ret == 0)
 			return -EIO;
@@ -443,13 +443,13 @@ again:
 		/* reserve a slot */
 		idx = srpc_get_slot(s);
 		if (unlikely(idx < 0)) {
-			tcp_read_full(s->c, buf_tmp, chdr.len);
+			tcp_read_full(s->cmn.c, buf_tmp, chdr.len);
 			atomic64_inc(&srpc_stat_req_dropped_);
 			return 0;
 		}
 
 		/* retrieve the payload */
-		ret = tcp_read_full(s->c, s->slots[idx]->req_buf, chdr.len);
+		ret = tcp_read_full(s->cmn.c, s->slots[idx]->cmn.req_buf, chdr.len);
 		if (unlikely(ret <= 0)) {
 			srpc_put_slot(s, idx);
 			if (ret == 0)
@@ -457,9 +457,9 @@ again:
 			return ret;
 		}
 
-		s->slots[idx]->req_len = chdr.len;
-		s->slots[idx]->resp_len = 0;
-		s->slots[idx]->id = chdr.id;
+		s->slots[idx]->cmn.req_len = chdr.len;
+		s->slots[idx]->cmn.resp_len = 0;
+		s->slots[idx]->cmn.id = chdr.id;
 
 		spin_lock_np(&s->lock);
 		old_demand = s->demand;
@@ -558,7 +558,7 @@ again:
 static void srpc_sender(void *arg)
 {
 	DEFINE_BITMAP(tmp, SRPC_MAX_WINDOW);
-	struct srpc_session *s = (struct srpc_session *)arg;
+	struct sbw_session *s = (struct sbw_session *)arg;
 	int ret, i;
 	bool sleep;
 	int num_resp;
@@ -592,7 +592,7 @@ static void srpc_sender(void *arg)
 		bitmap_init(s->completed_slots, SRPC_MAX_WINDOW, false);
 
 		bitmap_for_each_set(tmp, SRPC_MAX_WINDOW, i) {
-			struct srpc_ctx *c = s->slots[i];
+			struct sbw_ctx *c = s->slots[i];
 			if (c->drop) {
 				req_dropped = true;
 				break;
@@ -697,7 +697,7 @@ close:
 static void srpc_server(void *arg)
 {
 	tcpconn_t *c = (tcpconn_t *)arg;
-	struct srpc_session *s;
+	struct sbw_session *s;
 	thread_t *th;
 	int ret;
 
@@ -705,7 +705,7 @@ static void srpc_server(void *arg)
 	BUG_ON(!s);
 	memset(s, 0, sizeof(*s));
 
-	s->c = c;
+	s->cmn.c = c;
 	s->drained_core = -1;
 	s->id = atomic_fetch_and_add(&srpc_num_sess, 1) + 1;
 	bitmap_init(s->avail_slots, SRPC_MAX_WINDOW, true);
@@ -768,7 +768,7 @@ static void srpc_cc_worker(void *arg)
 	int win_used;
 	int win_open;
 	int num_sess;
-	struct srpc_session *ds;
+	struct sbw_session *ds;
 	unsigned int max_cores = runtime_max_cores();
 	unsigned int core_id, i;
 	thread_t *th;
@@ -876,13 +876,7 @@ static void srpc_listener(void *arg)
 	}
 }
 
-/**
- * srpc_enable - starts the RPC server
- * @handler: the handler function to call for each RPC.
- *
- * Returns 0 if successful.
- */
-int srpc_enable(srpc_fn_t handler)
+int sbw_enable(srpc_fn_t handler)
 {
 	static DEFINE_SPINLOCK(l);
 	int ret;
@@ -900,32 +894,42 @@ int srpc_enable(srpc_fn_t handler)
 	return 0;
 }
 
-uint64_t srpc_stat_winu_rx()
+uint64_t sbw_stat_winu_rx()
 {
 	return atomic64_read(&srpc_stat_winu_rx_);
 }
 
-uint64_t srpc_stat_winu_tx()
+uint64_t sbw_stat_winu_tx()
 {
 	return atomic64_read(&srpc_stat_winu_tx_);
 }
 
-uint64_t srpc_stat_win_tx()
+uint64_t sbw_stat_win_tx()
 {
 	return atomic64_read(&srpc_stat_win_tx_);
 }
 
-uint64_t srpc_stat_req_rx()
+uint64_t sbw_stat_req_rx()
 {
 	return atomic64_read(&srpc_stat_req_rx_);
 }
 
-uint64_t srpc_stat_req_dropped()
+uint64_t sbw_stat_req_dropped()
 {
 	return atomic64_read(&srpc_stat_req_dropped_);
 }
 
-uint64_t srpc_stat_resp_tx()
+uint64_t sbw_stat_resp_tx()
 {
 	return atomic64_read(&srpc_stat_resp_tx_);
 }
+
+struct srpc_ops sbw_ops = {
+	.srpc_enable		= sbw_enable,
+	.srpc_stat_winu_rx	= sbw_stat_winu_rx,
+	.srpc_stat_winu_tx	= sbw_stat_winu_tx,
+	.srpc_stat_win_tx	= sbw_stat_win_tx,
+	.srpc_stat_req_rx	= sbw_stat_req_rx,
+	.srpc_stat_req_dropped	= sbw_stat_req_dropped,
+	.srpc_stat_resp_tx	= sbw_stat_resp_tx,
+};

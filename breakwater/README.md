@@ -9,22 +9,22 @@ RPC layer.
 The results in the paper were generated with 11 machines
 (10 clients and 1 server) of
 xl170 in [Cloudlab](https://cloudlab.us) with Ubuntu 18.04 LTS
-(64 bit) where all optional configurations below are applied.
+(64 bit) where all optional configurations below were applied.
 
 1) Configure and build Shenango. (refer to Shenango documentation)
 - [xl170] Since xl170 has Mellanox ConnectX-4 NIC, install Mellanox
 OFED before building Shenango and set `CONFIG_MLX5=y` in shared.mk
 - (optional) Build Shenango with Directpath.
 Set `CONFIG_DIRECTPATH=y` in shared.mk
-- [xl170] Correct DPDK port for XL170 machine is 1. Change line 233
-of iokernel/dpdk.c to `dpdk.port = 1`
+- [xl170] Correct DPDK port for XL170 machine is 1. Change
+line 233 of iokernel/dpdk.c to `dpdk.port = 1`
 
 2) (optional) Keep CPU in a C-State
 ```
 $ pushd scripts
 scripts$ sudo killall cstate
 scripts$ gcc cstate.c -o cstate
-scripts$ ./cstate 0 &
+scripts$ sudo ./cstate 0 &
 scripts$ popd
 ```
 
