@@ -1,6 +1,6 @@
 # Makefile for C++ binidngs
 ROOT_PATH=../../..
-include $(ROOT_PATH)/shared.mk
+include $(ROOT_PATH)/build/shared.mk
 
 CXXFLAGS += -I$(ROOT_PATH)/breakwater/inc
 

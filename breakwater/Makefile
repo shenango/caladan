@@ -1,5 +1,5 @@
 ROOT_PATH=..
-include ../shared.mk
+include $(ROOT_PATH)/build/shared.mk
 
 CFLAGS += -I$(ROOT_PATH)/breakwater/inc
 
