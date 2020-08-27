@@ -3,6 +3,9 @@
  */
 
 #include <asm/mman.h>
+#include <linux/mman.h>
+#include <linux/shm.h>
+
 #include <unistd.h>
 #include <fcntl.h>
 #include <signal.h>
@@ -10,8 +13,6 @@
 #include <sys/types.h>
 #include <sys/syscall.h>
 #include <sys/mman.h>
-#include <sys/ipc.h>
-#include <sys/shm.h>
 
 #include <base/stddef.h>
 #include <base/mem.h>
@@ -26,6 +27,11 @@
 #warning "Your system does not support specifying SHM_HUGETLB page sizes"
 #endif
 
+/* libc conflicts with linux/shm.h, so define these ourselves */
+void* shmat(int shm_id, const void *addr, int flags);
+int shmctl(int shm_id, int cmd, struct shmid_ds* buf);
+int shmdt(const void *addr);
+int shmget(key_t key, size_t size, int flags);
 
 long mbind(void *start, size_t len, int mode,
 	   const unsigned long *nmask, unsigned long maxnode,
