@@ -1,6 +1,6 @@
 # Makefile for netbench
 ROOT_PATH=../..
-include $(ROOT_PATH)/shared.mk
+include $(ROOT_PATH)/build/shared.mk
 
 lib_src = synthetic_worker.cc distribution.cc util.cc
 lib_obj = $(lib_src:.cc=.o)

@@ -1,5 +1,5 @@
 /*
- * tf.S - assembly routines for switching trap frames
+ * switch.S - assembly routines for switching trap frames
  */
 
 /*

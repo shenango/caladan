@@ -1,6 +1,6 @@
 # Makefile for C++ bindings
 ROOT_PATH=../..
-include $(ROOT_PATH)/shared.mk
+include $(ROOT_PATH)/build/shared.mk
 
 # librt++.a - the c++ runtime library
 rt_src = runtime.cc thread.cc

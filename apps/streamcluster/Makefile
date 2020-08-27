@@ -1,6 +1,6 @@
 # Makefile for netbench
 ROOT_PATH=../..
-include $(ROOT_PATH)/shared.mk
+include $(ROOT_PATH)/build/shared.mk
 
 streamcluster_src = streamcluster.cc
 streamcluster_obj = $(streamcluster_src:.cc=.o)

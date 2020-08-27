@@ -5,7 +5,7 @@ $(error ROOT_PATH is not set)
 endif
 
 # load configuration parameters
-include config
+include $(ROOT_PATH)/build/config
 
 # shared toolchain definitions
 INC = -I$(ROOT_PATH)/inc

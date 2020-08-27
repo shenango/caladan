@@ -1,5 +1,5 @@
 ROOT_PATH=.
-include shared.mk
+include $(ROOT_PATH)/build/shared.mk
 
 DPDK_PATH = dpdk
 CHECKFLAGS = -D__CHECKER__ -Waddress-space
@@ -102,7 +102,7 @@ sparse: $(src)
 
 .PHONY: submodules
 submodules:
-	./init_submodules.sh
+	$(ROOT_PATH)/build/init_submodules.sh
 
 .PHONY: clean
 clean:

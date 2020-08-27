@@ -1,6 +1,6 @@
 # Makefile for benchmarks
 ROOT_PATH=../..
-include $(ROOT_PATH)/shared.mk
+include $(ROOT_PATH)/build/shared.mk
 
 fake_worker_src = fake_worker.cc
 fake_worker_obj = $(fake_worker_src:.cc=.o)
