@@ -100,6 +100,10 @@ endif
 sparse: $(src)
 	$(foreach f,$^,$(SPARSE) $(filter-out -std=gnu11, $(CFLAGS)) $(CHECKFLAGS) $(f);)
 
+.PHONY: submodules
+submodules:
+	./init_submodules.sh
+
 .PHONY: clean
 clean:
 	rm -f $(obj) $(dep) libbase.a libnet.a libruntime.a \
