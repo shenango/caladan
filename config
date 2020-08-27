@@ -1,0 +1,14 @@
+# build configuration options (set to y for "yes", n for "no")
+
+# Enable Mellanox ConnectX-5 NIC Support
+CONFIG_MLX5=n
+# Enable Mellanox ConnectX-4 NIC Support
+CONFIG_MLX4=n
+# Enable SPDK NVMe support
+CONFIG_SPDK=n
+# Enable debug build mode (slower but enables several runtime checks)
+CONFIG_DEBUG=n
+# Enable additional compiler optimizations (may reduce compatibility)
+CONFIG_OPTIMIZE=n
+# Allow runtimes to access Mellanox ConnectX-5 NICs directly (kernel bypass)
+CONFIG_DIRECTPATH=n
