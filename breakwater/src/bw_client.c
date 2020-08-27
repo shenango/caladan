@@ -16,10 +16,10 @@
 #include "util.h"
 #include "bw_proto.h"
 
-#define CRPC_MAX_CLIENT_DELAY_US	100
+#define CBW_MAX_CLIENT_DELAY_US		100
 
-#define CRPC_TRACK_FLOW			false
-#define CRPC_TRACK_FLOW_ID		1
+#define CBW_TRACK_FLOW			false
+#define CBW_TRACK_FLOW_ID		1
 
 /**
  * crpc_send_winupdate - send WINUPDATE message to update window size
@@ -29,14 +29,14 @@
  */
 ssize_t crpc_send_winupdate(struct cbw_session *s)
 {
-        struct crpc_hdr chdr;
+        struct cbw_hdr chdr;
         ssize_t ret;
 
 	assert_mutex_held(&s->lock);
 
 	/* construct the client header */
-	chdr.magic = RPC_REQ_MAGIC;
-	chdr.op = RPC_OP_WINUPDATE;
+	chdr.magic = BW_REQ_MAGIC;
+	chdr.op = BW_OP_WINUPDATE;
 	chdr.id = 0;
 	chdr.len = 0;
 	chdr.demand = s->head - s->tail;
@@ -50,8 +50,8 @@ ssize_t crpc_send_winupdate(struct cbw_session *s)
 	assert(ret == sizeof(chdr));
 	s->winu_tx_++;
 
-#if CRPC_TRACK_FLOW
-	if (s->id == CRPC_TRACK_FLOW_ID) {
+#if CBW_TRACK_FLOW
+	if (s->id == CBW_TRACK_FLOW_ID) {
 		printf("[%lu] <=== winupdate: demand = %lu, win = %u/%u\n",
 		       microtime(), chdr.demand, s->win_used, s->win_avail);
 	}
@@ -61,7 +61,7 @@ ssize_t crpc_send_winupdate(struct cbw_session *s)
 
 static ssize_t crpc_send_request_vector(struct cbw_session *s)
 {
-	struct crpc_hdr chdr[CRPC_QLEN];
+	struct cbw_hdr chdr[CRPC_QLEN];
 	struct iovec v[CRPC_QLEN * 2];
 	int nriov = 0;
 	int nrhdr = 0;
@@ -76,15 +76,15 @@ static ssize_t crpc_send_request_vector(struct cbw_session *s)
 	while (s->head != s->tail && s->win_used < s->win_avail) {
 		struct crpc_ctx *c = s->qreq[s->tail++ % CRPC_QLEN];
 
-		chdr[nrhdr].magic = RPC_REQ_MAGIC;
-		chdr[nrhdr].op = RPC_OP_CALL;
+		chdr[nrhdr].magic = BW_REQ_MAGIC;
+		chdr[nrhdr].op = BW_OP_CALL;
 		chdr[nrhdr].id = c->id;
 		chdr[nrhdr].len = c->len;
 		chdr[nrhdr].demand = s->head - s->tail;
 		chdr[nrhdr].sync = s->demand_sync;
 
 		v[nriov].iov_base = &chdr[nrhdr];
-		v[nriov].iov_len = sizeof(struct crpc_hdr);
+		v[nriov].iov_len = sizeof(struct cbw_hdr);
 		nrhdr++;
 		nriov++;
 
@@ -106,8 +106,8 @@ static ssize_t crpc_send_request_vector(struct cbw_session *s)
 
 	s->req_tx_ += nrhdr;
 
-#if CRPC_TRACK_FLOW
-	if (s->id == CRPC_TRACK_FLOW_ID) {
+#if CBW_TRACK_FLOW
+	if (s->id == CBW_TRACK_FLOW_ID) {
 		printf("[%lu] <=== request (%d): qlen=%d win=%d/%d\n",
 		       microtime(), nrhdr, s->head-s->tail, s->win_used, s->win_avail);
 	}
@@ -123,12 +123,12 @@ static ssize_t crpc_send_raw(struct cbw_session *s,
 			     uint64_t id)
 {
 	struct iovec vec[2];
-	struct crpc_hdr chdr;
+	struct cbw_hdr chdr;
 	ssize_t ret;
 
 	/* initialize the header */
-	chdr.magic = RPC_REQ_MAGIC;
-	chdr.op = RPC_OP_CALL;
+	chdr.magic = BW_REQ_MAGIC;
+	chdr.op = BW_OP_CALL;
 	chdr.id = id;
 	chdr.len = len;
 	chdr.demand = s->head - s->tail;
@@ -147,8 +147,8 @@ static ssize_t crpc_send_raw(struct cbw_session *s,
 	assert(ret == sizeof(chdr) + len);
 	s->req_tx_++;
 
-#if CRPC_TRACK_FLOW
-	if (s->id == CRPC_TRACK_FLOW_ID) {
+#if CBW_TRACK_FLOW
+	if (s->id == CBW_TRACK_FLOW_ID) {
 		printf("[%lu] <=== request: id=%lu, demand = %lu, win = %u/%u\n",
 		       microtime(), chdr.id, chdr.demand, s->win_used, s->win_avail);
 	}
@@ -176,13 +176,13 @@ static void crpc_drain_queue(struct cbw_session *s)
 	while (s->head != s->tail) {
 		pos = s->tail % CRPC_QLEN;
 		c = s->qreq[pos];
-		if (now - c->ts <= CRPC_MAX_CLIENT_DELAY_US)
+		if (now - c->ts <= CBW_MAX_CLIENT_DELAY_US)
 			break;
 
 		s->tail++;
 		s->req_dropped_++;
-#if CRPC_TRACK_FLOW
-		if (s->id == CRPC_TRACK_FLOW_ID) {
+#if CBW_TRACK_FLOW
+		if (s->id == CBW_TRACK_FLOW_ID) {
 			printf("[%lu] request dropped: id=%lu, qlen = %d\n",
 			       now, c->id, s->head - s->tail);
 		}
@@ -205,8 +205,8 @@ static bool crpc_enqueue_one(struct cbw_session *s,
 	if (s->head - s->tail >= CRPC_QLEN) {
 		s->tail++;
 		s->req_dropped_++;
-#if CRPC_TRACK_FLOW
-		if (s->id == CRPC_TRACK_FLOW_ID) {
+#if CBW_TRACK_FLOW
+		if (s->id == CBW_TRACK_FLOW_ID) {
 			printf("[%lu] queue full. drop the request\n",
 			       now);
 		}
@@ -220,8 +220,8 @@ static bool crpc_enqueue_one(struct cbw_session *s,
 	c->ts = now;
 	c->len = len;
 
-#if CRPC_TRACK_FLOW
-	if (s->id == CRPC_TRACK_FLOW_ID) {
+#if CBW_TRACK_FLOW
+	if (s->id == CBW_TRACK_FLOW_ID) {
 		printf("[%lu] request enqueued: id=%lu, qlen = %d, waiting_winupdate=%d\n",
 		       now, c->id, s->head - s->tail, s->waiting_winupdate);
 	}
@@ -276,7 +276,7 @@ ssize_t cbw_send_one(struct crpc_session *s_,
 ssize_t cbw_recv_one(struct crpc_session *s_, void *buf, size_t len)
 {
 	struct cbw_session *s = (struct cbw_session *)s_;
-	struct srpc_hdr shdr;
+	struct sbw_hdr shdr;
 	ssize_t ret;
 
 again:
@@ -287,7 +287,7 @@ again:
 	assert(ret == sizeof(shdr));
 
 	/* parse the server header */
-	if (unlikely(shdr.magic != RPC_RESP_MAGIC)) {
+	if (unlikely(shdr.magic != BW_RESP_MAGIC)) {
 		log_warn("crpc: got invalid magic %x", shdr.magic);
 		return -EINVAL;
 	}
@@ -298,7 +298,7 @@ again:
 	}
 
 	switch (shdr.op) {
-	case RPC_OP_CALL:
+	case BW_OP_CALL:
 		/* read the payload */
 		if (shdr.len > 0) {
 			ret = tcp_read_full(s->cmn.c, buf, shdr.len);
@@ -315,8 +315,8 @@ again:
 		s->win_avail = shdr.win;
 		s->waiting_winupdate = false;
 
-#if CRPC_TRACK_FLOW
-		if (s->id == CRPC_TRACK_FLOW_ID) {
+#if CBW_TRACK_FLOW
+		if (s->id == CBW_TRACK_FLOW_ID) {
 			printf("[%lu] ===> response: id=%lu, shdr.win=%lu, win=%u/%u\n",
 			       now, shdr.id, shdr.win, s->win_used, s->win_avail);
 		}
@@ -331,7 +331,7 @@ again:
 			goto again;
 
 		break;
-	case RPC_OP_WINUPDATE:
+	case BW_OP_WINUPDATE:
 		if (unlikely(shdr.len != 0)) {
 			log_warn("crpc: winupdate has nonzero len");
 			return -EINVAL;
@@ -343,8 +343,8 @@ again:
 		s->win_avail = shdr.win;
 		s->waiting_winupdate = false;
 
-#if CRPC_TRACK_FLOW
-		if (s->id == CRPC_TRACK_FLOW_ID) {
+#if CBW_TRACK_FLOW
+		if (s->id == CBW_TRACK_FLOW_ID) {
 			printf("[%lu] ===> Winupdate: shdr.win=%lu, win=%u/%u\n",
 			       microtime(), shdr.win, s->win_used, s->win_avail);
 		}
@@ -388,14 +388,14 @@ static void crpc_timer(void *arg)
 		while (s->head != s->tail) {
 			pos = s->tail % CRPC_QLEN;
 			c = s->qreq[pos];
-			if (now - c->ts <= CRPC_MAX_CLIENT_DELAY_US)
+			if (now - c->ts <= CBW_MAX_CLIENT_DELAY_US)
 				break;
 
 			s->tail++;
 			s->req_dropped_++;
 			num_drops++;
-#if CRPC_TRACK_FLOW
-			if (s->id == CRPC_TRACK_FLOW_ID) {
+#if CBW_TRACK_FLOW
+			if (s->id == CBW_TRACK_FLOW_ID) {
 				printf("[%lu] request dropped: id=%lu, qlen = %d\n",
 				       now, c->id, s->head - s->tail);
 			}
@@ -415,7 +415,7 @@ static void crpc_timer(void *arg)
 		pos = (s->head - 1) % CRPC_QLEN;
 		c = s->qreq[pos];
 		mutex_unlock(&s->lock);
-		timer_sleep_until(c->ts + CRPC_MAX_CLIENT_DELAY_US);
+		timer_sleep_until(c->ts + CBW_MAX_CLIENT_DELAY_US);
 		mutex_lock(&s->lock);
 	}
 done:

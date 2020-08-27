@@ -131,3 +131,7 @@ extern const struct srpc_ops *srpc_ops;
 extern const struct crpc_ops *crpc_ops;
 extern struct srpc_ops sbw_ops;
 extern struct crpc_ops cbw_ops;
+extern struct srpc_ops ssd_ops;
+extern struct crpc_ops csd_ops;
+extern struct srpc_ops sdg_ops;
+extern struct crpc_ops cdg_ops;

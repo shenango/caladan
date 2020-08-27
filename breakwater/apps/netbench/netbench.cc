@@ -4,6 +4,7 @@ extern "C" {
 #include <net/ip.h>
 #include <unistd.h>
 #include <breakwater.h>
+#include <seda.h>
 }
 
 #include "cc/net.h"
@@ -1062,30 +1063,43 @@ void ClientHandler(void *arg) {
 int main(int argc, char *argv[]) {
   int ret;
 
-  crpc_ops = &cbw_ops;
-  srpc_ops = &sbw_ops;
-
-  if (argc < 3) {
-    std::cerr << "usage: [cfg_file] [cmd] ..." << std::endl;
+  if (argc < 4) {
+    std::cerr << "usage: [breakwater/seda/dagor] [cfg_file] [cmd] ..." << std::endl;
     return -EINVAL;
   }
 
-  std::string cmd = argv[2];
+  std::string olc = argv[1]; // overload control
+  if (olc.compare("breakwater") == 0) {
+    crpc_ops = &cbw_ops;
+    srpc_ops = &sbw_ops;
+  } else if (olc.compare("seda") == 0) {
+    crpc_ops = &csd_ops;
+    srpc_ops = &ssd_ops;
+  } else if (olc.compare("dagor") == 0) {
+    crpc_ops = &cdg_ops;
+    srpc_ops = &sdg_ops;
+  } else {
+    std::cerr << "usage: [breakwater/seda/dagor] [cfg_file] [cmd] ..." << std::endl;
+    return -EINVAL;
+  }
+
+  std::string cmd = argv[3];
   if (cmd.compare("server") == 0) {
-    ret = runtime_init(argv[1], ServerHandler, NULL);
+    ret = runtime_init(argv[2], ServerHandler, NULL);
     if (ret) {
       printf("failed to start runtime\n");
       return ret;
     }
   } else if (cmd.compare("agent") == 0) {
-    if (argc < 4 || StringToAddr(argv[3], &master.ip)) {
-      std::cerr << "usage: [cfg_file] agent [ip_address] ..." << std::endl;
+    if (argc < 5 || StringToAddr(argv[4], &master.ip)) {
+      std::cerr << "usage: [breakwater/seda/dagor] [cfg_file] agent [master_ip] ..."
+	      << std::endl;
       return -EINVAL;
     }
 
-    if (argc > 4) offered_load = std::stod(argv[4], nullptr);
+    if (argc > 5) offered_load = std::stod(argv[5], nullptr);
 
-    ret = runtime_init(argv[1], AgentHandler, NULL);
+    ret = runtime_init(argv[2], AgentHandler, NULL);
     if (ret) {
       printf("failed to start runtime\n");
       return ret;
@@ -1095,25 +1109,25 @@ int main(int argc, char *argv[]) {
     return -EINVAL;
   }
 
-  if (argc < 6) {
-    std::cerr << "usage: [cfg_file] client [#threads] [remote_ip] [service_us] "
-                 "[npeers]"
+  if (argc < 7) {
+    std::cerr << "usage: [breakwater/seda/dagor] [cfg_file] client [#threads] "
+		 "[remote_ip] [service_us] [npeers]"
               << std::endl;
     return -EINVAL;
   }
 
-  threads = std::stoi(argv[3], nullptr, 0);
+  threads = std::stoi(argv[4], nullptr, 0);
 
-  ret = StringToAddr(argv[4], &raddr.ip);
+  ret = StringToAddr(argv[5], &raddr.ip);
   if (ret) return -EINVAL;
   raddr.port = kNetbenchPort;
 
-  st = std::stod(argv[5], nullptr);
+  st = std::stod(argv[6], nullptr);
 
-  if (argc > 6) total_agents += std::stoi(argv[6], nullptr, 0);
-  if (argc > 7) offered_load = std::stod(argv[7], nullptr);
+  if (argc > 7) total_agents += std::stoi(argv[7], nullptr, 0);
+  if (argc > 8) offered_load = std::stod(argv[8], nullptr);
 
-  ret = runtime_init(argv[1], ClientHandler, NULL);
+  ret = runtime_init(argv[2], ClientHandler, NULL);
   if (ret) {
     printf("failed to start runtime\n");
     return ret;

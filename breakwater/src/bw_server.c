@@ -22,31 +22,31 @@
 #include "bw_proto.h"
 
 /* time-series output */
-#define SRPC_TS_OUT		false
+#define SBW_TS_OUT		false
 #define TS_BUF_SIZE_EXP		15
 #define TS_BUF_SIZE		(1 << TS_BUF_SIZE_EXP)
 #define TS_BUF_MASK		(TS_BUF_SIZE - 1)
 
 /* the maximum supported window size */
-#define SRPC_MAX_WINDOW_EXP	6
-#define SRPC_MAX_WINDOW		64
+#define SBW_MAX_WINDOW_EXP	6
+#define SBW_MAX_WINDOW		64
 /* the minimum runtime queuing delay */
-#define SRPC_MIN_DELAY_US	100
-#define SRPC_DROP_THRESH	200
+#define SBW_MIN_DELAY_US	100
+#define SBW_DROP_THRESH		200
 /* round trip time in us */
-#define SRPC_RTT_US		10
+#define SBW_RTT_US		10
 
-#define SRPC_AI			0.002
-#define SRPC_MD			0.008
+#define SBW_AI			0.002
+#define SBW_MD			0.008
 
-#define SRPC_TRACK_FLOW		false
-#define SRPC_TRACK_FLOW_ID	1
+#define SBW_TRACK_FLOW		false
+#define SBW_TRACK_FLOW_ID	1
 
 #define EWMA_WEIGHT		0.1f
 
-BUILD_ASSERT((1 << SRPC_MAX_WINDOW_EXP) == SRPC_MAX_WINDOW);
+BUILD_ASSERT((1 << SBW_MAX_WINDOW_EXP) == SBW_MAX_WINDOW);
 
-#if SRPC_TS_OUT
+#if SBW_TS_OUT
 int nextIndex = 0;
 FILE *ts_out = NULL;
 
@@ -117,16 +117,16 @@ struct sbw_session {
 	bool			demand_sync;
 
 	/* shared state between receiver and sender */
-	DEFINE_BITMAP(avail_slots, SRPC_MAX_WINDOW);
+	DEFINE_BITMAP(avail_slots, SBW_MAX_WINDOW);
 
 	/* shared statnhocho@hp159.utah.cloudlab.use between workers and sender */
 	spinlock_t		lock;
 	int			closed;
 	thread_t		*sender_th;
-	DEFINE_BITMAP(completed_slots, SRPC_MAX_WINDOW);
+	DEFINE_BITMAP(completed_slots, SBW_MAX_WINDOW);
 
 	/* worker slots (one for each credit issued) */
-	struct sbw_ctx		*slots[SRPC_MAX_WINDOW];
+	struct sbw_ctx		*slots[SBW_MAX_WINDOW];
 };
 
 /* credit-related stats */
@@ -137,7 +137,7 @@ atomic64_t srpc_stat_req_rx_;
 atomic64_t srpc_stat_req_dropped_;
 atomic64_t srpc_stat_resp_tx_;
 
-#if SRPC_TS_OUT
+#if SBW_TS_OUT
 static void printRecord()
 {
 	int i;
@@ -198,12 +198,12 @@ static void srpc_put_slot(struct sbw_session *s, int slot)
 
 static int srpc_winupdate(struct sbw_session *s)
 {
-	struct srpc_hdr shdr;
+	struct sbw_hdr shdr;
 	int ret;
 
 	/* craft the response header */
-	shdr.magic = RPC_RESP_MAGIC;
-	shdr.op = RPC_OP_WINUPDATE;
+	shdr.magic = BW_RESP_MAGIC;
+	shdr.op = BW_OP_WINUPDATE;
 	shdr.len = 0;
 	shdr.win = (uint64_t)s->win;
 
@@ -215,8 +215,8 @@ static int srpc_winupdate(struct sbw_session *s)
 	atomic64_inc(&srpc_stat_winu_tx_);
 	atomic64_fetch_and_add(&srpc_stat_win_tx_, shdr.win);
 
-#if SRPC_TRACK_FLOW
-	if (s->id == SRPC_TRACK_FLOW_ID) {
+#if SBW_TRACK_FLOW
+	if (s->id == SBW_TRACK_FLOW_ID) {
 		printf("[%lu] <== Winupdate: win = %lu\n",
 		       microtime(), shdr.win);
 	}
@@ -228,24 +228,24 @@ static int srpc_winupdate(struct sbw_session *s)
 static int srpc_send_completion_vector(struct sbw_session *s,
 				       unsigned long *slots)
 {
-	struct srpc_hdr shdr[SRPC_MAX_WINDOW];
-	struct iovec v[SRPC_MAX_WINDOW * 2];
+	struct sbw_hdr shdr[SBW_MAX_WINDOW];
+	struct iovec v[SBW_MAX_WINDOW * 2];
 	int nriov = 0;
 	int nrhdr = 0;
 	int i;
 	ssize_t ret = 0;
 
-	bitmap_for_each_set(slots, SRPC_MAX_WINDOW, i) {
+	bitmap_for_each_set(slots, SBW_MAX_WINDOW, i) {
 		struct sbw_ctx *c = s->slots[i];
 
-		shdr[nrhdr].magic = RPC_RESP_MAGIC;
-		shdr[nrhdr].op = RPC_OP_CALL;
+		shdr[nrhdr].magic = BW_RESP_MAGIC;
+		shdr[nrhdr].op = BW_OP_CALL;
 		shdr[nrhdr].len = c->cmn.resp_len;
 		shdr[nrhdr].id = c->cmn.id;
 		shdr[nrhdr].win = (uint64_t)s->win;
 
 		v[nriov].iov_base = &shdr[nrhdr];
-		v[nriov].iov_len = sizeof(struct srpc_hdr);
+		v[nriov].iov_len = sizeof(struct sbw_hdr);
 		nrhdr++;
 		nriov++;
 
@@ -259,11 +259,11 @@ static int srpc_send_completion_vector(struct sbw_session *s,
 	if (nriov == 0)
 		return 0;
 	ret = tcp_writev_full(s->cmn.c, v, nriov);
-	bitmap_for_each_set(slots, SRPC_MAX_WINDOW, i)
+	bitmap_for_each_set(slots, SBW_MAX_WINDOW, i)
 		srpc_put_slot(s, i);
 
-#if SRPC_TRACK_FLOW
-	if (s->id == SRPC_TRACK_FLOW_ID) {
+#if SBW_TRACK_FLOW
+	if (s->id == SBW_TRACK_FLOW_ID) {
 		printf("[%lu] <=== Response (%d): win=%d\n",
 			microtime(), nrhdr, s->win);
 	}
@@ -311,7 +311,7 @@ static void srpc_update_window(struct sbw_session *s, bool req_dropped)
 	/* clamp to supported values */
 	/* now we allow zero window */
 	s->win = MAX(s->win, s->num_pending);
-	s->win = MIN(s->win, SRPC_MAX_WINDOW - 1);
+	s->win = MIN(s->win, SBW_MAX_WINDOW - 1);
 
 	if (s->demand_sync)
 		s->win = MIN(s->win, s->num_pending + s->demand);
@@ -320,8 +320,8 @@ static void srpc_update_window(struct sbw_session *s, bool req_dropped)
 
 	win_diff = s->win - old_win;
 	atomic_fetch_and_add(&srpc_win_used, win_diff);
-#if SRPC_TRACK_FLOW
-	if (s->id == SRPC_TRACK_FLOW_ID) {
+#if SBW_TRACK_FLOW
+	if (s->id == SBW_TRACK_FLOW_ID) {
 		printf("[%lu] window update: win_avail = %d, win_used = %d, req_dropped = %d, num_pending = %d, demand = %d, num_sess = %d, old_win = %d, new_win = %d\n",
 		       microtime(), win_avail, win_used, req_dropped, s->num_pending, s->demand, num_sess, old_win, s->win);
 	}
@@ -357,8 +357,8 @@ static struct sbw_session *srpc_choose_drained_session(int core_id)
 	ret->drained_core = -1;
 	spin_unlock_np(&ret->lock);
 	atomic_dec(&srpc_num_drained);
-#if SRPC_TRACK_FLOW
-	if (ret->id == SRPC_TRACK_FLOW_ID) {
+#if SBW_TRACK_FLOW
+	if (ret->id == SBW_TRACK_FLOW_ID) {
 		printf("[%lu] Session waken up\n", microtime());
 	}
 #endif
@@ -378,8 +378,8 @@ static void srpc_remove_from_drained_list(struct sbw_session *s)
 		list_del(&s->drained_link);
 		s->is_linked = false;
 		atomic_dec(&srpc_num_drained);
-#if SRPC_TRACK_FLOW
-		if (s->id == SRPC_TRACK_FLOW_ID) {
+#if SBW_TRACK_FLOW
+		if (s->id == SBW_TRACK_FLOW_ID) {
 			printf("[%lu] Seesion is removed from drained list\n",
 			       microtime());
 		}
@@ -409,7 +409,7 @@ static void srpc_worker(void *arg)
 
 static int srpc_recv_one(struct sbw_session *s)
 {
-	struct crpc_hdr chdr;
+	struct cbw_hdr chdr;
 	int idx, ret;
 	thread_t *th;
 	uint64_t old_demand;
@@ -427,7 +427,7 @@ again:
 	}
 
 	/* parse the client header */
-	if (unlikely(chdr.magic != RPC_REQ_MAGIC)) {
+	if (unlikely(chdr.magic != BW_REQ_MAGIC)) {
 		log_warn("srpc: got invalid magic %x", chdr.magic);
 		return -EINVAL;
 	}
@@ -438,7 +438,7 @@ again:
 	}
 
 	switch (chdr.op) {
-	case RPC_OP_CALL:
+	case BW_OP_CALL:
 		atomic64_inc(&srpc_stat_req_rx_);
 		/* reserve a slot */
 		idx = srpc_get_slot(s);
@@ -476,7 +476,7 @@ again:
 
 		atomic_inc(&srpc_num_pending);
 
-		if (runtime_queue_us() >= SRPC_DROP_THRESH) {
+		if (runtime_queue_us() >= SBW_DROP_THRESH) {
 			thread_t *th;
 
 			s->slots[idx]->drop = true;
@@ -495,15 +495,15 @@ again:
 		ret = thread_spawn(srpc_worker, s->slots[idx]);
 		BUG_ON(ret);
 
-#if SRPC_TRACK_FLOW
+#if SBW_TRACK_FLOW
 		uint64_t now = microtime();
-		if (s->id == SRPC_TRACK_FLOW_ID) {
+		if (s->id == SBW_TRACK_FLOW_ID) {
 			printf("[%lu] ===> Request: id=%lu, demand=%lu, delay=%lu\n",
 			       now, chdr.id, chdr.demand, now - s->last_winupdate_timestamp);
 		}
 #endif
 		break;
-	case RPC_OP_WINUPDATE:
+	case BW_OP_WINUPDATE:
 		if (unlikely(chdr.len != 0)) {
 			log_warn("srpc: winupdate has nonzero len");
 			return -EINVAL;
@@ -540,8 +540,8 @@ again:
 			thread_ready(th);
 
 		atomic64_inc(&srpc_stat_winu_rx_);
-#if SRPC_TRACK_FLOW
-		if (s->id == SRPC_TRACK_FLOW_ID) {
+#if SBW_TRACK_FLOW
+		if (s->id == SBW_TRACK_FLOW_ID) {
 			printf("[%lu] ===> Winupdate: demand=%lu, \n",
 			       microtime(), chdr.demand);
 		}
@@ -557,7 +557,7 @@ again:
 
 static void srpc_sender(void *arg)
 {
-	DEFINE_BITMAP(tmp, SRPC_MAX_WINDOW);
+	DEFINE_BITMAP(tmp, SBW_MAX_WINDOW);
 	struct sbw_session *s = (struct sbw_session *)arg;
 	int ret, i;
 	bool sleep;
@@ -574,7 +574,7 @@ static void srpc_sender(void *arg)
 		while (true) {
 			sleep = !s->closed && !s->need_winupdate && !s->wake_up &&
 				bitmap_popcount(s->completed_slots,
-						SRPC_MAX_WINDOW) == 0;
+						SBW_MAX_WINDOW) == 0;
 			if (!sleep) {
 				s->sender_th = NULL;
 				break;
@@ -589,9 +589,9 @@ static void srpc_sender(void *arg)
 		}
 		req_dropped = false;
 		memcpy(tmp, s->completed_slots, sizeof(tmp));
-		bitmap_init(s->completed_slots, SRPC_MAX_WINDOW, false);
+		bitmap_init(s->completed_slots, SBW_MAX_WINDOW, false);
 
-		bitmap_for_each_set(tmp, SRPC_MAX_WINDOW, i) {
+		bitmap_for_each_set(tmp, SBW_MAX_WINDOW, i) {
 			struct sbw_ctx *c = s->slots[i];
 			if (c->drop) {
 				req_dropped = true;
@@ -603,7 +603,7 @@ static void srpc_sender(void *arg)
 			srpc_remove_from_drained_list(s);
 
 		drained_core = s->drained_core;
-		num_resp = bitmap_popcount(tmp, SRPC_MAX_WINDOW);
+		num_resp = bitmap_popcount(tmp, SBW_MAX_WINDOW);
 		s->num_pending -= num_resp;
 		srpc_update_window(s, req_dropped);
 
@@ -638,8 +638,8 @@ static void srpc_sender(void *arg)
 		 * (2) s is not in the list already,
 		 * (3) it has no outstanding requests */
 		if (win == 0 && drained_core == -1 &&
-		    bitmap_popcount(s->avail_slots, SRPC_MAX_WINDOW) ==
-		    SRPC_MAX_WINDOW) {
+		    bitmap_popcount(s->avail_slots, SBW_MAX_WINDOW) ==
+		    SBW_MAX_WINDOW) {
 			spin_lock_np(&s->lock);
 			if (!s->demand_sync || s->demand > 0) {
 				spin_lock_np(&srpc_drained[core_id].lock);
@@ -658,8 +658,8 @@ static void srpc_sender(void *arg)
 				atomic_inc(&srpc_num_drained);
 			}
 			spin_unlock_np(&s->lock);
-#if SRPC_TRACK_FLOW
-			if (s->id == SRPC_TRACK_FLOW_ID) {
+#if SBW_TRACK_FLOW
+			if (s->id == SBW_TRACK_FLOW_ID) {
 				printf("[%lu] Session is drained: win=%d, drained_core = %d\n",
 				       microtime(), win, s->drained_core);
 			}
@@ -671,9 +671,9 @@ close:
 	/* wait for in-flight completions to finish */
 	spin_lock_np(&s->lock);
 	while (!s->closed ||
-	       bitmap_popcount(s->avail_slots, SRPC_MAX_WINDOW) +
-	       bitmap_popcount(s->completed_slots, SRPC_MAX_WINDOW) <
-	       SRPC_MAX_WINDOW) {
+	       bitmap_popcount(s->avail_slots, SBW_MAX_WINDOW) +
+	       bitmap_popcount(s->completed_slots, SBW_MAX_WINDOW) <
+	       SBW_MAX_WINDOW) {
 		s->sender_th = thread_self();
 		thread_park_and_unlock_np(&s->lock);
 		spin_lock_np(&s->lock);
@@ -685,7 +685,7 @@ close:
 	spin_unlock_np(&s->lock);
 
 	/* free any left over slots */
-	for (i = 0; i < SRPC_MAX_WINDOW; i++) {
+	for (i = 0; i < SBW_MAX_WINDOW; i++) {
 		if (s->slots[i])
 			srpc_put_slot(s, i);
 	}
@@ -708,13 +708,13 @@ static void srpc_server(void *arg)
 	s->cmn.c = c;
 	s->drained_core = -1;
 	s->id = atomic_fetch_and_add(&srpc_num_sess, 1) + 1;
-	bitmap_init(s->avail_slots, SRPC_MAX_WINDOW, true);
+	bitmap_init(s->avail_slots, SBW_MAX_WINDOW, true);
 
 	waitgroup_init(&s->send_waiter);
 	waitgroup_add(&s->send_waiter, 1);
 
-#if SRPC_TRACK_FLOW
-	if (s->id == SRPC_TRACK_FLOW_ID) {
+#if SBW_TRACK_FLOW
+	if (s->id == SBW_TRACK_FLOW_ID) {
 		printf("[%lu] connection established.\n",
 		       microtime());
 	}
@@ -774,23 +774,23 @@ static void srpc_cc_worker(void *arg)
 	thread_t *th;
 
 	while (true) {
-		timer_sleep(SRPC_RTT_US);
+		timer_sleep(SBW_RTT_US);
 		us = runtime_queue_us();
 		new_win = atomic_read(&srpc_win_avail);
 		num_sess = atomic_read(&srpc_num_sess);
 
-		if (us >= SRPC_MIN_DELAY_US) {
-			alpha = (us - SRPC_MIN_DELAY_US) / (float)SRPC_MIN_DELAY_US;
-			alpha = alpha * SRPC_MD;
+		if (us >= SBW_MIN_DELAY_US) {
+			alpha = (us - SBW_MIN_DELAY_US) / (float)SBW_MIN_DELAY_US;
+			alpha = alpha * SBW_MD;
 			alpha = MAX(1.0 - alpha, 0.5);
 
 			new_win = (int)(new_win * alpha);
 		} else {
-			new_win += MAX((int)(num_sess * SRPC_AI), 1);
+			new_win += MAX((int)(num_sess * SBW_AI), 1);
 		}
 
 		new_win = MAX(new_win, max_cores);
-		new_win = MIN(new_win, atomic_read(&srpc_num_sess) << SRPC_MAX_WINDOW_EXP);
+		new_win = MIN(new_win, atomic_read(&srpc_num_sess) << SBW_MAX_WINDOW_EXP);
 
 		// Wake up threads from drained list
 		win_used = atomic_read(&srpc_win_used);
@@ -826,7 +826,7 @@ static void srpc_cc_worker(void *arg)
 
 		atomic_write(&srpc_win_avail, new_win);
 
-#if SRPC_TS_OUT
+#if SBW_TS_OUT
 		record(new_win, us);
 #endif
 	}

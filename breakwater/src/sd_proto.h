@@ -1,35 +1,34 @@
 /*
- * bw_proto.h - RPC protocol definitions for BreakWater
+ * proto.h - RPC protocol definitions for SEDA
  */
 
 #pragma once
 
 #include <base/types.h>
 
-#define BW_REQ_MAGIC	0x63727063 /* 'crpc' */
-#define BW_RESP_MAGIC	0x73727063 /* 'srpc' */
+#define SD_REQ_MAGIC	0x63727063 /* 'crpc' */
+#define SD_RESP_MAGIC	0x73727063 /* 'srpc' */
 
 enum {
-	BW_OP_CALL = 0,  /* performs a procedure call */
-	BW_OP_WINUPDATE, /* just updates the window (no call) */
-	BW_OP_MAX,	  /* maximum number of opcodes */
+	SD_OP_CALL = 0,  /* performs a procedure call */
+	SD_OP_WINUPDATE, /* just updates the window (no call) */
+	SD_OP_MAX,	  /* maximum number of opcodes */
 };
 
 /* header used for CLIENT -> SERVER */
-struct cbw_hdr {
+struct csd_hdr {
 	uint32_t	magic; /* must be set to RPC_REQ_MAGIC */
 	uint32_t	op;    /* the opcode */
 	size_t		len;   /* length of request in bytes */
 	uint64_t	id;    /* Request / Response ID */
-	uint64_t	demand;/* the demanded window size */
-	bool		sync;
+	uint64_t	ts;
 };
 
 /* header used for SERVER -> CLIENT */
-struct sbw_hdr {
+struct ssd_hdr {
 	uint32_t	magic; /* must be set to RPC_RESP_MAGIC */
 	uint32_t	op;    /* the opcode */
 	size_t		len;   /* length of response in bytes */
 	uint64_t	id;    /* Request / Response ID */
-	uint64_t	win;   /* the offered window size */
+	uint64_t	ts;
 };

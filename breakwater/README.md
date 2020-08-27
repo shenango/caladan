@@ -61,19 +61,22 @@ breakwater/apps/netbench$ make clean && make
 $ sudo ./iokerneld
 ```
 
-9) Launch benchmark application (Server)
+9) Modify runtime configuration
+- Sample server and client configurations are in breakwater/apps/netbench/.
+
+10) Launch benchmark application (Server)
 ```
-breakwater/apps/netbench$ sudo ./netbench server.config server
+breakwater/apps/netbench$ sudo ./netbench breakwater server.config server
 ```
 
-10) Launch benchmark application (Master Client)
-When launching multiple client applications, one of them should be a master client,
+11) Launch benchmark application (Master Client)
+- When launching multiple client applications, one of them should be a master client,
 and others are agents.
 ```
-breakwater/apps/netbench$ sudo ./netbench client.config client [# threads] [server_ip] [service_time_us] [# agents] [offered_load]
+breakwater/apps/netbench$ sudo ./netbench breakwater client.config client [# threads] [server_ip] [service_time_us] [# agents] [offered_load]
 ```
 
-11) Launch benchmark application (Agent)
+12) Launch benchmark application (Agent)
 ```
-breakwater/apps/netbench$ sudo ./netbench client.config agent [master_client_ip] [offered_load]
+breakwater/apps/netbench$ sudo ./netbench breakwater client.config agent [master_client_ip] [offered_load]
 ```
