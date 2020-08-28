@@ -582,7 +582,6 @@ static inline size_t directpath_rx_buf_pool_sz(unsigned int nrqs)
  */
 
 extern void timer_softirq(struct kthread *k, unsigned int budget);
-extern void timer_merge(struct kthread *r);
 extern uint64_t timer_earliest_deadline(void);
 
 struct timer_idx {

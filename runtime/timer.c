@@ -94,63 +94,20 @@ static void sift_down(struct timer_idx *heap, int i, int n)
 	}
 }
 
-static inline void update_q_ptrs(struct kthread *k)
+static void update_q_ptrs(struct kthread *k)
 {
+	uint64_t next_tsc = 0;
+
 	if (k->timern)
-		ACCESS_ONCE(k->q_ptrs->next_timer_tsc) = k->timers[0].deadline_us * cycles_per_us + start_tsc;
-	else
-		ACCESS_ONCE(k->q_ptrs->next_timer_tsc) = 0;
-}
-
-/**
- * timer_merge - merges a timer heap from another kthread into our timer heap
- * @r: the remote kthread whose timer heap we will absorb
- */
-void timer_merge(struct kthread *r)
-{
-	struct kthread *k = myk();
-	int i;
-
-	spin_lock(&k->timer_lock);
-	spin_lock(&r->timer_lock);
-
-	if (r->timern == 0) {
-		spin_unlock(&r->timer_lock);
-		goto done;
-	}
-
-	/* move all timers from r to the end of our array */
-	for (i = 0; i < r->timern; i++) {
-		k->timers[k->timern] = r->timers[i];
-		k->timers[k->timern].e->idx = k->timern;
-		k->timers[k->timern].e->localk = k;
-		k->timern++;
-
-		if (k->timern >= RUNTIME_MAX_TIMERS)
-			BUG();
-	}
-	r->timern = 0;
-	update_q_ptrs(r);
-	spin_unlock(&r->timer_lock);
-
-	/*
-         * Restore heap order by sifting each non-leaf element downward,
-         * starting from the bottom of the heap and working upward (runs in
-	 * linear time).
-	 */
-	for (i = k->timern / D; i >= 0; i--)
-		sift_down(k->timers, i, k->timern);
-
-done:
-	update_q_ptrs(k);
-	spin_unlock(&k->timer_lock);
+		next_tsc = k->timers[0].deadline_us * cycles_per_us + start_tsc;
+	ACCESS_ONCE(k->q_ptrs->next_timer_tsc) = next_tsc;
 }
 
 /**
  * timer_earliest_deadline - return the first deadline for this kthread or 0 if
  * there are no active timers.
  */
-uint64_t timer_earliest_deadline()
+uint64_t timer_earliest_deadline(void)
 {
 	struct kthread *k = myk();
 	uint64_t deadline_us;
@@ -199,10 +156,10 @@ void timer_start(struct timer_entry *e, uint64_t deadline_us)
 {
 	struct kthread *k = getk();
 
-	spin_lock_np(&k->timer_lock);
+	spin_lock(&k->timer_lock);
 	timer_start_locked(e, deadline_us);
 	update_q_ptrs(k);
-	spin_unlock_np(&k->timer_lock);
+	spin_unlock(&k->timer_lock);
 	putk();
 }
 
@@ -219,21 +176,17 @@ bool timer_cancel(struct timer_entry *e)
 	int last;
 
 try_again:
-	preempt_disable();
 	k = load_acquire(&e->localk);
-
 	spin_lock_np(&k->timer_lock);
 
 	if (e->localk != k) {
 		/* Timer was merged to a different heap */
 		spin_unlock_np(&k->timer_lock);
-		preempt_enable();
 		goto try_again;
 	}
 
 	if (!e->armed) {
 		spin_unlock_np(&k->timer_lock);
-		preempt_enable();
 		return false;
 	}
 	e->armed = false;
@@ -242,7 +195,6 @@ try_again:
 	if (e->idx == last) {
 		update_q_ptrs(k);
 		spin_unlock_np(&k->timer_lock);
-		preempt_enable();
 		return true;
 	}
 
@@ -253,7 +205,6 @@ try_again:
 	update_q_ptrs(k);
 	spin_unlock_np(&k->timer_lock);
 
-	preempt_enable();
 	return true;
 }
 
