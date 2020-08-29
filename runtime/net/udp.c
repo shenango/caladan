@@ -109,7 +109,7 @@ static void udp_conn_err(struct trans_entry *e, int err)
 }
 
 /* operations for UDP sockets */
-const struct trans_ops udp_conn_ops = {
+static const struct trans_ops udp_conn_ops = {
 	.recv = udp_conn_recv,
 	.err = udp_conn_err,
 };
@@ -451,7 +451,7 @@ ssize_t udp_write(udpconn_t *c, const void *buf, size_t len)
 	return udp_write_to(c, buf, len, NULL);
 }
 
-void __udp_shutdown(udpconn_t *c)
+static void __udp_shutdown(udpconn_t *c)
 {
 	spin_lock_np(&c->inq_lock);
 	spin_lock_np(&c->outq_lock);
@@ -564,7 +564,7 @@ static void udp_par_recv(struct trans_entry *e, struct mbuf *m)
 }
 
 /* operations for UDP spawners */
-const struct trans_ops udp_par_ops = {
+static const struct trans_ops udp_par_ops = {
 	.recv = udp_par_recv,
 };
 

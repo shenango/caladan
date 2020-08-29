@@ -6,7 +6,7 @@
 #include <runtime/runtime.h>
 #include <runtime/sync.h>
 
-#define N		20000
+#define N	20000
 #define ITERS   500000
 #define NCORES	4
 
@@ -16,17 +16,17 @@ struct bucket {
 	int message;
 };
 
-mutex_t next_bucket_lock;
-int next_bucket = 0;
-struct bucket buckets[N];
+static mutex_t next_bucket_lock;
+static int next_bucket = 0;
+static struct bucket buckets[N];
 
-mutex_t messages_received_lock;
-condvar_t messages_received_cv;
-int messages_received;
+static mutex_t messages_received_lock;
+static condvar_t messages_received_cv;
+static int messages_received;
 
-mutex_t start_lock;
-condvar_t start_cv;
-bool start;
+static mutex_t start_lock;
+static condvar_t start_cv;
+static bool start;
 
 static void work_handler(void *arg)
 {

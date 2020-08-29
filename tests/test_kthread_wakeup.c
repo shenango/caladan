@@ -15,9 +15,9 @@
 #define N		500000
 #define SPAWN_LIMIT	5
 
-atomic_t n_threads;
-atomic_t n_spawned;
-waitgroup_t wg;
+static atomic_t n_threads;
+static atomic_t n_spawned;
+static waitgroup_t wg;
 
 static void work_handler(void *arg)
 {

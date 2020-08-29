@@ -70,15 +70,15 @@ struct sched_ops {
  */
 
 DECLARE_BITMAP(sched_allowed_cores, NCPU);
-unsigned int sched_siblings[NCPU];
-unsigned int sched_dp_core;
-unsigned int sched_ctrl_core;
-unsigned int sched_linux_core;
+extern unsigned int sched_siblings[NCPU];
+extern unsigned int sched_dp_core;
+extern unsigned int sched_ctrl_core;
+extern unsigned int sched_linux_core;
 /* per socket state */
 struct socket {
 	DEFINE_BITMAP(cores, NCPU);
 };
-struct socket socket_state[NNUMA];
+extern struct socket socket_state[NNUMA];
 
 
 /*

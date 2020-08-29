@@ -26,6 +26,9 @@ unsigned int sched_dp_core;	/* used for the iokernel's dataplane */
 unsigned int sched_ctrl_core;	/* used for the iokernel's controlplane */
 unsigned int sched_linux_core;	/* used by normal linux scheduler */
 
+/* keeps track of which cores are in each NUMA socket */
+struct socket socket_state[NNUMA];
+
 /* arrays of core numbers for fast polling */
 unsigned int sched_cores_tbl[NCPU];
 int sched_cores_nr;
@@ -138,7 +141,8 @@ static struct thread *sched_pick_kthread(struct proc *p, unsigned int core)
 	return list_tail(&p->idle_threads, struct thread, idle_link);
 }
 
-int __sched_run(struct core_state *s, struct thread *th, unsigned int core)
+static int
+__sched_run(struct core_state *s, struct thread *th, unsigned int core)
 {
 	/* if we're still busy with the last run request than stop here */
 	if (s->wait) {

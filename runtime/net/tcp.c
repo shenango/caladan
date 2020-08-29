@@ -187,7 +187,7 @@ static void tcp_conn_err(struct trans_entry *e, int err)
 }
 
 /* operations for TCP sockets */
-const struct trans_ops tcp_conn_ops = {
+static const struct trans_ops tcp_conn_ops = {
 	.recv = tcp_rx_conn,
 	.err = tcp_conn_err,
 };
@@ -377,7 +377,7 @@ done:
 }
 
 /* operations for TCP listen queues */
-const struct trans_ops tcp_queue_ops = {
+static const struct trans_ops tcp_queue_ops = {
 	.recv = tcp_queue_recv,
 };
 

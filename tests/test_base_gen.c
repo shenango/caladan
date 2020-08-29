@@ -6,7 +6,7 @@
 #include <base/init.h>
 #include <base/log.h>
 
-static void test_gen()
+static void test_gen(void)
 {
 	uint32_t gen;
 	struct gen_num gen_writer, gen_reader;

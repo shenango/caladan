@@ -209,8 +209,8 @@ void tcp_rx_conn(struct trans_entry *e, struct mbuf *m)
 	mbuf_pull(m, hdr_len - sizeof(struct tcp_hdr)); /* strip off options */
 
 	/* Use slow path if this is not an ACK|PUSH */
-	bool slow_path = (tcphdr->flags != (TCP_ACK | TCP_PUSH)) |
-	                 (len == 0) | wraps_gt(ack, snd_nxt);
+	bool slow_path = (tcphdr->flags != (TCP_ACK | TCP_PUSH)) ||
+	                 (len == 0) || wraps_gt(ack, snd_nxt);
 
 	spin_lock_np(&c->lock);
 
@@ -220,7 +220,7 @@ void tcp_rx_conn(struct trans_entry *e, struct mbuf *m)
 	slow_path |= is_snd_full(c);
 
 	/* Is the packet on the next in-order boundary? */
-	slow_path |= (seq != c->pcb.rcv_nxt) | !list_empty(&c->rxq_ooo);
+	slow_path |= (seq != c->pcb.rcv_nxt) || !list_empty(&c->rxq_ooo);
 
 	/* Does it fit perfectly in the receive window?  */
 	slow_path |= wraps_lt(c->pcb.rcv_wnd, len);

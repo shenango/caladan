@@ -98,3 +98,4 @@ static inline void clear_preempt_cede_needed(void)
 	clear_preempt_needed();
 	preempt_cede = false;
 }
+

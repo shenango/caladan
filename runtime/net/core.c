@@ -315,7 +315,7 @@ struct mbuf *net_tx_alloc_mbuf(void)
 }
 
 /* drains overflow queues */
-void __noinline net_tx_drain_overflow(void)
+static void __noinline net_tx_drain_overflow(void)
 {
 	struct mbuf *m;
 	struct kthread *k = myk();

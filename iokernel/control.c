@@ -98,7 +98,7 @@ static struct proc *control_create_proc(mem_key_t key, size_t len,
 		 pid_t pid)
 {
 	struct control_hdr hdr;
-	struct shm_region reg = {0};
+	struct shm_region reg = {NULL};
 	size_t nr_pages;
 	struct proc *p = NULL;
 	struct thread_spec *threads = NULL;

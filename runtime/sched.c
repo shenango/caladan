@@ -702,8 +702,8 @@ thread_t *thread_create_with_buf(thread_fn_t fn, void **buf, size_t buf_len)
 	if (unlikely(!th))
 		return NULL;
 
-	th->tf.rsp = stack_init_to_rsp_with_buf(th->stack, &ptr,
-						buf_len, thread_exit);
+	th->tf.rsp = stack_init_to_rsp_with_buf(th->stack, &ptr, buf_len,
+						thread_exit);
 	th->tf.rdi = (uint64_t)ptr;
 	th->tf.rbp = (uint64_t)0; /* just in case base pointers are enabled */
 	th->tf.rip = (uint64_t)fn;
