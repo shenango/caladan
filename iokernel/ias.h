@@ -10,17 +10,17 @@
  */
 
 /* the maximum number of processes */
-#define IAS_NPROC		         32
+#define IAS_NPROC			32
 /* the memory bandwidth limit */
-#define IAS_BW_LIMIT		         0.09
+#define IAS_BW_LIMIT			0.09
 /* the bandwidth controller's adjustment interval */
 #define IAS_BW_INTERVAL_US		10
 /* the HT controller's adjustment interval */
 #define IAS_HT_INTERVAL_US		10
 /* the time before the core-local cache is assumed to be evicted */
-#define IAS_LOC_EVICTED_US	         100
+#define IAS_LOC_EVICTED_US		100
 /* the debug info printing interval */
-#define IAS_DEBUG_PRINT_US	         1000000
+#define IAS_DEBUG_PRINT_US		1000000
 
 
 /*

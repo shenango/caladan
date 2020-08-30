@@ -241,8 +241,7 @@ static bool ias_can_preempt_core(struct ias_data *sd, unsigned int core)
  *
  * Returns a locality score, higher is better.
  */
-static float ias_locality_score(struct ias_data *sd, unsigned int core,
-				uint64_t now_us)
+static float ias_locality_score(struct ias_data *sd, unsigned int core)
 {
 	uint64_t delta_us;
 	unsigned int sib = sched_siblings[core];
@@ -258,13 +257,12 @@ static float ias_locality_score(struct ias_data *sd, unsigned int core,
 	return (float)(IAS_LOC_EVICTED_US - delta_us) / IAS_LOC_EVICTED_US;
 }
 
-static float ias_core_score(struct ias_data *sd, unsigned int core,
-			    uint64_t now_us)
+static float ias_core_score(struct ias_data *sd, unsigned int core)
 {
 	float score;
 	struct ias_data *sib_task = cores[sched_siblings[core]];
 
-	score = ias_locality_score(sd, core, now_us);
+	score = ias_locality_score(sd, core);
 
 	if (bitmap_test(sd->reserved_cores, core))
 		score += 6.0f;
@@ -282,7 +280,6 @@ static unsigned int ias_choose_core(struct ias_data *sd)
 {
 	unsigned int core, best_core = NCPU, tmp;
 	float score, best_score = -1.0f;
-	uint64_t now_tsc = rdtsc();
 
 	sched_for_each_allowed_core(core, tmp) {
 		/* check if this process can preempt this core */
@@ -290,7 +287,7 @@ static unsigned int ias_choose_core(struct ias_data *sd)
 			continue;
 
 		/* try to estimate how good this core is for the process */
-		score = ias_core_score(sd, core, now_tsc);
+		score = ias_core_score(sd, core);
 		if (score > best_score) {
 			best_score = score;
 			best_core = core;
@@ -301,7 +298,7 @@ static unsigned int ias_choose_core(struct ias_data *sd)
 }
 
 /**
- * ias_can_add_kthread - determines if a core can be added to the process
+ * ias_can_add_kthread - checks if a core can be added to a process
  * @sd: the process to check
  *
  * Returns true if a core can be added.
@@ -323,8 +320,12 @@ int ias_add_kthread(struct ias_data *sd)
 	unsigned int core;
 
 	/* check if we're constrained by the thread limit */
-	if (sd->threads_active >= sd->threads_limit)
-		return -ENOENT;
+	if (sd->threads_active >= sd->threads_limit) {
+		core = ias_ht_relinquish_core(sd);
+		if (core == NCPU)
+			return -ENOENT;
+		goto done;
+	}
 
 	/* choose the best core to run the process on */
 	core = ias_choose_core(sd);
@@ -334,6 +335,7 @@ int ias_add_kthread(struct ias_data *sd)
 			return -ENOENT;
 	}
 
+done:
 	/* finally, wake up the thread on the chosen core */
 	return ias_run_kthread_on_core(sd, core);
 }
@@ -491,7 +493,6 @@ static void ias_sched_poll(uint64_t now, int idle_cnt, bitmap_ptr_t idle)
 	if (idle_cnt != 0)
 		bitmap_or(ias_idle_cores, ias_idle_cores, idle, NCPU);
 
-
 	/* try to allocate any idle cores */
 	bitmap_for_each_set(ias_idle_cores, NCPU, core) {
 		if (bitmap_test(ias_ht_punished_cores, core))
@@ -502,11 +503,13 @@ static void ias_sched_poll(uint64_t now, int idle_cnt, bitmap_ptr_t idle)
 		ias_add_kthread_on_core(core);
 	}
 
+	/* try to run the bandwidth controller */
 	if (!cfg.nobw && now - last_bw_us >= IAS_BW_INTERVAL_US) {
 		last_bw_us = now;
 		ias_bw_poll();
 	}
 
+	/* try to run the hyperthread controller */
 	if (now - last_ht_us >= IAS_HT_INTERVAL_US) {
 		last_ht_us = now;
 		ias_ht_poll();

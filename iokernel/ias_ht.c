@@ -37,14 +37,11 @@ static void ias_ht_punish(struct ias_data *sd, unsigned int core)
 	unsigned int sib = sched_siblings[core];
 
 	/* check if the core is already punished */
-	if (bitmap_test(ias_ht_punished_cores, sib))
+	if (bitmap_test(ias_ht_punished_cores, core) ||
+	    bitmap_test(ias_ht_punished_cores, sib))
 		return;
 
-	/* check if the sibling is punishing this core */
-	if (bitmap_test(ias_ht_punished_cores, core))
-		return;
-
-	/* don't preempt an LC task if we can't add back a different core */
+	/* don't preempt an LC task if we can't add back a core */
 	sib_sd = cores[sib];
 	if (sib_sd && sib_sd->is_lc && !ias_can_add_kthread(sib_sd))
 		return;
