@@ -18,8 +18,7 @@ fn main() {
 
     // consult shared.mk for other libraries... sorry y'all.
     let output = Command::new("make")
-        .args(&["-f", "shared.mk", "print-RUNTIME_LIBS", "ROOT_PATH=../../"])
-        .current_dir("../../")
+        .args(&["-f", "../../Makefile", "print-RUNTIME_LIBS", "ROOT_PATH=../../"])
         .output()
         .unwrap();
     for t in String::from_utf8_lossy(&output.stdout).split_whitespace() {
