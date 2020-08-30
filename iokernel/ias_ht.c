@@ -41,9 +41,9 @@ static void ias_ht_punish(struct ias_data *sd, unsigned int core)
 	    bitmap_test(ias_ht_punished_cores, sib))
 		return;
 
-	/* don't preempt an LC task if we can't add back a core */
+	/* don't preempt an LC task if we can't add back a core, or queues have built up */
 	sib_sd = cores[sib];
-	if (sib_sd && sib_sd->is_lc && !ias_can_add_kthread(sib_sd))
+	if (sib_sd && sib_sd->is_lc && (sib_sd->current_qdelay_us >= sib_sd->ht_punish_us || !ias_can_add_kthread(sib_sd)))
 		return;
 
 	/* idle the core, but mark it as in use by the process */
@@ -85,7 +85,7 @@ static uint64_t ias_ht_poll_one(unsigned int core)
 	uint64_t sgen, rgen;
 
 	/* check if we might be able to punish the sibling's HT lane */
-	if (sd && sd->is_lc && sd->ht_punish_us > 0 && th != NULL) {
+	if (sd && sd->ht_punish_us > 0 && th != NULL) {
 		/* update generation counters */
 		sgen = ias_gen[core];
 		rgen = ACCESS_ONCE(th->q_ptrs->rcu_gen);
@@ -145,7 +145,7 @@ void ias_ht_poll(void)
 		const struct tarr *ta = &arr[tmp];
 		struct ias_data *sd = cores[ta->core];
 
-		if (sd && sd->is_lc && sd->ht_punish_us > 0 &&
+		if (sd && sd->ht_punish_us > 0 &&
 		    ta->service_us >= sd->ht_punish_us) {
 			ias_ht_punish(sd, ta->core);
 		} else {

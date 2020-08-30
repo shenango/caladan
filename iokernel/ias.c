@@ -69,7 +69,8 @@ static int ias_attach(struct proc *p, struct sched_spec *cfg)
 	sd->threads_max = cfg->max_cores;
 	sd->threads_limit = cfg->max_cores;
 	sd->is_lc = cfg->priority == SCHED_PRIO_LC;
-	sd->ht_punish_us = cfg->ht_punish_us;
+	if (sd->is_lc)
+		sd->ht_punish_us = cfg->ht_punish_us;
 	sd->qdelay_us = cfg->qdelay_us;
 	sd->threads_active = 0;
 	p->policy_data = (unsigned long)sd;
@@ -321,10 +322,12 @@ int ias_add_kthread(struct ias_data *sd)
 
 	/* check if we're constrained by the thread limit */
 	if (sd->threads_active >= sd->threads_limit) {
-		core = ias_ht_relinquish_core(sd);
-		if (core == NCPU)
-			return -ENOENT;
-		goto done;
+		if (sd->ht_punish_us > 0 && sd->current_qdelay_us >= sd->ht_punish_us) {
+			core = ias_ht_relinquish_core(sd);
+			if (core != NCPU)
+				goto done;
+		}
+		return -ENOENT;
 	}
 
 	/* choose the best core to run the process on */
@@ -360,6 +363,11 @@ static void ias_notify_congested(struct proc *p, bitmap_ptr_t threads,
 		noio = bitmap_popcount(io, NCPU) == 0;
 	} else {
 		uint64_t tsc = rdtsc();
+		uint64_t queue_since = MIN(rq_oldest_tsc, pkq_oldest_tsc);
+		if (queue_since < tsc)
+			sd->current_qdelay_us = (tsc - queue_since) / cycles_per_us;
+		else
+			sd->current_qdelay_us = 0;
 		norq = rq_oldest_tsc == UINT64_MAX ||
 		       tsc - rq_oldest_tsc < sd->qdelay_us * cycles_per_us;
 		noio = pkq_oldest_tsc == UINT64_MAX ||

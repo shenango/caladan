@@ -296,7 +296,7 @@ static void sched_detect_congestion(struct proc *p)
 	DEFINE_BITMAP(ios, NCPU);
 	struct thread *th;
 	uint32_t cur_tail, cur_head, last_head, last_tail;
-	uint64_t now, timer_tsc;
+	uint64_t timer_tsc;
 	uint64_t rq_oldest_tsc = UINT64_MAX;
 	uint64_t pkq_oldest_tsc = UINT64_MAX;
 	int i;
@@ -361,13 +361,12 @@ static void sched_detect_congestion(struct proc *p)
 	}
 
 	/* detect expired timers */
-	now = rdtsc();
 	for (i = 0; i < p->thread_count; i++) {
 		th = &p->threads[i];
 		timer_tsc = ACCESS_ONCE(*th->timer_heap.next_tsc);
-		if (!timer_tsc || timer_tsc > now)
+		if (!timer_tsc || timer_tsc > cur_tsc)
 			continue;
-		if (timer_tsc + IOKERNEL_POLL_INTERVAL * cycles_per_us <= now) {
+		if (timer_tsc + IOKERNEL_POLL_INTERVAL * cycles_per_us <= cur_tsc) {
 			timeout = true;
 			break;
 		}

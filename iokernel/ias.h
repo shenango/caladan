@@ -34,6 +34,7 @@ struct ias_data {
 	unsigned int		is_lc:1;
 	unsigned int		idx; /* a unique index */
 	uint64_t		qdelay_us;
+	uint64_t		current_qdelay_us;
 	struct list_node	all_link;
 	DEFINE_BITMAP(reserved_cores, NCPU);
 
