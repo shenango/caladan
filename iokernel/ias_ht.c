@@ -56,6 +56,9 @@ static void ias_ht_punish(struct ias_data *sd, unsigned int core)
 	ias_ht_punish_count++;
 	sd->ht_punish_count++;
 	bitmap_set(ias_ht_punished_cores, sib);
+
+	if (sib_sd && sib_sd->is_lc)
+		ias_add_kthread(sib_sd);
 }
 
 static void ias_ht_relax(struct ias_data *sd, unsigned int core)
