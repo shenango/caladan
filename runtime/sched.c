@@ -188,9 +188,10 @@ static void update_oldest_tsc(struct kthread *k)
 static bool steal_work(struct kthread *l, struct kthread *r)
 {
 	thread_t *th;
-	uint32_t i, avail, rq_tail, lrq_head, lrq_tail;
+	uint32_t i, avail, rq_tail, overflow = 0;
 
 	assert_spin_lock_held(&l->lock);
+	assert(l->rq_head == 0 && l->rq_tail == 0);
 
 	if (!work_available(r))
 		return false;
@@ -213,19 +214,29 @@ static bool steal_work(struct kthread *l, struct kthread *r)
 		/* steal half the tasks */
 		avail = div_up(avail, 2);
 		rq_tail = r->rq_tail;
-		lrq_tail = l->rq_tail;
-		lrq_head = l->rq_head;
-		for (i = 0; i < avail && lrq_head - lrq_tail < RUNTIME_RQ_SIZE; i++)
-			l->rq[lrq_head++ % RUNTIME_RQ_SIZE] = r->rq[rq_tail++ % RUNTIME_RQ_SIZE];
-		for (; i < avail; i++)
-			list_add_tail(&l->rq_overflow, &r->rq[rq_tail++ % RUNTIME_RQ_SIZE]->link);
+		for (i = 0; i < avail; i++)
+			l->rq[i] = r->rq[rq_tail++ % RUNTIME_RQ_SIZE];
 		store_release(&r->rq_tail, rq_tail);
-		ACCESS_ONCE(r->q_ptrs->rq_tail) += avail;
+
+		/*
+		 * Drain the remote overflow queue, so newly readied tasks don't cut
+		 * in front tasks in the oveflow queue
+		 */
+		while (true) {
+			th = list_pop(&r->rq_overflow, thread_t, link);
+			if (!th)
+				break;
+
+			list_add_tail(&l->rq_overflow, &th->link);
+			overflow++;
+		}
+
+		ACCESS_ONCE(r->q_ptrs->rq_tail) += avail + overflow;
 		update_oldest_tsc(r);
 		spin_unlock(&r->lock);
 
-		l->rq_head = lrq_head;
-		ACCESS_ONCE(l->q_ptrs->rq_head) += avail;
+		l->rq_head = avail;
+		ACCESS_ONCE(l->q_ptrs->rq_head) += avail + overflow;
 		STAT(THREADS_STOLEN) += avail;
 		return true;
 	}
@@ -247,10 +258,7 @@ static bool steal_work(struct kthread *l, struct kthread *r)
 
 done:
 	if (th) {
-		if (likely(l->rq_head - l->rq_tail < RUNTIME_RQ_SIZE))
-			l->rq[l->rq_head++ % RUNTIME_RQ_SIZE] = th;
-		else
-			list_add_tail(&l->rq_overflow, &th->link);
+		l->rq[l->rq_head++ % RUNTIME_RQ_SIZE] = th;
 		ACCESS_ONCE(l->q_ptrs->rq_head)++;
 		STAT(THREADS_STOLEN)++;
 	}
@@ -507,23 +515,13 @@ void thread_park_and_unlock_np(spinlock_t *l)
  */
 void thread_yield(void)
 {
-	static __thread unsigned long nextk;
-	struct kthread *r, *k;
+	struct kthread *k;
 	thread_t *myth = thread_self();
 
 	/* check for softirqs */
 	softirq_run(RUNTIME_SOFTIRQ_LOCAL_BUDGET);
 
 	k = getk();
-
-	/* try to drain parked kthreads for fairness */
-	r = ks[nextk++ % maxks];
-	if (ACCESS_ONCE(r->parked)) {
-		spin_lock(&k->lock);
-		if (likely(ACCESS_ONCE(r->parked)))
-			steal_work(k, r);
-		spin_unlock(&k->lock);
-	}
 
 	assert(myth->state == THREAD_STATE_RUNNING);
 	myth->state = THREAD_STATE_SLEEPING;
@@ -586,24 +584,20 @@ static void thread_finish_cede(void)
 
 	STAT(PROGRAM_CYCLES) += rdtsc() - last_tsc;
 
-	if (k->rq_head == ACCESS_ONCE(k->rq_tail)) {
-		/* if the runqueue is empty, use lockless thread wake */
-		thread_ready(myth);
-	} else {
-		/* ensure preempted thread cuts the line,
-		 * possibly displacing the newest element in a full runqueue
-		 * into the overflow queue
-		 */
-		ACCESS_ONCE(k->q_ptrs->rq_head)++;
-		spin_lock(&k->lock);
-		th = k->rq[--k->rq_tail % RUNTIME_RQ_SIZE];
-		k->rq[k->rq_tail % RUNTIME_RQ_SIZE] = myth;
-		if (unlikely(k->rq_head - k->rq_tail > RUNTIME_RQ_SIZE)) {
-			list_add(&k->rq_overflow, &th->link);
-			k->rq_head--;
-		}
-		spin_unlock(&k->lock);
+	/* ensure preempted thread cuts the line,
+	 * possibly displacing the newest element in a full runqueue
+	 * into the overflow queue
+	 */
+	ACCESS_ONCE(k->q_ptrs->rq_head)++;
+	spin_lock(&k->lock);
+	th = k->rq[--k->rq_tail % RUNTIME_RQ_SIZE];
+	k->rq[k->rq_tail % RUNTIME_RQ_SIZE] = myth;
+	if (unlikely(k->rq_head - k->rq_tail > RUNTIME_RQ_SIZE)) {
+		list_add(&k->rq_overflow, &th->link);
+		k->rq_head--;
 	}
+	ACCESS_ONCE(k->q_ptrs->oldest_tsc) = myth->ready_tsc;
+	spin_unlock(&k->lock);
 
 	/* increment the RCU generation number (even - pretend in sched) */
 	store_release(&k->rcu_gen, k->rcu_gen + 1);
