@@ -1,0 +1,58 @@
+diff --git a/build/config b/build/config
+index a412ea8..73156cf 100644
+--- a/build/config
++++ b/build/config
+@@ -1,7 +1,7 @@
+ # build configuration options (set to y for "yes", n for "no")
+ 
+ # Enable Mellanox ConnectX-5 NIC Support
+-CONFIG_MLX5=n
++CONFIG_MLX5=y
+ # Enable Mellanox ConnectX-4 NIC Support
+ CONFIG_MLX4=n
+ # Enable SPDK NVMe support
+@@ -11,4 +11,4 @@ CONFIG_DEBUG=n
+ # Enable additional compiler optimizations (may reduce compatibility)
+ CONFIG_OPTIMIZE=n
+ # Allow runtimes to access Mellanox ConnectX-5 NICs directly (kernel bypass)
+-CONFIG_DIRECTPATH=n
++CONFIG_DIRECTPATH=y
+diff --git a/iokernel/dpdk.c b/iokernel/dpdk.c
+index 2d037d7..d871aad 100644
+--- a/iokernel/dpdk.c
++++ b/iokernel/dpdk.c
+@@ -230,7 +230,7 @@ int dpdk_init(void)
+ int dpdk_late_init(void)
+ {
+ 	/* initialize port */
+-	dp.port = 0;
++	dp.port = 1;
+ 	if (dpdk_port_init(dp.port, dp.rx_mbuf_pool) != 0) {
+ 		log_err("dpdk: cannot init port %"PRIu8 "\n", dp.port);
+ 		return -1;
+diff --git a/iokernel/ksched.h b/iokernel/ksched.h
+index 92fe7e9..8f12a1f 100644
+--- a/iokernel/ksched.h
++++ b/iokernel/ksched.h
+@@ -16,7 +16,7 @@
+ #include "../ksched/ksched.h"
+ 
+ // TODO: should not be hard-coded.
+-#define SOCKET0_IMC_BUS_NO (0x7F)
++#define SOCKET0_IMC_BUS_NO (0xFF)
+ #define SOCKET0_IMC_DEVICE_NO (0x14)
+ #define SOCKET0_CHANNEL0_IMC_FUNC_NO (0)
+ #define SOCKET0_CHANNEL1_IMC_FUNC_NO (1)
+diff --git a/runtime/net/directpath/mlx5/mlx5_init.c b/runtime/net/directpath/mlx5/mlx5_init.c
+index e344f3f..57e7b39 100644
+--- a/runtime/net/directpath/mlx5/mlx5_init.c
++++ b/runtime/net/directpath/mlx5/mlx5_init.c
+@@ -335,7 +335,7 @@ int mlx5_common_init(struct hardware_q **rxq_out, struct direct_txq **txq_out,
+ 
+ 	i = 0;
+ 	while ((ib_dev = dev_list[i])) {
+-		if (strncmp(ibv_get_device_name(ib_dev), "mlx5", 4) == 0)
++		if (strncmp(ibv_get_device_name(ib_dev), "mlx5_3", 6) == 0)
+ 			break;
+ 		i++;
+ 	}
