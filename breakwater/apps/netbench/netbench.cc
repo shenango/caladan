@@ -49,6 +49,11 @@ int threads;
 netaddr raddr, master;
 // the mean service time in us.
 double st;
+// service time distribution type
+// 1: exponential
+// 2: constant
+// 3: bimodal
+int st_type;
 
 std::ofstream json_out;
 std::ofstream csv_out;
@@ -61,7 +66,7 @@ constexpr uint64_t kWarmUpTime = 2000000;
 constexpr uint64_t kExperimentTime = 4000000;
 // RTT
 constexpr uint64_t kRTT = 10;
-constexpr int STRICT_SLO = 300;
+constexpr int STRICT_SLO = 200;
 
 std::vector<double> offered_loads;
 double offered_load;
@@ -168,6 +173,8 @@ class NetBarrier {
       BUG_ON(c->WriteFull(&st, sizeof(st)) <= 0);
       BUG_ON(c->WriteFull(&raddr, sizeof(raddr)) <= 0);
       BUG_ON(c->WriteFull(&total_agents, sizeof(total_agents)) <= 0);
+      BUG_ON(c->WriteFull(&st_type, sizeof(st_type)) <= 0);
+      BUG_ON(c->WriteFull(&offered_load, sizeof(offered_load)) <= 0);
       for (size_t j = 0; j < npara; j++) {
         rt::TcpConn *c = aggregator_->Accept();
         if (c == nullptr) panic("couldn't accept a connection");
@@ -185,6 +192,8 @@ class NetBarrier {
     BUG_ON(c->ReadFull(&st, sizeof(st)) <= 0);
     BUG_ON(c->ReadFull(&raddr, sizeof(raddr)) <= 0);
     BUG_ON(c->ReadFull(&total_agents, sizeof(total_agents)) <= 0);
+    BUG_ON(c->ReadFull(&st_type, sizeof(st_type)) <= 0);
+    BUG_ON(c->ReadFull(&offered_load, sizeof(offered_load)) <= 0);
     for (size_t i = 0; i < npara; i++) {
       auto c = rt::TcpConn::Dial({0, 0}, {master.ip, kBarrierPort + 1});
       BUG_ON(c == nullptr);
@@ -470,10 +479,28 @@ template <class Arrival, class Service>
 std::vector<work_unit> GenerateWork(Arrival a, Service s, double cur_us,
                                     double last_us) {
   std::vector<work_unit> w;
+  double st_us;
   while (true) {
     cur_us += a();
     if (cur_us > last_us) break;
-    w.emplace_back(work_unit{cur_us, s(), 0});
+    switch (st_type) {
+      case 1: // exponential
+	st_us = s();
+        break;
+      case 2: // constant
+	st_us = st;
+	break;
+      case 3: // bimodal
+	if (rand() % 10 < 2) {
+          st_us = st * 4.0;
+	} else {
+          st_us = st * 0.25;
+	}
+	break;
+      default:
+	panic("unknown service time distribution");
+    }
+    w.emplace_back(work_unit{cur_us, st_us, 0});
   }
 
   return w;
@@ -943,69 +970,7 @@ int StringToAddr(const char *str, uint32_t *addr) {
 }
 
 void calculate_rates() {
-  if (offered_load > 0.0) {
-    offered_loads.push_back(offered_load / (double)total_agents);
-  } else {
-    if (st == 1.0) {
-      offered_loads.push_back(200000 / (double)total_agents);
-      offered_loads.push_back(400000 / (double)total_agents);
-      offered_loads.push_back(600000 / (double)total_agents);
-      offered_loads.push_back(800000 / (double)total_agents);
-      offered_loads.push_back(1000000 / (double)total_agents);
-      offered_loads.push_back(2000000 / (double)total_agents);
-      offered_loads.push_back(3000000 / (double)total_agents);
-      offered_loads.push_back(4000000 / (double)total_agents);
-      offered_loads.push_back(5000000 / (double)total_agents);
-      offered_loads.push_back(6000000 / (double)total_agents);
-      offered_loads.push_back(7000000 / (double)total_agents);
-      offered_loads.push_back(8000000 / (double)total_agents);
-      offered_loads.push_back(9000000 / (double)total_agents);
-      offered_loads.push_back(10000000 / (double)total_agents);
-      offered_loads.push_back(12000000 / (double)total_agents);
-      offered_loads.push_back(16000000 / (double)total_agents);
-      offered_loads.push_back(20000000 / (double)total_agents);
-    } else if (st == 10.0) {
-      offered_loads.push_back(100000 / (double)total_agents);
-      offered_loads.push_back(200000 / (double)total_agents);
-      offered_loads.push_back(300000 / (double)total_agents);
-      offered_loads.push_back(400000 / (double)total_agents);
-      offered_loads.push_back(500000 / (double)total_agents);
-      offered_loads.push_back(600000 / (double)total_agents);
-      offered_loads.push_back(700000 / (double)total_agents);
-      offered_loads.push_back(800000 / (double)total_agents);
-      offered_loads.push_back(900000 / (double)total_agents);
-      offered_loads.push_back(1000000 / (double)total_agents);
-      offered_loads.push_back(1100000 / (double)total_agents);
-      offered_loads.push_back(1200000 / (double)total_agents);
-      offered_loads.push_back(1300000 / (double)total_agents);
-      offered_loads.push_back(2000000 / (double)total_agents);
-      offered_loads.push_back(3000000 / (double)total_agents);
-      offered_loads.push_back(4000000 / (double)total_agents);
-    } else if (st == 100.0) {
-      offered_loads.push_back(10000 / (double)total_agents);
-      offered_loads.push_back(20000 / (double)total_agents);
-      offered_loads.push_back(30000 / (double)total_agents);
-      offered_loads.push_back(40000 / (double)total_agents);
-      offered_loads.push_back(50000 / (double)total_agents);
-      offered_loads.push_back(60000 / (double)total_agents);
-      offered_loads.push_back(70000 / (double)total_agents);
-      offered_loads.push_back(80000 / (double)total_agents);
-      offered_loads.push_back(90000 / (double)total_agents);
-      offered_loads.push_back(100000 / (double)total_agents);
-      offered_loads.push_back(110000 / (double)total_agents);
-      offered_loads.push_back(120000 / (double)total_agents);
-      offered_loads.push_back(130000 / (double)total_agents);
-      offered_loads.push_back(140000 / (double)total_agents);
-      offered_loads.push_back(150000 / (double)total_agents);
-      offered_loads.push_back(160000 / (double)total_agents);
-      offered_loads.push_back(170000 / (double)total_agents);
-      offered_loads.push_back(180000 / (double)total_agents);
-      offered_loads.push_back(190000 / (double)total_agents);
-      offered_loads.push_back(200000 / (double)total_agents);
-      offered_loads.push_back(300000 / (double)total_agents);
-      offered_loads.push_back(400000 / (double)total_agents);
-    }
-  }
+  offered_loads.push_back(offered_load / (double)total_agents);
 }
 
 void AgentHandler(void *arg) {
@@ -1064,7 +1029,10 @@ int main(int argc, char *argv[]) {
   int ret;
 
   if (argc < 4) {
-    std::cerr << "usage: [breakwater/seda/dagor] [cfg_file] [cmd] ..." << std::endl;
+    std::cerr << "usage: [alg] [cfg_file] [cmd] ...\n"
+	      << "\talg: overload control algorithms (breakwater/seda/dagor)\n"
+	      << "\tcfg_file: Shenango configuration file\n"
+	      << "\tcmd: netbenchd command (server/client/agent)" << std::endl;
     return -EINVAL;
   }
 
@@ -1079,7 +1047,11 @@ int main(int argc, char *argv[]) {
     crpc_ops = &cdg_ops;
     srpc_ops = &sdg_ops;
   } else {
-    std::cerr << "usage: [breakwater/seda/dagor] [cfg_file] [cmd] ..." << std::endl;
+    std::cerr << "invalid algorithm: " << olc << std::endl;
+    std::cerr << "usage: [alg] [cfg_file] [cmd] ...\n"
+	      << "\talg: overload control algorithms (breakwater/seda/dagor)\n"
+	      << "\tcfg_file: Shenango configuration file\n"
+	      << "\tcmd: netbenchd command (server/client/agent)" << std::endl;
     return -EINVAL;
   }
 
@@ -1092,12 +1064,12 @@ int main(int argc, char *argv[]) {
     }
   } else if (cmd.compare("agent") == 0) {
     if (argc < 5 || StringToAddr(argv[4], &master.ip)) {
-      std::cerr << "usage: [breakwater/seda/dagor] [cfg_file] agent [master_ip] ..."
-	      << std::endl;
+    std::cerr << "usage: [alg] [cfg_file] agent [client_ip]\n"
+	      << "\talg: overload control algorithms (breakwater/seda/dagor)\n"
+	      << "\tcfg_file: Shenango configuration file\n"
+	      << "\tclient_ip: Client IP address" << std::endl;
       return -EINVAL;
     }
-
-    if (argc > 5) offered_load = std::stod(argv[5], nullptr);
 
     ret = runtime_init(argv[2], AgentHandler, NULL);
     if (ret) {
@@ -1106,13 +1078,25 @@ int main(int argc, char *argv[]) {
     }
   } else if (cmd.compare("client") != 0) {
     std::cerr << "invalid command: " << cmd << std::endl;
+    std::cerr << "usage: [alg] [cfg_file] [cmd] ...\n"
+	      << "\talg: overload control algorithms (breakwater/seda/dagor)\n"
+	      << "\tcfg_file: Shenango configuration file\n"
+	      << "\tcmd: netbenchd command (server/client/agent)" << std::endl;
     return -EINVAL;
   }
 
-  if (argc < 7) {
-    std::cerr << "usage: [breakwater/seda/dagor] [cfg_file] client [#threads] "
-		 "[remote_ip] [service_us] [npeers]"
-              << std::endl;
+  if (argc < 10) {
+    std::cerr << "usage: [alg] [cfg_file] client [nclients] "
+		 "[server_ip] [service_us] [service_dist] [nagents] "
+		 "[offered_load]\n"
+	      << "\talg: overload control algorithms (breakwater/seda/dagor)\n"
+	      << "\tcfg_file: Shenango configuration file\n"
+	      << "\tnclients: the number of client connections\n"
+	      << "\tserver_ip: server IP address\n"
+	      << "\tservice_us: average request processing time (in us)\n"
+	      << "\tservice_dist: service time distribution (exp/const/bimod)\n"
+	      << "\tnagents: the number of agents\n"
+	      << "\toffered_load: offered load in rps" << std::endl;
     return -EINVAL;
   }
 
@@ -1124,8 +1108,30 @@ int main(int argc, char *argv[]) {
 
   st = std::stod(argv[6], nullptr);
 
-  if (argc > 7) total_agents += std::stoi(argv[7], nullptr, 0);
-  if (argc > 8) offered_load = std::stod(argv[8], nullptr);
+  std::string st_dist = argv[7];
+  if (st_dist.compare("exp") == 0) {
+    st_type = 1;
+  } else if (st_dist.compare("const") == 0) {
+    st_type = 2;
+  } else if (st_dist.compare("bimod") == 0) {
+    st_type = 3;
+  } else {
+    std::cerr << "invalid service time distribution: " << st_dist << std::endl;
+    std::cerr << "usage: [alg] [cfg_file] client [nclients] "
+		 "[server_ip] [service_us] [service_dist] [nagents] "
+		 "[offered_load]\n"
+	      << "\talg: overload control algorithms (breakwater/seda/dagor)\n"
+	      << "\tcfg_file: Shenango configuration file\n"
+	      << "\tnclients: the number of client connections\n"
+	      << "\tserver_ip: server IP address\n"
+	      << "\tservice_us: average request processing time (in us)\n"
+	      << "\tservice_dist: service time distribution (exp/const/bimod)\n"
+	      << "\tnagents: the number of agents\n"
+	      << "\toffered_load: offered load in rps" << std::endl;
+  }
+
+  total_agents += std::stoi(argv[8], nullptr, 0);
+  offered_load = std::stod(argv[9], nullptr);
 
   ret = runtime_init(argv[2], ClientHandler, NULL);
   if (ret) {
