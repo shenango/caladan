@@ -16,24 +16,10 @@
 
 #include "util.h"
 #include "sd_proto.h"
-
-#define CSD_MAX_CLIENT_DELAY_US		10
-
-#define CSD_TB_INIT_RATE		2
-#define CSD_TB_MIN_RATE			1
-#define CSD_TB_MAX_TOKEN		4
+#include "sd_config.h"
 
 #define CSD_TRACK_FLOW			false
 #define CSD_TRACK_FLOW_ID		1
-
-#define SEDA_ALPHA			0.7
-#define SEDA_TARGET			220
-#define SEDA_TIMEOUT			1000
-#define SEDA_ERR_D			0.0
-#define SEDA_ERR_I			-0.5
-#define SEDA_ADJ_I			10.0
-#define SEDA_ADJ_D			1.1
-#define SEDA_CI				-0.1
 
 static void tb_refill_token(struct csd_session *s) {
 	double new_token;

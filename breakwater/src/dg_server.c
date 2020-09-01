@@ -21,17 +21,11 @@
 
 #include "util.h"
 #include "dg_proto.h"
+#include "dg_config.h"
 
 /* the maximum supported window size */
 #define SDG_MAX_WINDOW_EXP	6
 #define SDG_MAX_WINDOW		64
-
-#define DAGOR_OVERLOAD_THRESH	120	// in us
-#define DAGOR_PRIO_UPDATE_INT	1000	// in us
-#define DAGOR_PRIO_UPDATE_REQS	2000	// in # reqs
-#define DAGOR_PRIO_MONITOR	10
-#define DAGOR_ALPHA		0.95
-#define DAGOR_BETA		0.01
 
 #define SDG_TRACK_FLOW		false
 #define SDG_TRACK_FLOW_ID	1

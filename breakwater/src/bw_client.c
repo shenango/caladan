@@ -15,8 +15,8 @@
 
 #include "util.h"
 #include "bw_proto.h"
+#include "bw_config.h"
 
-#define CBW_MAX_CLIENT_DELAY_US		10
 
 #define CBW_TRACK_FLOW			false
 #define CBW_TRACK_FLOW_ID		1

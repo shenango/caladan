@@ -17,8 +17,7 @@
 
 #include "util.h"
 #include "dg_proto.h"
-
-#define CDG_BATCH_WAIT_US		0
+#include "dg_config.h"
 
 #define CDG_TRACK_FLOW			false
 #define CDG_TRACK_FLOW_ID		1

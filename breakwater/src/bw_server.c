@@ -20,6 +20,7 @@
 
 #include "util.h"
 #include "bw_proto.h"
+#include "bw_config.h"
 
 /* time-series output */
 #define SBW_TS_OUT		false
@@ -30,14 +31,6 @@
 /* the maximum supported window size */
 #define SBW_MAX_WINDOW_EXP	6
 #define SBW_MAX_WINDOW		64
-/* the minimum runtime queuing delay */
-#define SBW_MIN_DELAY_US	100
-#define SBW_DROP_THRESH		200
-/* round trip time in us */
-#define SBW_RTT_US		10
-
-#define SBW_AI			0.002
-#define SBW_MD			0.008
 
 #define SBW_TRACK_FLOW		false
 #define SBW_TRACK_FLOW_ID	1

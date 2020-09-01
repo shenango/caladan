@@ -38,8 +38,8 @@ execute_command([server_conn, client_conn] + agent_conns, cmd, True)
 
 # update RTT of Breakwater
 print("Setting up breakwater...")
-cmd = "cd {}/breakwater && sed -i \'s/#define SBW_RTT_US\t\t10/"\
-        "#define SBW_RTT_US\t\t{:d}/g\' src/bw_server.c"\
+cmd = "cd {}/breakwater && sed -i \'s/#define SBW_RTT_US\t\t\t10/"\
+        "#define SBW_RTT_US\t\t\t{:d}/g\' src/bw_config.h"\
         .format(SHENANGO_PATH, NET_RTT)
 execute_command([server_conn, client_conn] + agent_conns, cmd, True)
 

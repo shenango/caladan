@@ -100,8 +100,27 @@ execute_command([server_conn, client_conn] + agent_conns,
 sleep(1)
 
 # Remove temporary output
-cmd = "cd {} && rm output.csv output.json".format(SHENANGO_PATH)
+cmd = "cd {}/breakwater && rm output.csv output.json".format(SHENANGO_PATH)
 execute_command([client_conn], cmd, True)
+
+# Distribuing config files
+print("Distributing configs...")
+# - server
+cmd = "scp -P 22 -i {} -o StrictHostKeyChecking=no src/*_config.h"\
+        " {}@{}:~/{}/breakwater/src/"\
+        .format(KEY_LOCATION, USERNAME, SERVER, SHENANGO_PATH)
+os.system(cmd)
+# - client
+cmd = "scp -P 22 -i {} -o StrictHostKeyChecking=no src/*_config.h"\
+        " {}@{}:~/{}/breakwater/src/"\
+        .format(KEY_LOCATION, USERNAME, CLIENT, SHENANGO_PATH)
+os.system(cmd)
+# - agents
+for agent in AGENTS:
+    cmd = "scp -P 22 -i {} -o StrictHostKeyChecking=no src/*_config.h"\
+            " {}@{}:~/{}/breakwater/src/"\
+            .format(KEY_LOCATION, USERNAME, agent, SHENANGO_PATH)
+    os.system(cmd)
 
 # Generating config files
 print("Generating config files...")
