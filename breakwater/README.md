@@ -7,9 +7,9 @@ RPC layer between network transport and application.
 ## Supported platform
 Breakwater requires an Intel server with many cores equipped
 with an Intel NIC based on 82599 chip or Mellanox ConnectX-4
-or ConnectX-5 NIC. For the best performance, Breakwater requires
-a low latency switch connecting server and client machines with
-Mellanox NIC.
+or ConnectX-5 NIC. For the best performance,
+a low latency switch connecting server and client machines and
+Mellanox NICs are required.
 
 ## Running Breakwater
 1. Clone this repository to each machine.
@@ -23,8 +23,8 @@ shenango$ ./build/init_submodules.sh
 ```
 
 3. Modify `build/config` according to the experiment environment.
-We require `CONFIG_DIRECTPATH=y` which is only supported for
-Mellanox ConnectX-4 and ConnectX-5 NICs for the best performance.
+For the best performance, set `CONFIG_DIRECTPATH=y`, but please
+note that directpath is supported with Mellanox NICs.
 
 4. If the machine is equipped with Mellanox ConnectX-4 NIC,
 apply ConnectX-4 patch.
