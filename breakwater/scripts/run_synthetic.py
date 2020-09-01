@@ -209,13 +209,13 @@ os.system(cmd)
 
 output_prefix = "{}_{}_{:d}_nconn_{:d}".format(OVERLOAD_ALG, ST_DIST, ST_AVG, NUM_CONNS)
 # Print Headers
-header = "num_clients, offered_load, throughput, goodput, cpu, min, mean, p50, p90, p99, p999, p9999"\
-        ", max, p1_win, mean_win, p99_win, p1_q, mean_q, p99_q, mean_stime, p99_stime, server:rx_pps"\
-        ", server:tx_pps, server:rx_bps, server:tx_bps, server:rx_drops_pps, server:rx_ooo_pps"\
-        ", server:winu_rx_pps, server:winu_tx_pps, server:win_tx_wps, server:req_rx_pps"\
-        ", server:req_drop_rate, server:resp_tx_pps, client:min_tput, client:max_tput"\
-        ", client:winu_rx_pps, client:winu_tx_pps, client:resp_rx_pps, client:req_tx_pps"\
-        ", client:win_expired_wps, client:req_dropped_rps"
+header = "num_clients,offered_load,throughput,goodput,cpu,min,mean,p50,p90,p99,p999,p9999"\
+        ",max, p1_win,mean_win,p99_win,p1_q,mean_q,p99_q,mean_stime,p99_stime,server:rx_pps"\
+        ",server:tx_pps,server:rx_bps,server:tx_bps,server:rx_drops_pps, server:rx_ooo_pps"\
+        ",server:winu_rx_pps,server:winu_tx_pps,server:win_tx_wps,server:req_rx_pps"\
+        ",server:req_drop_rate,server:resp_tx_pps,client:min_tput,client:max_tput"\
+        ",client:winu_rx_pps,client:resp_rx_pps,client:req_tx_pps"\
+        ",client:win_expired_wps,client:req_dropped_rps"
 cmd = "echo \"{}\" > outputs/{}.csv".format(header, output_prefix)
 os.system(cmd)
 
