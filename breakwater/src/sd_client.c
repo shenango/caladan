@@ -17,7 +17,7 @@
 #include "util.h"
 #include "sd_proto.h"
 
-#define CSD_MAX_CLIENT_DELAY_US		40
+#define CSD_MAX_CLIENT_DELAY_US		10
 
 #define CSD_TB_INIT_RATE		2
 #define CSD_TB_MIN_RATE			1
