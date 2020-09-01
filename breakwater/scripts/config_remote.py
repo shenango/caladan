@@ -3,16 +3,16 @@
 ###
 
 # Public domain or IP of server
-SERVER = "hp128.utah.cloudlab.us"
+SERVER = "server.breakwater.com"
 # Public domain or IP of client
-CLIENT = "hp131.utah.cloudlab.us"
+CLIENT = "client.breakwater.com"
 # Public domain or IP of agents
-AGENTS = ["hp130.utah.cloudlab.us", "hp160.utah.cloudlab.us", "hp145.utah.cloudlab.us"]
+AGENTS = ["agent1.breakwater.com", "agent2.breakwater.com"]
 
 # Username and SSH credential location to access
 # the server, client, and agents via public IP
-USERNAME = "inhocho"
-KEY_LOCATION = "/users/inhocho/inhocho.pem"
+USERNAME = "breakwater"
+KEY_LOCATION = "~/xxx.pem"
 
 # Relative Shenango path from home directory
 SHENANGO_PATH = "shenango"
