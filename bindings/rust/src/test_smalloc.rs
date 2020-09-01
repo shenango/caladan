@@ -5,7 +5,7 @@ use std::os::raw::c_void;
 use std::ptr;
 
 const SAMPLES: u32 = 200000;
-const N: usize = (1 << 10);
+const N: usize = 1 << 10;
 const SIZE: usize = 256;
 
 fn malloc_bench(samples: u32, ptrs: &mut [*mut c_void]) {
