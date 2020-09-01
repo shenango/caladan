@@ -54,6 +54,8 @@ double st;
 // 2: constant
 // 3: bimodal
 int st_type;
+// RPC service level objective (in us)
+int slo;
 
 std::ofstream json_out;
 std::ofstream csv_out;
@@ -66,7 +68,6 @@ constexpr uint64_t kWarmUpTime = 2000000;
 constexpr uint64_t kExperimentTime = 4000000;
 // RTT
 constexpr uint64_t kRTT = 10;
-constexpr int STRICT_SLO = 200;
 
 std::vector<double> offered_loads;
 double offered_load;
@@ -174,6 +175,7 @@ class NetBarrier {
       BUG_ON(c->WriteFull(&raddr, sizeof(raddr)) <= 0);
       BUG_ON(c->WriteFull(&total_agents, sizeof(total_agents)) <= 0);
       BUG_ON(c->WriteFull(&st_type, sizeof(st_type)) <= 0);
+      BUG_ON(c->WriteFull(&slo, sizeof(slo)) <= 0);
       BUG_ON(c->WriteFull(&offered_load, sizeof(offered_load)) <= 0);
       for (size_t j = 0; j < npara; j++) {
         rt::TcpConn *c = aggregator_->Accept();
@@ -193,6 +195,7 @@ class NetBarrier {
     BUG_ON(c->ReadFull(&raddr, sizeof(raddr)) <= 0);
     BUG_ON(c->ReadFull(&total_agents, sizeof(total_agents)) <= 0);
     BUG_ON(c->ReadFull(&st_type, sizeof(st_type)) <= 0);
+    BUG_ON(c->ReadFull(&slo, sizeof(slo)) <= 0);
     BUG_ON(c->ReadFull(&offered_load, sizeof(offered_load)) <= 0);
     for (size_t i = 0; i < npara; i++) {
       auto c = rt::TcpConn::Dial({0, 0}, {master.ip, kBarrierPort + 1});
@@ -674,7 +677,7 @@ std::vector<work_unit> RunExperiment(
                            }),
             v.end());
     slo_success = std::count_if(v.begin(), v.end(), [](const work_unit &s) {
-      return s.duration_us < STRICT_SLO;
+      return s.duration_us < slo;
     });
     throughput = static_cast<double>(v.size()) / elapsed_ * 1000000;
 
@@ -995,20 +998,11 @@ void ClientHandler(void *arg) {
 
   calculate_rates();
 
-  std::string json_fname = std::string("outputs/dist_exp_st_") +
-                           std::to_string((int)st) + std::string("_nconn_") +
-                           std::to_string((int)(threads * total_agents)) +
-                           std::string(".json");
-  std::string csv_fname = std::string("outputs/dist_exp_st_") +
-                          std::to_string((int)st) + std::string("_nconn_") +
-                          std::to_string((int)(threads * total_agents)) +
-                          std::string(".csv");
-  json_out.open(json_fname);
-  csv_out.open(csv_fname);
+  json_out.open("output.json");
+  csv_out.open("output.csv", std::fstream::out | std::fstream::app);
   json_out << "[";
 
   /* Print Header */
-  PrintHeader(csv_out);
   PrintHeader(std::cout);
 
   for (double i : offered_loads) {
@@ -1085,9 +1079,9 @@ int main(int argc, char *argv[]) {
     return -EINVAL;
   }
 
-  if (argc < 10) {
+  if (argc < 11) {
     std::cerr << "usage: [alg] [cfg_file] client [nclients] "
-		 "[server_ip] [service_us] [service_dist] [nagents] "
+		 "[server_ip] [service_us] [service_dist] [slo] [nagents] "
 		 "[offered_load]\n"
 	      << "\talg: overload control algorithms (breakwater/seda/dagor)\n"
 	      << "\tcfg_file: Shenango configuration file\n"
@@ -1095,6 +1089,7 @@ int main(int argc, char *argv[]) {
 	      << "\tserver_ip: server IP address\n"
 	      << "\tservice_us: average request processing time (in us)\n"
 	      << "\tservice_dist: service time distribution (exp/const/bimod)\n"
+	      << "\tslo: RPC service level objective (in us)\n"
 	      << "\tnagents: the number of agents\n"
 	      << "\toffered_load: offered load in rps" << std::endl;
     return -EINVAL;
@@ -1118,7 +1113,7 @@ int main(int argc, char *argv[]) {
   } else {
     std::cerr << "invalid service time distribution: " << st_dist << std::endl;
     std::cerr << "usage: [alg] [cfg_file] client [nclients] "
-		 "[server_ip] [service_us] [service_dist] [nagents] "
+		 "[server_ip] [service_us] [service_dist] [slo] [nagents] "
 		 "[offered_load]\n"
 	      << "\talg: overload control algorithms (breakwater/seda/dagor)\n"
 	      << "\tcfg_file: Shenango configuration file\n"
@@ -1126,12 +1121,14 @@ int main(int argc, char *argv[]) {
 	      << "\tserver_ip: server IP address\n"
 	      << "\tservice_us: average request processing time (in us)\n"
 	      << "\tservice_dist: service time distribution (exp/const/bimod)\n"
+	      << "\tslo: RPC service level objective (in us)\n"
 	      << "\tnagents: the number of agents\n"
 	      << "\toffered_load: offered load in rps" << std::endl;
   }
 
-  total_agents += std::stoi(argv[8], nullptr, 0);
-  offered_load = std::stod(argv[9], nullptr);
+  slo = std::stoi(argv[8], nullptr, 0);
+  total_agents += std::stoi(argv[9], nullptr, 0);
+  offered_load = std::stod(argv[10], nullptr);
 
   ret = runtime_init(argv[2], ClientHandler, NULL);
   if (ret) {
