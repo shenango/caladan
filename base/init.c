@@ -69,8 +69,11 @@ static int init_internal(void)
 		return ret;
 
 	ret = page_init();
-	if (ret)
+	if (ret) {
+		log_err("Could not intialize memory. Please ensure that hugepages are "
+			    "enabled/available.");
 		return ret;
+	}
 
 	return slab_init();
 }

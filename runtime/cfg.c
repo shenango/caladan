@@ -372,8 +372,10 @@ int cfg_load(const char *path)
 	log_info("loading configuration from '%s'", path);
 
 	f = fopen(path, "r");
-	if (!f)
+	if (!f) {
+		log_err("Could not find configuation file %s (%s)", path, strerror(errno));
 		return -errno;
+	}
 
 	while (fgets(buf, sizeof(buf), f)) {
 		if (buf[0] == '#' || buf[0] == '\n') {

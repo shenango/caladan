@@ -2,11 +2,14 @@
  * ksched.c - an interface to the ksched kernel module
  */
 
+#include <string.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
 #include <fcntl.h>
 #include <unistd.h>
+
+#include <base/log.h>
 
 #include "ksched.h"
 
@@ -37,9 +40,13 @@ int ksched_init(void)
 
 	/* first open the file descriptor */
 	ksched_fd = open("/dev/ksched", O_RDWR);
-	if (ksched_fd < 0)
+	if (ksched_fd < 0) {
+		log_err("Could not find ksched kernel module (%s). Please ensure that "
+			    "ksched is compiled and inserted (see README for more details)",
+			    strerror(errno));
 		return -errno;
-	
+	}
+
 	/* then map the shared memory region with the kernel */
 	ksched_addr = mmap(NULL, sizeof(struct ksched_shm_cpu) * NCPU,
 		    PROT_READ | PROT_WRITE, MAP_SHARED, ksched_fd, 0);

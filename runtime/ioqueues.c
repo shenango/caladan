@@ -188,6 +188,7 @@ int ioqueues_init(void)
 			PGSIZE_2MB);
 	if (netcfg.rx_region.base == MAP_FAILED) {
 		log_err("control_setup: failed to map ingress region");
+		log_err("Please make sure IOKernel is running");
 		return -1;
 	}
 	netcfg.rx_region.len = INGRESS_MBUF_SHM_SIZE;
