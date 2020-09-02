@@ -41,9 +41,9 @@ static void ias_ht_punish(struct ias_data *sd, unsigned int core)
 	    bitmap_test(ias_ht_punished_cores, sib))
 		return;
 
-	/* don't preempt an LC task if we can't add back a core, or queues have built up */
+	/* don't preempt an LC task if we can't add back a core */
 	sib_sd = cores[sib];
-	if (sib_sd && sib_sd->is_lc && (sib_sd->current_qdelay_us >= sib_sd->ht_punish_us || !ias_can_add_kthread(sib_sd)))
+	if (sib_sd && sib_sd->is_lc && !ias_can_add_kthread(sib_sd, true))
 		return;
 
 	/* idle the core, but mark it as in use by the process */

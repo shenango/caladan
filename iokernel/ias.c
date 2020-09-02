@@ -195,9 +195,11 @@ int ias_idle_on_core(unsigned int core)
 {
 	int ret;
 
-	ret = sched_idle_on_core(0, core);
-	if (ret)
-		return -EBUSY;
+	if (!bitmap_test(ias_idle_cores, core)) {
+		ret = sched_idle_on_core(0, core);
+		if (ret)
+			return -EBUSY;
+	}
 
 	ias_cleanup_core(core);
 	cores[core] = NULL;
@@ -304,11 +306,13 @@ static unsigned int ias_choose_core(struct ias_data *sd)
  *
  * Returns true if a core can be added.
  */
-bool ias_can_add_kthread(struct ias_data *sd)
+bool ias_can_add_kthread(struct ias_data *sd, bool new_phys_core)
 {
 	unsigned int core, tmp;
 
 	sched_for_each_allowed_core(core, tmp) {
+		if (new_phys_core && cores[sched_siblings[core]] == sd)
+			continue;
 		if (ias_can_preempt_core(sd, core))
 			return true;
 	}

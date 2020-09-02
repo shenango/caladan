@@ -69,7 +69,7 @@ extern uint64_t now_us;
 
 extern int ias_idle_placeholder_on_core(struct ias_data *sd, unsigned int core);
 extern int ias_idle_on_core(unsigned int core);
-extern bool ias_can_add_kthread(struct ias_data *sd);
+extern bool ias_can_add_kthread(struct ias_data *sd, bool new_phys_core);
 extern int ias_add_kthread(struct ias_data *sd);
 extern int ias_add_kthread_on_core(unsigned int core);
 
