@@ -24,7 +24,7 @@ class RpcClient {
   static RpcClient *Dial(netaddr raddr, int id);
 
   // Sends an RPC request.
-  ssize_t Send(const void *buf, size_t len);
+  ssize_t Send(const void *buf, size_t len, int hash);
 
   // Receives an RPC request.
   ssize_t Recv(void *buf, size_t len);

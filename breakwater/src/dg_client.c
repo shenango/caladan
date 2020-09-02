@@ -66,12 +66,12 @@ static ssize_t crpc_send_request_vector(struct cdg_session *s)
 }
 
 static bool crpc_enqueue_one(struct cdg_session *s,
-			     const void *buf, size_t len)
+			     const void *buf, size_t len, int hash)
 {
 	int pos;
 	struct cdg_ctx *c;
 	uint64_t now = microtime();
-	int prio = rand() % DG_MAX_PRIO;
+	int prio = hash % DG_MAX_PRIO;
 
 	assert_mutex_held(&s->lock);
 
@@ -96,7 +96,7 @@ static bool crpc_enqueue_one(struct cdg_session *s,
 }
 
 ssize_t cdg_send_one(struct crpc_session *s_,
-		      const void *buf, size_t len)
+		      const void *buf, size_t len, int hash)
 {
 	struct cdg_session *s = (struct cdg_session *)s_;
 
@@ -107,7 +107,7 @@ ssize_t cdg_send_one(struct crpc_session *s_,
 	mutex_lock(&s->lock);
 
 	/* hot path, just send */
-	crpc_enqueue_one(s, buf, len);
+	crpc_enqueue_one(s, buf, len, hash);
 	mutex_unlock(&s->lock);
 
 	return len;

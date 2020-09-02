@@ -457,13 +457,13 @@ static void dagor_prio_update(void *arg)
 
 	while (true) {
 		timer_sleep(DAGOR_PRIO_MONITOR);
-		us = runtime_queue_us();
-
-		dagor_delay = (int)(0.7 * dagor_delay + 0.3 * us);
 
 		if (microtime() - last_prio_update < DAGOR_PRIO_UPDATE_INT ||
 		    atomic_read(&dagor_num_reqs) < DAGOR_PRIO_UPDATE_REQS)
 			continue;
+
+		us = runtime_queue_us();
+		dagor_delay = (int)(0.8 * dagor_delay + 0.2 * us);
 
 		if (dagor_delay >= DAGOR_OVERLOAD_THRESH)
 			dagor_prio_ = DAGOR_ALPHA * dagor_prio_;

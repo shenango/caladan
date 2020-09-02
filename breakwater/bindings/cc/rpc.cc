@@ -23,8 +23,8 @@ RpcClient *RpcClient::Dial(netaddr raddr, int id) {
   return new RpcClient(s);
 }
 
-ssize_t RpcClient::Send(const void *buf, size_t len) {
-  return crpc_ops->crpc_send_one(s_, buf, len);
+ssize_t RpcClient::Send(const void *buf, size_t len, int hash) {
+  return crpc_ops->crpc_send_one(s_, buf, len, hash);
 }
 
 ssize_t RpcClient::Recv(void *buf, size_t len) {

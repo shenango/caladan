@@ -148,6 +148,7 @@ struct cstat {
 
 struct work_unit {
   double start_us, work_us, duration_us;
+  int hash;
   uint64_t window;
   uint64_t tsc;
   uint32_t cpu;
@@ -503,7 +504,7 @@ std::vector<work_unit> GenerateWork(Arrival a, Service s, double cur_us,
       default:
 	panic("unknown service time distribution");
     }
-    w.emplace_back(work_unit{cur_us, st_us, 0});
+    w.emplace_back(work_unit{cur_us, st_us, 0, rand()});
   }
 
   return w;
@@ -565,7 +566,7 @@ std::vector<work_unit> ClientWorker(
     // Send an RPC request.
     p.work_iterations = hton64(w[i].work_us * kIterationsPerUS);
     p.index = hton64(i);
-    ssize_t ret = c->Send(&p, sizeof(p));
+    ssize_t ret = c->Send(&p, sizeof(p), w[i].hash);
     if (ret == -ENOBUFS) continue;
     if (ret != static_cast<ssize_t>(sizeof(p)))
       panic("write failed, ret = %ld", ret);

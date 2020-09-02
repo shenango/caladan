@@ -175,7 +175,7 @@ static bool crpc_enqueue_one(struct csd_session *s,
 }
 
 ssize_t csd_send_one(struct crpc_session *s_,
-		      const void *buf, size_t len)
+		      const void *buf, size_t len, int hash)
 {
 	struct csd_session *s = (struct csd_session *)s_;
 	ssize_t ret;

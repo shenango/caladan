@@ -242,7 +242,7 @@ static bool crpc_enqueue_one(struct cbw_session *s,
 }
 
 ssize_t cbw_send_one(struct crpc_session *s_,
-		      const void *buf, size_t len)
+		      const void *buf, size_t len, int hash)
 {
 	struct cbw_session *s = (struct cbw_session *)s_;
 	ssize_t ret;

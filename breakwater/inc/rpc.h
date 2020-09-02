@@ -79,7 +79,7 @@ struct crpc_ops {
 	 * errors (< 0).
 	 */
 	ssize_t (*crpc_send_one)(struct crpc_session *s,
-				 const void *buf, size_t len);
+				 const void *buf, size_t len, int hash);
 	/**
 	 * crpc_recv_one - receive one RPC request
 	 * @s: the RPC session to receive from
