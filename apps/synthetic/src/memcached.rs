@@ -212,7 +212,7 @@ impl LoadgenProtocol for MemcachedProtocol {
         write_key(buf, key, self.key_size);
     }
 
-    fn read_response(&self, mut sock: &Connection, scratch: &mut [u8]) -> io::Result<usize> {
+    fn read_response(&self, mut sock: &Connection, scratch: &mut [u8]) -> io::Result<(usize, u64)> {
         let hdr = match self.tport {
             Transport::Udp => {
                 let len = sock.read(&mut scratch[..32])?;
@@ -241,6 +241,6 @@ impl LoadgenProtocol for MemcachedProtocol {
                 format!("Not NoError {}", hdr.vbucket_id_or_status),
             ));
         }
-        Ok(hdr.opaque as usize)
+        Ok((hdr.opaque as usize, hdr.cas))
     }
 }

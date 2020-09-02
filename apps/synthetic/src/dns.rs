@@ -90,7 +90,7 @@ impl LoadgenProtocol for DnsProtocol {
             .unwrap();
     }
 
-    fn read_response(&self, mut sock: &Connection, scratch: &mut [u8]) -> io::Result<usize> {
+    fn read_response(&self, mut sock: &Connection, scratch: &mut [u8]) -> io::Result<(usize, u64)> {
         let len = sock.read(&mut scratch[..])?;
         if len == 0 {
             return Err(Error::new(ErrorKind::UnexpectedEof, "eof"));
@@ -102,6 +102,6 @@ impl LoadgenProtocol for DnsProtocol {
 
         let pos = Header::size();
         let end = pos + scratch[pos] as usize + 1;
-        Ok(pull_usize(&scratch[pos + 1..end]))
+        Ok((pull_usize(&scratch[pos + 1..end]), 0))
     }
 }

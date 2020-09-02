@@ -28,8 +28,9 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use clap::{App, Arg};
 use itertools::Itertools;
+use mersenne_twister::MersenneTwister;
 use rand::distributions::{Exp, IndependentSample};
-use rand::Rng;
+use rand::{Rng, SeedableRng};
 use shenango::udp::UdpSpawner;
 
 mod backend;
@@ -45,19 +46,8 @@ pub struct Packet {
     target_start: Duration,
     actual_start: Option<Duration>,
     completion_time_ns: AtomicU64,
+    completion_server_tsc: Option<u64>,
     completion_time: Option<Duration>,
-}
-
-impl PartialOrd for Packet {
-    fn partial_cmp(&self, other: &Packet) -> Option<std::cmp::Ordering> {
-        self.target_start.partial_cmp(&other.target_start)
-    }
-}
-
-impl PartialEq for Packet {
-    fn eq(&self, other: &Packet) -> bool {
-        self.target_start == other.target_start
-    }
 }
 
 mod fakework;
@@ -122,7 +112,7 @@ pub enum Transport {
 
 trait LoadgenProtocol: Send + Sync {
     fn gen_req(&self, i: usize, p: &Packet, buf: &mut Vec<u8>);
-    fn read_response(&self, sock: &Connection, scratch: &mut [u8]) -> io::Result<usize>;
+    fn read_response(&self, sock: &Connection, scratch: &mut [u8]) -> io::Result<(usize, u64)>;
 }
 
 arg_enum! {
@@ -250,7 +240,7 @@ fn run_memcached_preload(
                 });
                 let socket = sock1.clone();
                 backend.spawn_thread(move || {
-                    backend.sleep(Duration::from_secs(20));
+                    backend.sleep(Duration::from_secs(520));
                     if Arc::strong_count(&socket) > 1 {
                         println!("Timing out socket");
                         socket.shutdown();
@@ -287,7 +277,38 @@ struct RequestSchedule {
     service: Distribution,
     output: OutputMode,
     runtime: Duration,
+    rps: usize,
     discard_pct: usize,
+}
+
+struct TraceResult {
+    actual_start: Option<Duration>,
+    target_start: Duration,
+    completion_time: Option<Duration>,
+    server_tsc: u64,
+}
+
+impl PartialOrd for TraceResult {
+    fn partial_cmp(&self, other: &TraceResult) -> Option<std::cmp::Ordering> {
+        self.server_tsc.partial_cmp(&other.server_tsc)
+    }
+}
+
+impl PartialEq for TraceResult {
+    fn eq(&self, other: &TraceResult) -> bool {
+        self.server_tsc == other.server_tsc
+    }
+}
+
+struct ScheduleResult {
+    packet_count: usize,
+    drop_count: usize,
+    never_sent_count: usize,
+    first_send: Option<Duration>,
+    last_send: Option<Duration>,
+    latencies: BTreeMap<u64, usize>,
+    first_tsc: Option<u64>,
+    trace: Option<Vec<TraceResult>>,
 }
 
 fn gen_classic_packet_schedule(
@@ -297,6 +318,7 @@ fn gen_classic_packet_schedule(
     distribution: Distribution,
     ramp_up_seconds: usize,
     nthreads: usize,
+    discard_pct: usize,
 ) -> Vec<RequestSchedule> {
     let mut sched: Vec<RequestSchedule> = Vec::new();
 
@@ -304,22 +326,29 @@ fn gen_classic_packet_schedule(
     for t in 1..(10 * ramp_up_seconds) {
         let rate = t * packets_per_second / (ramp_up_seconds * 10);
 
+        if rate == 0 {
+            continue;
+        }
+
         sched.push(RequestSchedule {
             arrival: Distribution::Exponential((nthreads * 1000_000_000 / rate) as f64),
             service: distribution,
             output: OutputMode::Silent,
             runtime: Duration::from_millis(100),
+            rps: rate,
             discard_pct: 0,
         });
     }
 
     let ns_per_packet = nthreads * 1000_000_000 / packets_per_second;
+
     sched.push(RequestSchedule {
         arrival: Distribution::Exponential(ns_per_packet as f64),
         service: distribution,
         output: output,
         runtime: runtime,
-        discard_pct: 10,
+        rps: packets_per_second,
+        discard_pct: discard_pct,
     });
 
     sched
@@ -329,138 +358,355 @@ fn gen_loadshift_experiment(
     spec: &str,
     service: Distribution,
     nthreads: usize,
+    output: OutputMode,
 ) -> Vec<RequestSchedule> {
     spec.split(",")
         .map(|step_spec| {
             let s: Vec<&str> = step_spec.split(":").collect();
-            assert!(s.len() == 2);
-            let ns_per_packet = nthreads as u64 * 1000_000_000 / s[0].parse::<u64>().unwrap();
+            assert!(s.len() >= 2 && s.len() <= 3);
+            let packets_per_second: u64 = s[0].parse().unwrap();
+            let ns_per_packet = nthreads as u64 * 1000_000_000 / packets_per_second;
             let micros = s[1].parse().unwrap();
+            let output = match s.len() {
+                2 => output,
+                3 => OutputMode::Silent,
+                _ => unreachable!(),
+            };
             RequestSchedule {
                 arrival: Distribution::Exponential(ns_per_packet as f64),
                 service: service,
-                output: OutputMode::Trace,
+                output: output,
                 runtime: Duration::from_micros(micros),
+                rps: packets_per_second as usize,
                 discard_pct: 0,
             }
         })
         .collect()
 }
 
-fn process_result(sched: &RequestSchedule, packets: &mut [Packet], wct_start: SystemTime) -> bool {
-    if packets.len() == 0 {
-        return true;
-    }
-    let start_unix = wct_start + packets[0].target_start;
+fn process_result_final(
+    sched: &RequestSchedule,
+    results: Vec<ScheduleResult>,
+    wct_start: SystemTime,
+    sched_start: Duration,
+) -> bool {
+    let mut buckets: BTreeMap<u64, usize> = BTreeMap::new();
 
-    // Discard the first X% of the packets.
-    let plen = packets.len();
-    let packets = &mut packets[plen * sched.discard_pct / 100..];
-
-    let never_sent = packets.iter().filter(|p| p.actual_start.is_none()).count();
-    let dropped = packets
+    let packet_count = results.iter().map(|res| res.packet_count).sum::<usize>();
+    let drop_count = results.iter().map(|res| res.drop_count).sum::<usize>();
+    let never_sent_count = results
         .iter()
-        .filter(|p| p.completion_time.is_none())
-        .count()
-        - never_sent;
-
-    if packets.len() - dropped - never_sent <= 1 {
-        match sched.output {
-            OutputMode::Silent => {}
-            _ => {
-                let first_send = packets.iter().map(|p| p.target_start).min().unwrap();
-                let last_send = packets.iter().map(|p| p.target_start).max().unwrap();
-                println!(
-                    "{}, {}, 0, {}, {}, {}",
-                    sched.service.name(),
-                    packets.len() as u64 * 1000_000_000 / duration_to_ns(last_send - first_send),
-                    dropped,
-                    never_sent,
-                    start_unix.duration_since(UNIX_EPOCH).unwrap().as_secs()
-                );
-            }
-        }
-        return false;
-    }
+        .map(|res| res.never_sent_count)
+        .sum::<usize>();
+    let first_send = results.iter().filter_map(|res| res.first_send).min();
+    let last_send = results.iter().filter_map(|res| res.last_send).max();
+    let first_tsc = results.iter().filter_map(|res| res.first_tsc).min();
+    let start_unix = wct_start + sched_start;
 
     if let OutputMode::Silent = sched.output {
         return true;
     }
 
-    let first_send = packets.iter().filter_map(|p| p.actual_start).min().unwrap();
-    let last_send = packets.iter().filter_map(|p| p.actual_start).max().unwrap();
+    if packet_count <= 1 {
+        println!(
+            "{}, {}, 0, {}, {}, {}",
+            sched.service.name(),
+            sched.rps,
+            drop_count,
+            never_sent_count,
+            start_unix.duration_since(UNIX_EPOCH).unwrap().as_secs()
+        );
+        return false;
+    }
 
-    let mut latencies: Vec<_> = packets
-        .iter()
-        .filter_map(|p| match (p.actual_start, p.completion_time) {
-            (Some(ref start), Some(ref end)) => Some(*end - *start),
-            _ => None,
-        })
-        .collect();
-    latencies.sort();
+    results.iter().for_each(|res| {
+        for (k, v) in &res.latencies {
+            *buckets.entry(*k).or_insert(0) += v;
+        }
+    });
 
     let percentile = |p| {
-        let idx = ((packets.len() - never_sent) as f32 * p / 100.0) as usize;
-        if idx >= latencies.len() {
+        let idx = ((packet_count + drop_count) as f32 * p / 100.0) as usize;
+        if idx >= packet_count {
             return INFINITY;
         }
-        duration_to_ns(latencies[idx]) as f32 / 1000.0
+
+        let mut seen = 0;
+        for k in buckets.keys() {
+            seen += buckets[k];
+            if seen >= idx {
+                return *k as f32;
+            }
+        }
+        return INFINITY;
     };
 
+    let last_send = last_send.unwrap();
+    let first_send = first_send.unwrap();
+    let first_tsc = first_tsc.unwrap();
+
     println!(
-        "{}, {}, {}, {}, {}, {:.1}, {:.1}, {:.1}, {:.1}, {:.1}, {}",
+        "{}, {}, {}, {}, {}, {:.1}, {:.1}, {:.1}, {:.1}, {:.1}, {}, {}",
         sched.service.name(),
-        (packets.len() - never_sent) as u64 * 1000_000_000 / duration_to_ns(last_send - first_send),
-        latencies.len() as u64 * 1000_000_000 / duration_to_ns(last_send - first_send),
-        dropped,
-        never_sent,
+        (packet_count + drop_count) as u64 * 1000_000_000 / duration_to_ns(last_send - first_send),
+        packet_count as u64 * 1000_000_000 / duration_to_ns(last_send - first_send),
+        drop_count,
+        never_sent_count,
         percentile(50.0),
         percentile(90.0),
         percentile(99.0),
         percentile(99.9),
         percentile(99.99),
-        start_unix.duration_since(UNIX_EPOCH).unwrap().as_secs()
+        start_unix.duration_since(UNIX_EPOCH).unwrap().as_secs(),
+        first_tsc
     );
 
-    if let OutputMode::Trace = sched.output {
-        packets.sort_by_key(|p| p.actual_start.unwrap_or(p.target_start));
-        print!("Trace: ");
-        for p in packets {
-            if let Some(completion_time) = p.completion_time {
-                let actual_start = p.actual_start.unwrap();
-                print!(
-                    "{}:{}:{} ",
-                    duration_to_ns(actual_start),
-                    duration_to_ns(actual_start) as i64 - duration_to_ns(p.target_start) as i64,
-                    duration_to_ns(completion_time - actual_start)
-                )
-            } else if p.actual_start.is_some() {
-                let actual_start = p.actual_start.unwrap();
-                print!(
-                    "{}:{}:-1 ",
-                    duration_to_ns(actual_start),
-                    duration_to_ns(actual_start) as i64 - duration_to_ns(p.target_start) as i64,
-                )
-            } else {
-                print!("{}:-1:-1 ", duration_to_ns(p.target_start))
-            }
-        }
-        println!("");
-    }
-
     if let OutputMode::Buckets = sched.output {
-        let mut buckets = BTreeMap::new();
-
-        for l in latencies {
-            *buckets.entry(duration_to_ns(l) / 1000).or_insert(0) += 1;
-        }
         print!("Latencies: ");
         for k in buckets.keys() {
             print!("{}:{} ", k, buckets[k]);
         }
         println!("");
     }
+
+    if let OutputMode::Trace = sched.output {
+        print!("Trace: ");
+        for p in results.into_iter().filter_map(|p| p.trace).kmerge() {
+            if let Some(completion_time) = p.completion_time {
+                let actual_start = p.actual_start.unwrap();
+                print!(
+                    "{}:{}:{}:{} ",
+                    duration_to_ns(actual_start),
+                    duration_to_ns(actual_start) as i64 - duration_to_ns(p.target_start) as i64,
+                    duration_to_ns(completion_time - actual_start),
+                    p.server_tsc,
+                )
+            } else if p.actual_start.is_some() {
+                let actual_start = p.actual_start.unwrap();
+                print!(
+                    "{}:{}:-1:-1 ",
+                    duration_to_ns(actual_start),
+                    duration_to_ns(actual_start) as i64 - duration_to_ns(p.target_start) as i64,
+                )
+            } else {
+                print!("{}:-1:-1:-1 ", duration_to_ns(p.target_start))
+            }
+        }
+        println!("");
+    }
+
     true
+}
+
+fn process_result(sched: &RequestSchedule, packets: &mut [Packet]) -> Option<ScheduleResult> {
+    if packets.len() == 0 {
+        return None;
+    }
+
+    // Discard the first X% of the packets.
+    let plen = packets.len();
+    let packets = &mut packets[plen * sched.discard_pct / 100..];
+
+    let mut never_sent = 0;
+    let mut dropped = 0;
+    let mut latencies = BTreeMap::new();
+    for p in packets.iter() {
+        match (p.actual_start, p.completion_time) {
+            (None, _) => never_sent += 1,
+            (_, None) => dropped += 1,
+            (Some(ref start), Some(ref end)) => {
+                *latencies
+                    .entry(duration_to_ns(*end - *start) / 1000)
+                    .or_insert(0) += 1
+            }
+        }
+    }
+
+    if packets.len() - dropped - never_sent <= 1 {
+        return None;
+    }
+
+    if let OutputMode::Silent = sched.output {
+        return None;
+    }
+
+    let first_send = packets.iter().filter_map(|p| p.actual_start).min();
+    let last_send = packets.iter().filter_map(|p| p.actual_start).max();
+
+    let first_tsc = packets.iter().filter_map(|p| p.completion_server_tsc).min();
+
+    let trace = match sched.output {
+        OutputMode::Trace => {
+            let mut traceresults: Vec<_> = packets
+                .into_iter()
+                .filter_map(|p| {
+                    if !p.completion_time.is_some() {
+                        return None;
+                    }
+
+                    Some(TraceResult {
+                        actual_start: p.actual_start,
+                        target_start: p.target_start,
+                        completion_time: p.completion_time,
+                        server_tsc: p.completion_server_tsc.unwrap(),
+                    })
+                })
+                .collect();
+            traceresults.sort_by_key(|p| p.server_tsc);
+            Some(traceresults)
+        }
+        _ => None,
+    };
+
+    Some(ScheduleResult {
+        packet_count: packets.len() - dropped - never_sent,
+        drop_count: dropped,
+        never_sent_count: never_sent,
+        first_send: first_send,
+        last_send: last_send,
+        latencies: latencies,
+        first_tsc: first_tsc,
+        trace: trace,
+    })
+}
+
+fn run_client_worker(
+    proto: Arc<Box<dyn LoadgenProtocol>>,
+    backend: Backend,
+    addr: SocketAddrV4,
+    tport: Transport,
+    wg: shenango::WaitGroup,
+    wg_start: shenango::WaitGroup,
+    schedules: Arc<Vec<RequestSchedule>>,
+    index: usize,
+) -> Vec<Option<ScheduleResult>> {
+    let mut packets: Vec<Packet> = Vec::new();
+    let mut rng: MersenneTwister = SeedableRng::from_seed(rand::thread_rng().gen::<u64>());
+    let mut payload = Vec::with_capacity(4096);
+
+    let mut sched_boundaries = Vec::new();
+
+    let mut last = 100_000_000;
+    let mut end = 100_000_000;
+    for sched in schedules.iter() {
+        end += duration_to_ns(sched.runtime);
+        loop {
+            let nxt = last + sched.arrival.sample(&mut rng);
+            if nxt >= end {
+                break;
+            }
+            last = nxt;
+            packets.push(Packet {
+                randomness: rng.gen::<u64>(),
+                target_start: Duration::from_nanos(last),
+                work_iterations: sched.service.sample(&mut rng),
+                ..Default::default()
+            });
+        }
+        sched_boundaries.push(packets.len());
+    }
+
+    let src_addr = SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), (100 + index) as u16);
+    let socket = Arc::new(match tport {
+        Transport::Tcp => backend.create_tcp_connection(Some(src_addr), addr).unwrap(),
+        Transport::Udp => backend.create_udp_connection(src_addr, Some(addr)).unwrap(),
+    });
+
+    let packets_per_thread = packets.len();
+    let socket2 = socket.clone();
+    let rproto = proto.clone();
+    let wg2 = wg.clone();
+    let receive_thread = backend.spawn_thread(move || {
+        let mut recv_buf = vec![0; 4096];
+        let mut receive_times = vec![None; packets_per_thread];
+        wg2.done();
+        for _ in 0..receive_times.len() {
+            match rproto.read_response(&socket2, &mut recv_buf[..]) {
+                Ok((idx, tsc)) => receive_times[idx] = Some((Instant::now(), tsc)),
+                Err(e) => {
+                    match e.raw_os_error() {
+                        Some(-103) | Some(-104) => break,
+                        _ => (),
+                    }
+                    if e.kind() != ErrorKind::UnexpectedEof {
+                        println!("Receive thread: {}", e);
+                    }
+                    break;
+                }
+            }
+        }
+        receive_times
+    });
+
+    // If the send or receive thread is still running 500 ms after it should have finished,
+    // then stop it by triggering a shutdown on the socket.
+    let last = packets[packets.len() - 1].target_start;
+    let socket2 = socket.clone();
+    let wg2 = wg.clone();
+    let wg3 = wg_start.clone();
+    let timer = backend.spawn_thread(move || {
+        wg2.done();
+        wg3.wait();
+        backend.sleep(last + Duration::from_millis(500));
+        if Arc::strong_count(&socket2) > 1 {
+            socket2.shutdown();
+        }
+    });
+
+    wg.done();
+    wg_start.wait();
+    let start = Instant::now();
+
+    for (i, packet) in packets.iter_mut().enumerate() {
+        payload.clear();
+        proto.gen_req(i, packet, &mut payload);
+
+        let mut t = start.elapsed();
+        while t + Duration::from_micros(1) < packet.target_start {
+            backend.sleep(packet.target_start - t);
+            t = start.elapsed();
+        }
+        if t > packet.target_start + Duration::from_micros(5) {
+            continue;
+        }
+
+        packet.actual_start = Some(start.elapsed());
+        if let Err(e) = (&*socket).write_all(&payload[..]) {
+            packet.actual_start = None;
+            match e.raw_os_error() {
+                Some(-32) | Some(-103) | Some(-104) => {}
+                _ => println!("Send thread ({}/{}): {}", i, packets.len(), e),
+            }
+            break;
+        }
+    }
+
+    wg.done();
+    wg_start.wait();
+
+    timer.join().unwrap();
+    receive_thread
+        .join()
+        .unwrap()
+        .into_iter()
+        .zip(packets.iter_mut())
+        .for_each(|(c, p)| {
+            if let Some((inst, tsc)) = c {
+                (*p).completion_time = Some(inst - start);
+                (*p).completion_server_tsc = Some(tsc);
+            }
+        });
+
+    let mut start_index = 0;
+    schedules
+        .iter()
+        .zip(sched_boundaries)
+        .map(|(sched, end)| {
+            let res = process_result(&sched, &mut packets[start_index..end]);
+            start_index = end;
+            res
+        })
+        .collect::<Vec<Option<ScheduleResult>>>()
 }
 
 fn run_client(
@@ -470,167 +716,82 @@ fn run_client(
     nthreads: usize,
     tport: Transport,
     barrier_group: &mut Option<lockstep::Group>,
-    schedules: &Vec<RequestSchedule>,
+    schedules: Vec<RequestSchedule>,
     index: usize,
 ) -> bool {
-    let mut rng = rand::thread_rng();
+    let schedules = Arc::new(schedules);
+    let wg = shenango::WaitGroup::new();
+    wg.add(3 * nthreads as i32);
+    let wg_start = shenango::WaitGroup::new();
+    wg_start.add(1 as i32);
 
-    let packet_schedules: Vec<(Vec<Packet>, Vec<Option<Duration>>, Connection)> = (0..nthreads)
-        .map(|tidx| {
-            let mut last = 100_000_000;
-            let mut thread_packets: Vec<Packet> = Vec::new();
-            for sched in schedules {
-                let end = last + duration_to_ns(sched.runtime);
-                while last < end {
-                    last += sched.arrival.sample(&mut rng);
-                    thread_packets.push(Packet {
-                        randomness: rng.gen::<u64>(),
-                        target_start: Duration::from_nanos(last),
-                        work_iterations: sched.service.sample(&mut rng),
-                        ..Default::default()
-                    });
-                }
-            }
+    let conn_threads: Vec<_> = (0..nthreads)
+        .into_iter()
+        .map(|i| {
+            let client_idx = 100 + (index * nthreads) + i;
+            let proto = proto.clone();
+            let wg = wg.clone();
+            let wg_start = wg_start.clone();
+            let schedules = schedules.clone();
 
-            let src_addr = SocketAddrV4::new(
-                Ipv4Addr::new(0, 0, 0, 0),
-                (100 + (index * nthreads) + tidx) as u16,
-            );
-            let socket = match tport {
-                Transport::Tcp => backend.create_tcp_connection(Some(src_addr), addr).unwrap(),
-                Transport::Udp => backend
-                    .create_udp_connection("0.0.0.0:0".parse().unwrap(), Some(addr))
-                    .unwrap(),
-            };
-            let packets_per_thread = thread_packets.len();
-            (thread_packets, vec![None; packets_per_thread], socket)
+            backend.spawn_thread(move || {
+                run_client_worker(
+                    proto, backend, addr, tport, wg, wg_start, schedules, client_idx,
+                )
+            })
         })
         .collect();
 
     backend.sleep(Duration::from_secs(2));
+    wg.wait();
 
     if let Some(ref mut g) = *barrier_group {
         g.barrier();
     }
+
+    wg_start.done();
     let start_unix = SystemTime::now();
-    let start = Instant::now();
 
-    let mut send_threads = Vec::new();
-    let mut receive_threads = Vec::new();
-    for (mut packets, mut receive_times, socket) in packet_schedules {
-        let socket = Arc::new(socket);
-        let socket2 = socket.clone();
-        let rproto = proto.clone();
-        let sproto = proto.clone();
+    wg.add(nthreads as i32);
+    wg_start.add(1 as i32);
 
-        receive_threads.push(backend.spawn_thread(move || {
-            let mut recv_buf = vec![0; 4096];
-            for _ in 0..receive_times.len() {
-                match rproto.read_response(&socket, &mut recv_buf[..]) {
-                    Ok(idx) => receive_times[idx] = Some(start.elapsed()),
-                    Err(e) => {
-                        match e.raw_os_error() {
-                            Some(-103) | Some(-104) => break,
-                            _ => (),
-                        }
-                        if e.kind() != ErrorKind::UnexpectedEof {
-                            println!("Receive thread: {}", e);
-                        }
-                        break;
-                    }
-                }
-            }
-            receive_times
-        }));
-        send_threads.push(backend.spawn_thread(move || {
-            // If the send or receive thread is still running 500 ms after it should have finished,
-            // then stop it by triggering a shutdown on the socket.
-            let last = packets[packets.len() - 1].target_start;
-            let socket = socket2.clone();
-            let timer = backend.spawn_thread(move || {
-                backend.sleep(last + Duration::from_millis(500));
-                if Arc::strong_count(&socket) > 1 {
-                    socket.shutdown();
-                }
-            });
+    wg.wait();
+    wg_start.done();
 
-            let mut payload = Vec::with_capacity(4096);
-            for (i, packet) in packets.iter_mut().enumerate() {
-                payload.clear();
-                sproto.gen_req(i, packet, &mut payload);
-
-                let mut t = start.elapsed();
-                while t + Duration::from_micros(1) < packet.target_start {
-                    backend.sleep(packet.target_start - t);
-                    t = start.elapsed();
-                }
-                if t > packet.target_start + Duration::from_micros(5) {
-                    continue;
-                }
-
-                packet.actual_start = Some(start.elapsed());
-                if let Err(e) = (&*socket2).write_all(&payload[..]) {
-                    packet.actual_start = None;
-                    match e.raw_os_error() {
-                        Some(-32) | Some(-103) | Some(-104) => {}
-                        _ => println!("Send thread ({}/{}): {}", i, packets.len(), e),
-                    }
-                    break;
-                }
-            }
-            timer.join().unwrap();
-
-            packets
-        }))
-    }
-
-    let mut packets: Vec<_> = send_threads
+    let mut packets: Vec<Vec<Option<ScheduleResult>>> = conn_threads
         .into_iter()
-        .zip(receive_threads.into_iter())
-        .map(|(s, r)| {
-            s.join()
-                .unwrap()
-                .into_iter()
-                .zip(r.join().unwrap().into_iter())
-                .map(|(p, r)| Packet {
-                    completion_time: r,
-                    ..p
-                })
-        })
-        .kmerge()
+        .map(|s| s.join().unwrap())
         .collect();
 
-    let mut start_index = 0;
-    let mut start = Duration::from_nanos(100_000_000);
-    schedules.iter().fold(true, |pres, sched| {
-        let npackets = packets[start_index..]
-            .iter()
-            .position(|p| p.target_start >= start + sched.runtime)
-            .unwrap_or(packets.len() - start_index);
-        let res = process_result(
-            &sched,
-            &mut packets[start_index..start_index + npackets],
-            start_unix,
-        );
-        start_index += npackets;
-        start += sched.runtime;
-        pres && res
-    })
+    let mut sched_start = Duration::from_nanos(100_000_000);
+    schedules
+        .iter()
+        .enumerate()
+        .map(|(i, sched)| {
+            let perthread = packets.iter_mut().filter_map(|p| p[i].take()).collect();
+            let r = process_result_final(sched, perthread, start_unix, sched_start);
+            sched_start += sched.runtime;
+            r
+        })
+        .collect::<Vec<bool>>()
+        .into_iter()
+        .all(|p| p)
 }
 
 fn run_local(
     backend: Backend,
     nthreads: usize,
     worker: Arc<FakeWorker>,
-    schedules: &Vec<RequestSchedule>,
+    schedules: Vec<RequestSchedule>,
 ) -> bool {
     let mut rng = rand::thread_rng();
+    let schedules = Arc::new(schedules);
 
     let packet_schedules: Vec<Vec<Packet>> = (0..nthreads)
         .map(|_| {
             let mut last = 100_000_000;
             let mut thread_packets: Vec<Packet> = Vec::new();
-            for sched in schedules {
+            for sched in schedules.iter() {
                 let end = last + duration_to_ns(sched.runtime);
                 while last < end {
                     last += sched.arrival.sample(&mut rng);
@@ -655,6 +816,7 @@ fn run_local(
     let mut send_threads = Vec::new();
     for mut packets in packet_schedules {
         let worker = worker.clone();
+        let schedules = schedules.clone();
         send_threads.push(backend.spawn_thread(move || {
             let remaining = Arc::new(AtomicUsize::new(packets.len()));
             for i in 0..packets.len() {
@@ -690,35 +852,53 @@ fn run_local(
                 // do nothing
             }
 
-            packets
+            for p in packets.iter_mut() {
+                p.completion_time = Some(Duration::from_nanos(
+                    p.completion_time_ns.load(Ordering::SeqCst),
+                ));
+            }
+
+            let mut start = Duration::from_nanos(100_000_000);
+            let mut start_index = 0;
+
+            schedules
+                .iter()
+                .map(|sched| {
+                    let npackets = packets[start_index..]
+                        .iter()
+                        .position(|p| p.target_start >= start + sched.runtime)
+                        .unwrap_or(packets.len() - start_index - 1)
+                        + 1;
+                    let res =
+                        process_result(&sched, &mut packets[start_index..start_index + npackets]);
+                    start = packets[start_index + npackets - 1].target_start;
+                    start_index += npackets;
+                    res
+                })
+                .collect::<Vec<Option<ScheduleResult>>>()
         }))
     }
 
-    let mut packets: Vec<_> = send_threads
+    let mut packets: Vec<Vec<Option<ScheduleResult>>> = send_threads
         .into_iter()
-        .flat_map(|s| s.join().unwrap().into_iter())
-        .map(|mut p| {
-            p.completion_time = Some(Duration::from_nanos(
-                p.completion_time_ns.load(Ordering::SeqCst),
-            ));
-            p
-        })
+        .map(|s| s.join().unwrap())
         .collect();
-    packets.sort_by_key(|p| p.target_start);
 
-    let mut start = Duration::from_nanos(100_000_000);
-    schedules.iter().all(|sched| {
-        let last_index = packets
-            .iter()
-            .position(|p| p.target_start >= start + sched.runtime)
-            .unwrap_or(packets.len());
-        let rest = packets.split_off(last_index);
-        let res = process_result(&sched, packets.as_mut_slice(), start_unix);
-        packets = rest;
-        start += sched.runtime;
-        res
-    })
+    let mut sched_start = Duration::from_nanos(100_000_000);
+    schedules
+        .iter()
+        .enumerate()
+        .map(|(i, sched)| {
+            let perthread = packets.iter_mut().filter_map(|p| p[i].take()).collect();
+            let r = process_result_final(sched, perthread, start_unix, sched_start);
+            sched_start += sched.runtime;
+            r
+        })
+        .collect::<Vec<bool>>()
+        .into_iter()
+        .all(|p| p)
 }
+
 fn main() {
     let matches = App::new("Synthetic Workload Application")
         .version("0.1")
@@ -735,6 +915,12 @@ fn main() {
                 .value_name("T")
                 .default_value("1")
                 .help("Number of client threads"),
+        )
+        .arg(
+            Arg::with_name("discard_pct")
+                .long("discard_pct")
+                .default_value("10")
+                .help("Discard first % of packtets at target QPS from sample"),
         )
         .arg(
             Arg::with_name("mode")
@@ -883,6 +1069,8 @@ fn main() {
 
     let addr: SocketAddrV4 = FromStr::from_str(matches.value_of("ADDR").unwrap()).unwrap();
     let nthreads = value_t_or_exit!(matches, "threads", usize);
+    let discard_pct = value_t_or_exit!(matches, "discard_pct", usize);
+
     let runtime = Duration::from_secs(value_t!(matches, "runtime", u64).unwrap());
     let packets_per_second = (1.0e6 * value_t_or_exit!(matches, "mpps", f32)) as usize;
     let start_packets_per_second = (1.0e6 * value_t_or_exit!(matches, "start_mpps", f32)) as usize;
@@ -917,14 +1105,6 @@ fn main() {
         "spawner-server" | "runtime-client" | "local-client" => Backend::Runtime,
         _ => unreachable!(),
     };
-    let mut barrier_group = matches.value_of("barrier-leader").map(|leader| {
-        lockstep::Group::from_hostname(
-            leader,
-            23232,
-            value_t_or_exit!(matches, "barrier-peers", usize),
-        )
-        .unwrap()
-    });
 
     let loadshift_spec = value_t_or_exit!(matches, "loadshift", String);
     let fwspec = value_t_or_exit!(matches, "fakework", String);
@@ -981,12 +1161,13 @@ fn main() {
                             distribution,
                             0,
                             nthreads,
+                            discard_pct,
                         );
                         run_local(
                             backend,
                             nthreads,
                             fakeworker.clone(),
-                            &sched,
+                            sched,
                         );
                     }
                 }
@@ -999,12 +1180,13 @@ fn main() {
                         distribution,
                         0,
                         nthreads,
+                        discard_pct,
                     );
                     run_local(
                         backend,
                         nthreads,
                         fakeworker.clone(),
-                        &sched,
+                        sched,
                     );
                     backend.sleep(Duration::from_secs(3));
                 }
@@ -1013,6 +1195,16 @@ fn main() {
         "linux-client" | "runtime-client" => {
             let matches = matches.clone();
             backend.init_and_run(config, move || {
+
+                let mut barrier_group = matches.value_of("barrier-leader").map(|leader| {
+                    lockstep::Group::from_hostname(
+                        leader,
+                        23232,
+                        value_t_or_exit!(matches, "barrier-peers", usize),
+                    )
+                    .unwrap()
+                });
+
                 println!("Distribution, Target, Actual, Dropped, Never Sent, Median, 90th, 99th, 99.9th, 99.99th, Start");
                 match (matches.value_of("protocol").unwrap(), &barrier_group) {
                     (_, Some(lockstep::Group::Client(ref _c))) => (),
@@ -1026,7 +1218,7 @@ fn main() {
                 };
 
                 if !loadshift_spec.is_empty() {
-                    let sched = gen_loadshift_experiment(&loadshift_spec, distribution, nthreads);
+                    let sched = gen_loadshift_experiment(&loadshift_spec, distribution, nthreads, output);
                     run_client(
                         proto,
                         backend,
@@ -1034,24 +1226,27 @@ fn main() {
                         nthreads,
                         tport,
                         &mut barrier_group,
-                        &sched,
+                        sched,
                         0,
                     );
+                    if let Some(ref mut g) = barrier_group {
+                        g.barrier();
+                    }
                     return;
                 }
 
                 if dowarmup {
                     // Run at full pps 3 times for 20 seconds
+                    for _ in 0..1 {
                     let sched = gen_classic_packet_schedule(
-                        Duration::from_secs(20),
+                        Duration::from_secs(2),
                         packets_per_second,
                         OutputMode::Silent,
                         distribution,
-                        rampup,
+                        20,
                         nthreads,
+                        discard_pct,
                     );
-
-                    for _ in 0..3 {
                         run_client(
                             proto.clone(),
                             backend,
@@ -1059,7 +1254,7 @@ fn main() {
                             nthreads,
                             tport,
                             &mut barrier_group,
-                            &sched,
+                            sched,
                             0,
                         );
                     }
@@ -1074,17 +1269,18 @@ fn main() {
                         distribution,
                         rampup,
                         nthreads,
+                        discard_pct
                     );
-                    run_client(
+                    if !run_client(
                         proto.clone(),
                         backend,
                         addr,
                         nthreads,
                         tport,
                         &mut barrier_group,
-                        &sched,
+                        sched,
                         j,
-                    );
+                    ) { break; }
                 }
                 if let Some(ref mut g) = barrier_group {
                     g.barrier();
