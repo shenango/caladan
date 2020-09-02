@@ -20,6 +20,7 @@ struct all_threads_percore {
 };
 BUILD_ASSERT(sizeof(struct all_threads_percore) == CACHE_LINE_SIZE);
 
+bool cfg_gc_enabled;
 
 /* global lock protecting gc state */
 static DEFINE_SPINLOCK(gc_lock);
@@ -98,6 +99,9 @@ void gc_stop_world(void)
 	struct kthread *k;
 	uint32_t i, done;
 
+	if (unlikely(!cfg_gc_enabled))
+		panic("please add \"enable_gc\" to your config file to enable GC");
+
 	spin_lock_np(&gc_lock);
 	assert(!world_stopped);
 
@@ -174,6 +178,9 @@ void gc_discover_all_stacks(stack_bounds_cb discover_cb)
 int gc_remove_thread(thread_t *th)
 {
 	unsigned int aff;
+	if (!cfg_gc_enabled)
+		return 0;
+
 	BUG_ON(preempt_enabled());
 	assert_preempt_disabled();
 	aff = th->onk;
@@ -187,6 +194,10 @@ int gc_remove_thread(thread_t *th)
 int gc_register_thread(thread_t *th)
 {
 	unsigned int aff;
+
+	if (!cfg_gc_enabled)
+		return 0;
+
 	preempt_disable();
 	aff = get_current_affinity();
 	spin_lock(&all_threads[aff].lock);

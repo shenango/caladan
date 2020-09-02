@@ -322,6 +322,9 @@ static inline int storage_proc_completions(struct storage_q *q,
 
 #endif
 
+#ifdef GC
+extern bool cfg_gc_enabled;
+#endif
 
 /*
  * Per-kernel-thread State
