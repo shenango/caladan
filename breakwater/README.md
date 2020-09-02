@@ -8,16 +8,16 @@ RPC layer between network transport and application.
 Breakwater requires an Intel server with many cores equipped
 with an Intel NIC based on 82599 chip or Mellanox ConnectX-4
 or ConnectX-5 NIC. For the best performance,
-a low latency switch connecting server and client machines and
-Mellanox NICs are required.
+server and client machines with Mellanox NICs connected with
+a low latency switch are necessary.
 
 ## Terminology
 - Server: RPC server which is serving RPC request
-- Client: A single Shenango process which generates loads and
-controls agents to synchronously generate the load to server.
-- Agent: Shenango processes which generates load with control
-of client. (One of the load generating processes become client and others
-are agents.)
+- Client: A single Shenango process which generates load and
+controls agents to syncrhonize load generation. 
+- Agent: Shenango processes generating load while controlled by
+of client. (One of the load generating processes become client
+and others are agents.)
 - Observer: A machine which commands to server, client, and agents
 and collects data from them. Observer could be the same as server,
 client, or agent machines.
@@ -28,14 +28,15 @@ client, or agent machines.
 $ git clone [to_be_upated]
 ```
 
-2. Initialize the sub modules
+2. Initialize the submodules
 ```
 shenango$ ./build/init_submodules.sh
 ```
 
 3. Modify `build/config` according to the experiment environment.
 For the best performance, set `CONFIG_DIRECTPATH=y`, but please
-note that directpath is supported with Mellanox NICs.
+note that directpath is supported with Mellanox ConnectX-4 and
+CoonectX-5 Mellanox NICs.
 
 4. If the machine is equipped with Mellanox ConnectX-4 NIC,
 apply ConnectX-4 patch.
@@ -44,7 +45,7 @@ shenango$ git apply breakwater/build/connectx-4.patch
 ```
 
 5. Build Shenango and execute the 
-`breakwater/scripts/setup_machine.sh` script.
+`scripts/setup_machine.sh` script in `breakwater` directory.
 ```
 shenango$ make clean && make
 shenango$ make -C bindings/cc
@@ -64,11 +65,11 @@ service time distribution, and the number of clients.
 ```
 shenango/breakwater$ python3 scripts/run_synthetic.py
 ```
-You can modify each overload control's parameter in
-`src/bw_config.h` for Breakwater, `src/dg_config.h` for Dagor,
-and `src/sd_config.h` for SEDA. If you modify parameters in
+You can modify overload controls' parameters in
+`src/bw_config.h` (for Breakwater), `src/dg_config.h` (for Dagor),
+and `src/sd_config.h` (for SEDA). If you modify parameters in
 observer machine, `scripts/run_synthetic.py` script will distribute
-updated configuration to all the other machines.
+updated configs to all the other machines.
 
 ## Quick Start (with Cloudlab XL170)
 If you have access to the Cloudlab, you can simply follow the
@@ -82,13 +83,13 @@ machines. You can see the sample Cloudlab profile [here](
 https://www.cloudlab.us/p/CreditRPC/breakwater-five-xl170)
 consisting of five machines.
 You can use pre-built Cloudlab disk image (URN:
-urn:publicid:IDN+utah.cloudlab.us+image+creditrpc-PG0:shenango-ready-xl170)
+urn:publicid:IDN+utah.cloudlab.us+image+creditrpc-PG0:breakwater-xl170-2)
 which is Ubuntu 18.04 LTS with Mellanox OFED driver and
-dependencies installed. [For artifact evaluators] If you
+dependencies installed. **[For artifact evaluators]** If you
 don't have access to the Cloudlab and need one, we can provide
-the SSH access to the experiment after we launch one.
-However, please note that an experiment expires after 16 hours,
-so you will need to make another request to us after it expires.
+the SSH access to the machines after we launch an experiment.
+However, please note that because an experiment expires after 16 hours,
+you will need to make another request to us after expiration.
 Further, as Cloudlab is shared with other researchers, its
 availability is not guaranteed.
 
@@ -106,17 +107,17 @@ shenango/breakwater$ python3 scripts/configure_xl170.py
 
 4. You can execute `scripts/run_synthetic.py` at observer to experiment
 with synthetic workload. Default experiment scripts is for breakwater
-with 1,000 clients, 10 us average service time which is
-exponentially distributed. Once an experiment finished, you can
+with 1,000 clients, exponentially distributed service time with 10 us
+average. Once an experiment finished, you can
 see the csv-formatted output in `outputs` directory. Modify the
-configuration of experiment script for different overload control
+configuration of experiment script to change overload control
 mechanisms, average service time, service time distribution, and
 the number of clients.
 ```
 shenango/breakwater$ python3 scripts/run_synthetic.py
 ```
-You can modify each overload control's parameter in
-`src/bw_config.h` for Breakwater, `src/dg_config.h` for Dagor,
-and `src/sd_config.h` for SEDA. If you modify parameters in
+You can modify overload controls' parameters in
+`src/bw_config.h` (for Breakwater), `src/dg_config.h` (for Dagor),
+and `src/sd_config.h` (for SEDA). If you modify parameters in
 observer machine, `scripts/run_synthetic.py` script will distribute
-updated configuration to all the other machines.
+updated configs to all the other machines.

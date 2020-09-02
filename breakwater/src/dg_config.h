@@ -17,4 +17,4 @@
 /* increment factor when uncongested */
 #define DAGOR_BETA		0.01
 
-#define CDG_BATCH_WAIT_US		0
+#define CDG_BATCH_WAIT_US	0

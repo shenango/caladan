@@ -5,8 +5,8 @@
 #pragma once
 
 /* delay threshold */
-#define SBW_MIN_DELAY_US		100
-#define SBW_DROP_THRESH			200
+#define SBW_MIN_DELAY_US		80
+#define SBW_DROP_THRESH			180
 
 /* round trip time in us */
 #define SBW_RTT_US			10
