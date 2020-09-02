@@ -273,7 +273,7 @@ pub enum JoinHandle<T: Send + 'static> {
     Runtime(shenango::thread::JoinHandle<T>),
 }
 impl<T: Send + 'static> JoinHandle<T> {
-    pub fn join(self) -> Result<T, Box<Any + Send + 'static>> {
+    pub fn join(self) -> Result<T, Box<dyn Any + Send + 'static>> {
         match self {
             JoinHandle::Linux(j) => j.join(),
             JoinHandle::Runtime(j) => j.join(),

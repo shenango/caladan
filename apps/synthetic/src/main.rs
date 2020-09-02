@@ -135,7 +135,7 @@ enum OutputMode {
 }}
 
 fn duration_to_ns(duration: Duration) -> u64 {
-    (duration.as_secs() * 1000_000_000 + duration.subsec_nanos() as u64)
+    duration.as_secs() * 1000_000_000 + duration.subsec_nanos() as u64
 }
 
 fn run_linux_udp_server(
