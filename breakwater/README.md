@@ -93,16 +93,20 @@ you will need to make another request to us after expiration.
 Further, as Cloudlab is shared with other researchers, its
 availability is not guaranteed.
 
-2. Once you create an experiment, clone this repository to
-each machine.
+2. Once you create an experiment, clone this repository to the observer
+machine.
 ```
 $ git clone [to_be_updated]
 ```
 
-3. At the observer, provide the SSH information of machines in
-`scripts/config_remote.py`, and execute `scripts/configure_xl170.py`.
+3. At the observer, provide the information on remote servers to
+setup Shenango and Breakwater in `scripts/config_remote.py`, and
+execute `scripts/setup_remote_xl170.py`.
 ```
-shenango/breakwater$ python3 scripts/configure_xl170.py
+$ cd shenango/breakwater
+# Modify config_remote.py
+shenango/breakwater$ vim scripts/config_remote.py
+shenango/breakwater$ python3 scripts/setup_remote_xl170.py
 ```
 
 4. You can execute `scripts/run_synthetic.py` at observer to experiment

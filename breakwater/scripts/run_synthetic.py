@@ -54,10 +54,10 @@ def generate_shenango_config(is_server ,conn, ip, netmask, gateway, num_cores, d
     if directpath:
         config_string += "\nenable_directpath 1"
 
-    cmd = "cd {}/breakwater && echo \"{}\" > {} "\
+    cmd = "cd ~/{}/breakwater && echo \"{}\" > {} "\
             .format(SHENANGO_PATH,config_string, config_name)
 
-    return execute_command([conn], cmd, True)
+    return execute_remote([conn], cmd, True)
 ### End of function definition ###
 
 NUM_AGENT = len(AGENTS)
@@ -95,32 +95,32 @@ for agent in AGENTS:
 # Clean-up environment
 print("Cleaning up machines...")
 cmd = "sudo killall -9 netbench & sudo killall -9 iokerneld"
-execute_command([server_conn, client_conn] + agent_conns,
-                cmd, True)
+execute_remote([server_conn, client_conn] + agent_conns,
+               cmd, True, False)
 sleep(1)
 
 # Remove temporary output
-cmd = "cd {}/breakwater && rm output.csv output.json".format(SHENANGO_PATH)
-execute_command([client_conn], cmd, True)
+cmd = "cd ~/{}/breakwater && rm output.csv output.json".format(SHENANGO_PATH)
+execute_remote([client_conn], cmd, True, False)
 
 # Distribuing config files
 print("Distributing configs...")
 # - server
 cmd = "scp -P 22 -i {} -o StrictHostKeyChecking=no src/*_config.h"\
-        " {}@{}:~/{}/breakwater/src/"\
+        " {}@{}:~/{}/breakwater/src/ > /dev/null"\
         .format(KEY_LOCATION, USERNAME, SERVER, SHENANGO_PATH)
-os.system(cmd)
+execute_local(cmd)
 # - client
 cmd = "scp -P 22 -i {} -o StrictHostKeyChecking=no src/*_config.h"\
-        " {}@{}:~/{}/breakwater/src/"\
+        " {}@{}:~/{}/breakwater/src/ > /dev/null"\
         .format(KEY_LOCATION, USERNAME, CLIENT, SHENANGO_PATH)
-os.system(cmd)
+execute_local(cmd)
 # - agents
 for agent in AGENTS:
     cmd = "scp -P 22 -i {} -o StrictHostKeyChecking=no src/*_config.h"\
-            " {}@{}:~/{}/breakwater/src/"\
+            " {}@{}:~/{}/breakwater/src/ > /dev/null"\
             .format(KEY_LOCATION, USERNAME, agent, SHENANGO_PATH)
-    os.system(cmd)
+    execute_local(cmd)
 
 # Generating config files
 print("Generating config files...")
@@ -134,27 +134,27 @@ for i in range(NUM_AGENT):
 
 # Rebuild Shanango
 print("Building Shenango...")
-cmd = "cd {} && make clean && make && make -C bindings/cc".format(SHENANGO_PATH)
-execute_command([server_conn, client_conn] + agent_conns,
-                cmd, True)
+cmd = "cd ~/{} && make clean && make && make -C bindings/cc".format(SHENANGO_PATH)
+execute_remote([server_conn, client_conn] + agent_conns,
+               cmd, True)
 
 # Build Breakwater
 print("Building Breakwater...")
-cmd = "cd {}/breakwater && make clean && make && make -C bindings/cc".format(SHENANGO_PATH)
-execute_command([server_conn, client_conn] + agent_conns,
+cmd = "cd ~/{}/breakwater && make clean && make && make -C bindings/cc".format(SHENANGO_PATH)
+execute_remote([server_conn, client_conn] + agent_conns,
                  cmd, True)
 
 # Build Netbench
 print("Building netbench...")
-cmd = "cd {}/breakwater/apps/netbench && make clean && make".format(SHENANGO_PATH)
-execute_command([server_conn, client_conn] + agent_conns,
+cmd = "cd ~/{}/breakwater/apps/netbench && make clean && make".format(SHENANGO_PATH)
+execute_remote([server_conn, client_conn] + agent_conns,
                 cmd, True)
 
 # Execute IOKernel
 iok_sessions = []
 print("Executing IOKernel...")
-cmd = "cd {} && sudo ./iokerneld".format(SHENANGO_PATH)
-iok_sessions += execute_command([server_conn, client_conn] + agent_conns,
+cmd = "cd ~/{} && sudo ./iokerneld".format(SHENANGO_PATH)
+iok_sessions += execute_remote([server_conn, client_conn] + agent_conns,
                                cmd, False)
 
 sleep(1)
@@ -164,9 +164,9 @@ for offered_load in OFFERED_LOADS:
     # Execute netbench application
     # - server
     print("\tExecuting server...")
-    cmd = "cd {}/breakwater && sudo ./apps/netbench/netbench {} server.config server"\
+    cmd = "cd ~/{}/breakwater && sudo ./apps/netbench/netbench {} server.config server"\
             .format(SHENANGO_PATH, OVERLOAD_ALG)
-    server_session = execute_command([server_conn], cmd, False)
+    server_session = execute_remote([server_conn], cmd, False)
     server_session = server_session[0]
     
     sleep(1)
@@ -174,19 +174,19 @@ for offered_load in OFFERED_LOADS:
     # - client
     print("\tExecuting client...")
     client_agent_sessions = []
-    cmd = "cd {}/breakwater && sudo ./apps/netbench/netbench {} client.config client"\
+    cmd = "cd ~/{}/breakwater && sudo ./apps/netbench/netbench {} client.config client"\
             " {:d} {} {:d} {} {:d} {:d} {:d}"\
             .format(SHENANGO_PATH, OVERLOAD_ALG, NUM_CONNS, server_ip, ST_AVG, ST_DIST,
                     slo ,NUM_AGENT, offered_load)
-    client_agent_sessions += execute_command([client_conn], cmd, False)
+    client_agent_sessions += execute_remote([client_conn], cmd, False)
 
     sleep(1)
     
     # - agent
     print("\tExecuting agents...")
-    cmd = "cd {}/breakwater && sudo ./apps/netbench/netbench {} client.config agent"\
+    cmd = "cd ~/{}/breakwater && sudo ./apps/netbench/netbench {} client.config agent"\
             " {}".format(SHENANGO_PATH, OVERLOAD_ALG, client_ip)
-    client_agent_sessions += execute_command(agent_conns, cmd, False)
+    client_agent_sessions += execute_remote(agent_conns, cmd, False)
 
     # Wait for client and agents
     print("\tWaiting for client and agents...")
@@ -195,7 +195,7 @@ for offered_load in OFFERED_LOADS:
 
     # Kill server
     cmd = "sudo killall -9 netbench"
-    execute_command([server_conn], cmd, True)
+    execute_remote([server_conn], cmd, True)
 
     # Wait for server to be killed
     server_session.recv_exit_status()
@@ -204,7 +204,7 @@ for offered_load in OFFERED_LOADS:
 
 # Kill IOKernel
 cmd = "sudo killall -9 iokerneld"
-execute_command([server_conn, client_conn] + agent_conns, cmd, True)
+execute_remote([server_conn, client_conn] + agent_conns, cmd, True)
 
 # Wait for IOKernel sessions
 for iok_session in iok_sessions:
@@ -223,8 +223,8 @@ if not os.path.exists("outputs"):
 # Move output.csv and output.json
 print("Collecting outputs...")
 cmd = "scp -P 22 -i {} -o StrictHostKeyChecking=no {}@{}:~/{}/breakwater/output.csv ./"\
-        .format(KEY_LOCATION, USERNAME, CLIENT, SHENANGO_PATH)
-os.system(cmd)
+        " > /dev/null".format(KEY_LOCATION, USERNAME, CLIENT, SHENANGO_PATH)
+execute_local(cmd)
 
 output_prefix = "{}_{}_{:d}_nconn_{:d}".format(OVERLOAD_ALG, ST_DIST, ST_AVG, NUM_CONNS)
 # Print Headers
@@ -236,13 +236,14 @@ header = "num_clients,offered_load,throughput,goodput,cpu,min,mean,p50,p90,p99,p
         ",client:winu_rx_pps,client:resp_rx_pps,client:req_tx_pps"\
         ",client:win_expired_wps,client:req_dropped_rps"
 cmd = "echo \"{}\" > outputs/{}.csv".format(header, output_prefix)
-os.system(cmd)
+execute_local(cmd)
 
 cmd = "cat output.csv >> outputs/{}.csv".format(output_prefix)
-os.system(cmd)
+execute_local(cmd)
 
 # Remove temp outputs
 cmd = "rm output.csv"
-os.system(cmd)
+execute_local(cmd, False)
 
+print("Output generated: outputs/{}.csv".format(output_prefix))
 print("Done.")
