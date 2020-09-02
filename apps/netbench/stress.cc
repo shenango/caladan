@@ -13,6 +13,8 @@ extern "C" {
 
 barrier_t barrier;
 
+bool synth_barrier_wait() { return barrier_wait(&barrier); }
+
 namespace {
 
 int threads;

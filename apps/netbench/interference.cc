@@ -19,8 +19,6 @@
 #include <string>
 #include <vector>
 
-barrier_t barrier;
-
 namespace {
 
 // number of iterations required for 1us on target server
@@ -189,9 +187,10 @@ void PrintResults(double offered_rps, double duration,
 
   static bool first = true;
   if (first) {
-	  first = false;
-	  std::cout << "offered_rps,achieved_rps,count,min,mean,p90,p99,"
-		  "p999,p9999,max" << std::endl;
+    first = false;
+    std::cout << "offered_rps,achieved_rps,count,min,mean,p90,p99,"
+                 "p999,p9999,max"
+              << std::endl;
   }
 
   // print out the results

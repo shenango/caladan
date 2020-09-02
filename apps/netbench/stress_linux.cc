@@ -9,10 +9,6 @@ extern "C" {
 #include <base/init.h>
 }
 
-#include "sync.h"
-
-barrier_t barrier;
-
 namespace {
 
 int threads;

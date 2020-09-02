@@ -115,14 +115,15 @@ class MemBWAntagonistWorker : public SyntheticWorker {
   // Creates a memory bandwidth antagonist worker. It allocates an array whose
   // size is indicated by the parameter.
   static MemBWAntagonistWorker *Create(std::size_t size, int nop_period,
-				       int nop_num);
+                                       int nop_num);
 
   // Perform n times array stores.
   void Work(uint64_t n);
 
  private:
-  MemBWAntagonistWorker(char *buf, std::size_t size, int nop_period, int nop_num) :
-    buf_(buf), size_(size), nop_period_(nop_period), nop_num_(nop_num) {}
+  MemBWAntagonistWorker(char *buf, std::size_t size, int nop_period,
+                        int nop_num)
+      : buf_(buf), size_(size), nop_period_(nop_period), nop_num_(nop_num) {}
 
   char *buf_;
   std::size_t size_;
@@ -135,15 +136,16 @@ class DynamicCacheAntagonistWorker : public SyntheticWorker {
   ~DynamicCacheAntagonistWorker() { delete buf_; }
 
   // Creates a cache antagonist worker.
-  static DynamicCacheAntagonistWorker *Create(std::size_t size,
-					      int period, int nop_num);
+  static DynamicCacheAntagonistWorker *Create(std::size_t size, int period,
+                                              int nop_num);
 
   // Perform n cache accesses.
   void Work(uint64_t n);
 
  private:
- DynamicCacheAntagonistWorker(char *buf, std::size_t size, int period, int nop_num) :
-   buf_(buf), size_(size), period_(period), nop_num_(nop_num) {}
+  DynamicCacheAntagonistWorker(char *buf, std::size_t size, int period,
+                               int nop_num)
+      : buf_(buf), size_(size), period_(period), nop_num_(nop_num) {}
 
   char *buf_;
   std::size_t size_;

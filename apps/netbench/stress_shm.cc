@@ -8,15 +8,15 @@ extern "C" {
 #include "thread.h"
 #include "timer.h"
 
+#include <sys/shm.h>
+#include <unistd.h>
 #include <chrono>
 #include <iostream>
-#include <unistd.h>
-#include <sys/shm.h>
 
 #define SHM_KEY (0x123)
 
 barrier_t barrier;
-
+bool synth_barrier_wait() { return barrier_wait(&barrier); }
 namespace {
 
 int threads;
@@ -25,12 +25,12 @@ std::string worker_spec;
 
 void MainHandler(void *arg) {
   uint64_t *cnt;
-  int shmid = shmget((key_t)SHM_KEY, sizeof(uint64_t) * threads,
-		 0666 | IPC_CREAT);
+  int shmid =
+      shmget((key_t)SHM_KEY, sizeof(uint64_t) * threads * 8, 0777 | IPC_CREAT);
   void *shm = NULL;
   shm = shmat(shmid, 0, 0);
   cnt = (uint64_t *)shm;
-	
+
   rt::WaitGroup wg(1);
   barrier_init(&barrier, threads);
 
@@ -44,7 +44,7 @@ void MainHandler(void *arg) {
 
       while (true) {
         w->Work(n);
-        cnt[i]++;
+        cnt[i * 8]++;
         rt::Yield();
       }
     });

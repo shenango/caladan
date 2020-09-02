@@ -10,7 +10,6 @@ extern "C" {
 
 #include "synthetic_worker.h"
 #include "util.h"
-#include "sync.h"
 
 #include <algorithm>
 #include <cmath>
@@ -20,7 +19,7 @@ extern "C" {
 #include <random>
 #include <tuple>
 
-extern barrier_t barrier;
+bool __weak synth_barrier_wait() { BUG(); }
 
 namespace {
 
@@ -52,13 +51,14 @@ void SqrtWorker::Work(uint64_t n) {
 }
 
 #define SQRT(src_var, dest_var, src_xmm, dest_xmm) \
-  asm volatile(                                    \
-    "movq %1, %%" src_xmm "\n"                     \
-    "sqrtsd %%" src_xmm ", %%" dest_xmm "\n"       \
-    "movq %%" dest_xmm ", %0 \n"                   \
-    : "=r"(dest_var)                               \
-    : "g"(src_var)                                 \
-    : src_xmm, dest_xmm, "memory")
+  asm volatile("movq %1, %%" src_xmm               \
+               "\n"                                \
+               "sqrtsd %%" src_xmm ", %%" dest_xmm \
+               "\n"                                \
+               "movq %%" dest_xmm ", %0 \n"        \
+               : "=r"(dest_var)                    \
+               : "g"(src_var)                      \
+               : src_xmm, dest_xmm, "memory")
 
 void AsmSqrtWorker::Work(uint64_t n) {
   constexpr double kNumber = 2350845.545;
@@ -140,8 +140,9 @@ void CacheAntagonistWorker::Work(uint64_t n) {
     memcpy_ermsb(&buf_[0], &buf_[size_ / 2], size_ / 2);
 }
 
-MemBWAntagonistWorker *MemBWAntagonistWorker::Create(
-  std::size_t size, int nop_period, int nop_num) {
+MemBWAntagonistWorker *MemBWAntagonistWorker::Create(std::size_t size,
+                                                     int nop_period,
+                                                     int nop_num) {
   // non-temporal store won't bypass cache when accessing the remote memory.
   char *buf = reinterpret_cast<char *>(numa_alloc_local(size));
   // numa_alloc_* will allocate memory in pages, therefore it must be cacheline
@@ -166,16 +167,16 @@ void MemBWAntagonistWorker::Work(uint64_t n) {
       nt_cacheline_store(buf_ + i, 0);
       if (cnt++ == nop_period_) {
         cnt = 0;
-	for (int j = 0; j < nop_num_; j++) {
-  	  asm("");
-	}
+        for (int j = 0; j < nop_num_; j++) {
+          asm("");
+        }
       }
     }
   }
 }
 
 DynamicCacheAntagonistWorker *DynamicCacheAntagonistWorker::Create(
-  std::size_t size, int period, int nop_num) {
+    std::size_t size, int period, int nop_num) {
   char *buf = new char[size]();
   return new DynamicCacheAntagonistWorker(buf, size, period, nop_num);
 }
@@ -187,11 +188,11 @@ void DynamicCacheAntagonistWorker::Work(uint64_t n) {
     for (size_t j = 0; j < offset; j++) {
       ptr[j + offset] = ptr[j];
       if (cnt_++ == period_) {
-	barrier_wait(&barrier);
+        synth_barrier_wait();
         cnt_ = 0;
-	for (int k = 0; k < nop_num_; k++) {
-	  asm("");
-	}
+        for (int k = 0; k < nop_num_; k++) {
+          asm("");
+        }
       }
     }
   }
@@ -206,7 +207,7 @@ SyntheticWorker *SyntheticWorkerFactory(std::string s) {
   if (tokens[0] == "sqrt") {
     if (tokens.size() != 1) return nullptr;
     return new SqrtWorker();
-  }   if (tokens[0] == "asmsqrt") {
+  } else if (tokens[0] == "asmsqrt") {
     if (tokens.size() != 1) return nullptr;
     return new AsmSqrtWorker();
   } else if (tokens[0] == "stridedmem") {
