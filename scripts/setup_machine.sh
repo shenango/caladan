@@ -24,17 +24,3 @@ echo 0 > /sys/devices/system/node/node1/hugepages/hugepages-2048kB/nr_hugepages
 for n in /sys/devices/system/node/node[2-9]; do
 	echo 0 > $n/hugepages/hugepages-2048kB/nr_hugepages
 done
-
-# reserve LLC to iokernel
-cat=`lscpu | grep cat`
-if [[ ! -z "$cat" ]]; then
-       modprobe msr
-       pqos -R l3cdp-any
-#       pqos -e "llc:1=0x00003;llc:0=0xffffc;"
-#       pqos -a "llc:1=0"
-else
-       echo "Machine does not support CAT, skip..."
-fi
-
-# enable RDPMC instruction from userspace
-echo 2 > /sys/devices/cpu/rdpmc
