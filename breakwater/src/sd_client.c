@@ -437,12 +437,8 @@ int csd_open(struct netaddr raddr, struct crpc_session **sout, int id)
 	s->cmn.c = c;
 	s->running = true;
 	s->tb_token = 0.0;
-	if (CSD_TB_INIT_RATE > CSD_TB_MIN_RATE) {
-		s->tb_refresh_rate = (rand() % (CSD_TB_INIT_RATE - CSD_TB_MIN_RATE))
-			+ CSD_TB_MIN_RATE;
-	} else {
-		s->tb_refresh_rate = CSD_TB_INIT_RATE;
-	}
+	s->tb_refresh_rate = (rand() / (double)RAND_MAX) *
+		(CSD_TB_INIT_RATE - CSD_TB_MIN_RATE) + CSD_TB_MIN_RATE;
 	s->tb_last_refresh = 0;
 	s->res_idx = 0;
 
