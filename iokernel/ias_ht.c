@@ -182,7 +182,9 @@ unsigned int ias_ht_relinquish_core(struct ias_data *sd)
 
 	/* relax a core if we found one */
 	if (shortest_service_us < UINT64_MAX) {
-		ias_ht_relax(sd, best_core);
+		ias_ht_relax_count++;
+		bitmap_clear(ias_ht_punished_cores, best_core);
+		WARN_ON(ias_idle_on_core(best_core));
 		return best_core;
 	}
 
