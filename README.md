@@ -85,6 +85,8 @@ This code has been tested with an Intel Optane SSD 900P Series NVMe device.
 If your device has op latencies that are greater than 10us, consider updating the device_latency_us
 variable (or the known_devices list) in runtime/storage.c.
 
+## More Examples
+
 #### Running a simple block storage server
 Ensure that you have compiled Caladan with storage support by setting the appropriate flag in build/config,
 and that you have built the synthetic client application.
@@ -107,3 +109,33 @@ On the client:
 sudo ./iokerneld
 sudo apps/synthetic/target/release/synthetic --config=storage_client.config --mode=runtime-client --mpps=0.55 --protocol=reflex --runtime=10 --samples=10 --threads=20 --transport=tcp 192.168.1.3:5000
 ```
+
+#### Running with interference
+
+Ensure that you have built the synthetic application on client and server.
+
+Compile the C++ bindings and the memory/cache antagonist:
+```
+make -C bindings/cc
+make -C apps/netbench
+```
+
+On the server, run the IOKernel with the interference-aware scheduler (ias),
+the synthetic application, and the cache antagonist:
+```
+sudo ./iokerneld ias
+./apps/synthetic/target/release/synthetic 192.168.1.8:5000 --config victim.config --mode spawner-server
+./apps/netbench/stress antagonist.config 20 10 cacheantagonist:4090880
+```
+
+On the client:
+```
+sudo ./iokerneld
+./apps/synthetic/target/release/synthetic 192.168.1.8:5000 --config client.config --mode runtime-client
+```
+
+You should observe that you can stop and start the antagonist and that the
+synthetic application's latency is not impacted. In contrast, if you use
+Shenango's default scheduler (`sudo ./iokerneld`) on the server, when you run
+the antagonist with the synthetic application, the synthetic application's
+latency degrades.
