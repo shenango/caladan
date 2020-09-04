@@ -2,28 +2,23 @@
 
 Shenango is a system that enables servers in datacenters to
 simultaneously provide low tail latency and high CPU efficiency, by
-rapidly reallocating cores across applications, at timescales as small
-as every 5 microseconds.
+rapidly reallocating cores across applications.
 
 ## How to Run Shenango
 
 1) Clone the Shenango repository.
 
-```
-git clone https://github.com/abelay/shenango
-cd shenango
-```
-
 2) Set up submodules (e.g., DPDK, SPDK, and rdma-core).
 
 ```
+cd shenango
 make submodules
 ```
 
 3) Build the IOKernel, the Shenango runtime, and Ksched and perform some machine setup.
 Before building, set the parameters in build/config (e.g., `CONFIG_SPDK=y` to use
 storage, `CONFIG_DIRECTPATH=y` to use directpath, and the MLX4 or MLX5 flags to use
-MLX4 or MLX5 NICs, respectively).
+MLX4 or MLX5 NICs, respectively, ). To enable debugging, set `CONFIG_DEBUG=y` before building.
 ```
 make clean && make
 pushd ksched
@@ -31,8 +26,6 @@ make clean && make
 popd
 sudo ./scripts/setup_machine.sh
 ```
-
-To enable debugging, set `CONFIG_DEBUG=y` in build/config.
 
 4) Install Rust and build a synthetic client-server application.
 
