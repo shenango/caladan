@@ -251,11 +251,11 @@ static long ksched_park(void)
 	p = this_cpu_ptr(&kp);
 	s = &shm[cpu];
 
+	local_set(&p->busy, false);
+
 	/* clear blocked signals */
 	sigemptyset(&em);
 	WARN_ON_ONCE(sigprocmask(SIG_SETMASK, &em, NULL));
-
-	local_set(&p->busy, false);
 
 	/* check if a new request is available yet */
 	gen = smp_load_acquire(&s->gen);
@@ -281,7 +281,7 @@ static long ksched_park(void)
 
 	ksched_next_tid(p, cpu, tid);
 	WRITE_ONCE(s->busy, p->running_task != NULL);
-	local_set(&p->busy, true);
+	local_set(&p->busy, p->running_task != NULL);
 	smp_store_release(&s->last_gen, gen);
 	put_cpu();
 
