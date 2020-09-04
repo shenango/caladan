@@ -463,7 +463,7 @@ static void dagor_prio_update(void *arg)
 		nreqs = atomic_read(&dagor_num_reqs);
 
 		if (nreqs == 0 ||
-		    ((microtime() - last_prio_update < DAGOR_PRIO_UPDATE_INT &&
+		    (microtime() - last_prio_update < DAGOR_PRIO_UPDATE_INT &&
 		    nreqs < DAGOR_PRIO_UPDATE_REQS))
 			continue;
 
