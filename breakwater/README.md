@@ -80,12 +80,15 @@ when all the servers are connected to a single switch.
 
 1. Launch the Cloudlab experiment with multiple bare-metal
 machines. You can see the sample Cloudlab profile [here](
-https://www.cloudlab.us/p/CreditRPC/breakwater-five-xl170)
-consisting of five machines.
-You can use pre-built Cloudlab disk image (URN:
+https://www.cloudlab.us/p/CreditRPC/breakwater-xl170)
+consisting of twelve machines (1 for observer, 1 for server,
+and 10 for clients).
+You can create your own Cloudlab profile using our pre-built
+Cloudlab disk image (URN:
 urn:publicid:IDN+utah.cloudlab.us+image+creditrpc-PG0:breakwater-xl170-2)
 which is Ubuntu 18.04 LTS with Mellanox OFED driver and
-dependencies installed. **[For artifact evaluators]** If you
+dependencies installed.
+**[For artifact evaluators]** If you
 don't have access to the Cloudlab and need one, we can provide
 the SSH access to the machines after we launch an experiment.
 However, please note that because an experiment expires after 16 hours,
