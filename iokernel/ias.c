@@ -14,8 +14,6 @@
 #include "ksched.h"
 #include "ias.h"
 
-#define IAS_DEBUG 1
-
 /* a list of all processes */
 LIST_HEAD(all_procs);
 /* a bitmap of all available cores that are currently idle */
