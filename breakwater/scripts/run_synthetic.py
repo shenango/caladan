@@ -33,6 +33,15 @@ NUM_CORES_CLIENT = 16
 # SLO = 10 * (average RPC processing time + network RTT)
 slo = (ST_AVG + NET_RTT) * 10
 
+# Verify configs #
+if OVERLOAD_ALG not in ["breakwater", "seda", "dagor"]:
+    print("Unknown overload algorithm: " + OVERLOAD_ALG)
+    exit()
+
+if ST_DIST not in ["exp", "const", "bimod"]:
+    print("Unknown service time distribution: " + ST_DIST)
+    exit()
+
 ### Function definitions ###
 def generate_shenango_config(is_server ,conn, ip, netmask, gateway, num_cores, directpath):
     config_name = ""

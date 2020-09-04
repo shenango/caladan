@@ -125,3 +125,21 @@ You can modify overload controls' parameters in
 and `src/sd_config.h` (for SEDA). If you modify parameters in
 observer machine, `scripts/run_synthetic.py` script will distribute
 updated configs to all the other machines.
+
+## Tips for reproducing the paper results
+- We provide recommended parameter values in `src/bw_config.h`,
+`src/dg_config.h`, and `src/sd_config.h` in Cloudlab xl170 experiment
+environment with 1,000 clients. Because Dagor and SEDA is sensitive to
+parameter values you may need to try adjust parameter values with experiment
+environment.
+
+- As we have shown in Figure 7, SEDA may take a long time to recover
+its rate after it overreact to the congestion. To get the stable number for
+SEDA, you may consider extending experiment time (which require more memory
+space especially for shorter average service time), or repeating experiments
+and take median or the best performance for SEDA.
+
+- The results in the paper were produced from set of xl170 machines connected
+with a single ToR switch in Cloudlab. If machines are connected with multiple
+ToR switches and spine switch, the actual number might vary from the paper, but
+you can still observe the benefit of Breakwater.
