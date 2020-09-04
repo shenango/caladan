@@ -453,13 +453,17 @@ static void srpc_server(void *arg)
 
 static void dagor_prio_update(void *arg)
 {
-	uint64_t us;
+	uint64_t now, us;
+	int nreqs;
 
 	while (true) {
 		timer_sleep(DAGOR_PRIO_MONITOR);
 
-		if (microtime() - last_prio_update < DAGOR_PRIO_UPDATE_INT ||
-		    atomic_read(&dagor_num_reqs) < DAGOR_PRIO_UPDATE_REQS)
+		now = microtime();
+		nreqs = atomic_read(&dagor_num_reqs);
+		if (nreqs == 0 ||
+		    microtime() - last_prio_update < DAGOR_PRIO_UPDATE_INT ||
+		    nreqs < DAGOR_PRIO_UPDATE_REQS)
 			continue;
 
 		us = runtime_queue_us();
@@ -472,6 +476,8 @@ static void dagor_prio_update(void *arg)
 
 		dagor_prio_ = MAX(dagor_prio_, 1.0);
 		dagor_prio_ = MIN(dagor_prio_, DG_MAX_PRIO - 1);
+
+		last_prio_update = now;
 
 		atomic_write(&dagor_prio_thresh, (int)dagor_prio_);
 		atomic_write(&dagor_num_reqs, 0);
