@@ -29,7 +29,7 @@
 #define COMMAND_QUEUE_MCOUNT	4096
 /* the egress buffer pool must be large enough to fill all the TXQs entirely */
 #define EGRESS_POOL_SIZE(nks) \
-	(PACKET_QUEUE_MCOUNT * MBUF_DEFAULT_LEN * MAX(1, guaranteedks) * 16UL)
+	(PACKET_QUEUE_MCOUNT * MBUF_DEFAULT_LEN * MAX(1, guaranteedks) * 8UL)
 
 struct iokernel_control iok;
 bool cfg_prio_is_lc;

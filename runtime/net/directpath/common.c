@@ -18,7 +18,7 @@ bool cfg_directpath_enabled;
 
 size_t directpath_rx_buf_pool_sz(unsigned int nrqs)
 {
-	return align_up(nrqs * (32 * RQ_NUM_DESC) * 16UL * MBUF_DEFAULT_LEN,
+	return align_up(MAX(8, guaranteedks) * (16 * RQ_NUM_DESC) * 16UL * MBUF_DEFAULT_LEN,
 			PGSIZE_2MB);
 }
 
