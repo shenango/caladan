@@ -34,7 +34,7 @@
 struct iokernel_control iok;
 bool cfg_prio_is_lc;
 uint64_t cfg_ht_punish_us;
-uint64_t cfg_qdelay_us;
+uint64_t cfg_qdelay_us = 10;
 
 static int generate_random_mac(struct eth_addr *mac)
 {
