@@ -14,18 +14,16 @@ git clone https://github.com/abelay/shenango
 cd shenango
 ```
 
-2) Setup DPDK, SPDK, and rdma-core.
+2) Set up submodules (e.g., DPDK, SPDK, and rdma-core).
 
 ```
-./dpdk.sh
-./spdk.sh
-./rdma-core.sh
+./build/init_submodules.sh
 ```
 
-(3) Build the IOKernel, the Shenango runtime, and Ksched and perform some machine setup.
-Before building, set the `CONFIG_*` parameters in shared.mk (e.g., `CONFIG_SPDK=y` to use
+3) Build the IOKernel, the Shenango runtime, and Ksched and perform some machine setup.
+Before building, set the parameters in build/config (e.g., `CONFIG_SPDK=y` to use
 storage, `CONFIG_DIRECTPATH=y` to use directpath, and the MLX4 or MLX5 flags to use
-directpath with MLX4 or MLX5, respectively).
+MLX4 or MLX5 NICs, respectively).
 ```
 make clean && make
 pushd ksched
@@ -34,7 +32,7 @@ popd
 sudo ./scripts/setup_machine.sh
 ```
 
-To enable debugging, set `CONFIG_DEBUG=y` in shared.mk.
+To enable debugging, set `CONFIG_DEBUG=y` in build/config.
 
 4) Install Rust and build a synthetic client-server application.
 
@@ -86,7 +84,7 @@ NIC firmware must include support for User Context Objects (DEVX) and Software M
 For the ConnectX-5, the firmware version must be at least 16.26.1040. Additionally, directpath requires
 Linux kernel version 5.0.0 or newer.
 
-To enable directpath, set `CONFIG_DIRECTPATH=y` in shared.mk before building and add `enable_directpath`
+To enable directpath, set `CONFIG_DIRECTPATH=y` in build/config before building and add `enable_directpath`
 to the config file for all runtimes that should use directpath. Each runtime launched with directpath must
 currently run as root and have a unique IP address.
 
@@ -96,7 +94,7 @@ If your device has op latencies that are greater than 10us, consider updating th
 variable (or the known_devices list) in runtime/storage.c.
 
 #### Running a simple block storage server
-Ensure that you have compiled Shenango with storage support by setting the appropriate flag in shared.mk,
+Ensure that you have compiled Shenango with storage support by setting the appropriate flag in build/config,
 and that you have built the synthetic client application.
 
 Compile the C++ bindings and the storage server:
