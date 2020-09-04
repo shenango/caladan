@@ -17,7 +17,7 @@ cd shenango
 2) Set up submodules (e.g., DPDK, SPDK, and rdma-core).
 
 ```
-./build/init_submodules.sh
+make submodules
 ```
 
 3) Build the IOKernel, the Shenango runtime, and Ksched and perform some machine setup.
