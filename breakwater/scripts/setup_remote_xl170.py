@@ -1,4 +1,7 @@
+#!/usr/bin/env python3
+
 import paramiko
+import os
 from util import *
 from config_remote import *
 
@@ -23,26 +26,27 @@ for agent in AGENTS:
 
 # distributing code-base
 print("Distributing sources...")
+repo_name = (os.getcwd().split('/'))[-2]
 # - server
-cmd = "scp -P 22 -i {} -o StrictHostKeyChecking=no -r ~/{}"\
+cmd = "scp -P 22 -i {} -o StrictHostKeyChecking=no -r ../../{}"\
         " {}@{}:~/{} > /dev/null"\
-        .format(KEY_LOCATION, SHENANGO_PATH, USERNAME, SERVER, SHENANGO_PARENT)
+        .format(KEY_LOCATION, repo_name, USERNAME, SERVER, SHENANGO_PATH)
 execute_local(cmd);
 # - client
-cmd = "scp -P 22 -i {} -o StrictHostKeyChecking=no -r ~/{}"\
+cmd = "scp -P 22 -i {} -o StrictHostKeyChecking=no -r ../../{}"\
         " {}@{}:~/{} > /dev/null"\
-        .format(KEY_LOCATION, SHENANGO_PATH, USERNAME, CLIENT, SHENANGO_PARENT)
+        .format(KEY_LOCATION, repo_name, USERNAME, CLIENT, SHENANGO_PATH)
 execute_local(cmd)
 # - agents
 for agent in AGENTS:
-    cmd = "scp -P 22 -i {} -o StrictHostKeyChecking=no -r ~/{}"\
+    cmd = "scp -P 22 -i {} -o StrictHostKeyChecking=no -r ../../{}"\
             " {}@{}:~/{} > /dev/null"\
-            .format(KEY_LOCATION, SHENANGO_PATH, USERNAME, agent, SHENANGO_PARENT)
+            .format(KEY_LOCATION, repo_name, USERNAME, agent, SHENANGO_PATH)
     execute_local(cmd)
 
 # install sub-modules
-print("Initializing submodules... (it may take a few mintues)")
-cmd = "cd ~/{} && ./build/init_submodules.sh".format(SHENANGO_PATH)
+print("Building submodules... (it may take a few mintues)")
+cmd = "cd ~/{} && make submodules".format(SHENANGO_PATH)
 execute_remote([server_conn, client_conn] + agent_conns, cmd, True)
 
 # patch and build shenango

@@ -3,13 +3,17 @@ Breakwater is a server overload control system for
 microseconds-level RPCs. This repo includes 
 Shenango implementation of Breakwater as a library of
 RPC layer between network transport and application.
+Breakwater shares the Shenango code-base with
+[Caladan](https://github.com/joshuafried/caladan-ae),
+but Breakwater is independent to Caladan.
 
 ## Supported platform
 Breakwater requires an Intel server with many cores equipped
 with an Intel NIC based on 82599 chip or Mellanox ConnectX-4
 or ConnectX-5 NIC. For the best performance,
 server and client machines with Mellanox NICs connected with
-a low latency switch are necessary.
+a low latency switch are necessary. Breakwater has been tested
+on Ubuntu 18.04 with Linux kernel 4.15.0.
 
 ## Terminology
 - Server: RPC server which is serving RPC request
@@ -23,14 +27,18 @@ and collects data from them. Observer could be the same as server,
 client, or agent machines.
 
 ## Running Breakwater
-1. Clone this repository to each machine.
+0. Install dependencies
 ```
-$ git clone [to_be_upated]
+$ sudo apt-get update
+$ sudo apt-get install -y libnuma-dev libaio1 libaio-dev uuid-dev libcunit1 libcunit1-doc libcunit1-dev libmnl-dev cmake python3 python3-pip
+$ sudo python3 -m pip install paramiko
 ```
 
-2. Initialize the submodules
+1. Clone this repository.
+
+2. Build submodules
 ```
-shenango$ ./build/init_submodules.sh
+$ make submodules
 ```
 
 3. Modify `build/config` according to the experiment environment.
@@ -41,16 +49,16 @@ CoonectX-5 Mellanox NICs.
 4. If the machine is equipped with Mellanox ConnectX-4 NIC,
 apply ConnectX-4 patch.
 ```
-shenango$ git apply breakwater/build/connectx-4.patch
+$ git apply breakwater/build/connectx-4.patch
 ```
 
 5. Build Shenango and execute the 
 `scripts/setup_machine.sh` script in `breakwater` directory.
 ```
-shenango$ make clean && make
-shenango$ make -C bindings/cc
-shenango$ cd breakwater
-shenango/breakwater$ sudo ./scripts/setup_machine.sh
+$ make clean && make
+$ make -C bindings/cc
+$ cd breakwater
+breakwater$ sudo ./scripts/setup_machine.sh
 ```
 
 6. At observer machine, provide the SSH information of machines in
@@ -63,7 +71,7 @@ directory. Modify the configuration of experiment script for
 different overload control mechanisms, average service time,
 service time distribution, and the number of clients.
 ```
-shenango/breakwater$ python3 scripts/run_synthetic.py
+breakwater$ ./scripts/run_synthetic.py
 ```
 You can modify overload controls' parameters in
 `src/bw_config.h` (for Breakwater), `src/dg_config.h` (for Dagor),
@@ -96,20 +104,17 @@ you will need to make another request to us after expiration.
 Further, as Cloudlab is shared with other researchers, its
 availability is not guaranteed.
 
-2. Once you create an experiment, clone this repository to the observer
-machine.
-```
-$ git clone [to_be_updated]
-```
+2. Once you create an experiment, clone this repository to the
+observer machine.
 
 3. At the observer, provide the information on remote servers to
 setup Shenango and Breakwater in `scripts/config_remote.py`, and
 execute `scripts/setup_remote_xl170.py`.
 ```
-$ cd shenango/breakwater
+$ cd breakwater
 # Modify config_remote.py
-shenango/breakwater$ vim scripts/config_remote.py
-shenango/breakwater$ python3 scripts/setup_remote_xl170.py
+breakwater$ vim scripts/config_remote.py
+breakwater$ ./scripts/setup_remote_xl170.py
 ```
 
 4. You can execute `scripts/run_synthetic.py` at observer to experiment
@@ -121,7 +126,7 @@ configuration of experiment script to change overload control
 mechanisms, average service time, service time distribution, and
 the number of clients.
 ```
-shenango/breakwater$ python3 scripts/run_synthetic.py
+breakwater$ ./scripts/run_synthetic.py
 ```
 You can modify overload controls' parameters in
 `src/bw_config.h` (for Breakwater), `src/dg_config.h` (for Dagor),
