@@ -27,6 +27,16 @@ static void dp_clients_add_client(struct proc *p)
 {
 	int ret;
 
+	if (!sched_attach_proc(p)) {
+		p->kill = false;
+		dp.clients[dp.nr_clients++] = p;
+	} else {
+		log_err("dp_clients: failed to attach proc.");
+		p->attach_fail = true;
+		proc_put(p);
+		return;
+	}
+
 	if (!p->has_directpath) {
 		ret = rte_hash_add_key_data(dp.mac_to_proc, &p->mac.addr[0], p);
 		if (ret < 0)
@@ -41,12 +51,6 @@ static void dp_clients_add_client(struct proc *p)
 #endif
 	}
 
-	if (!sched_attach_proc(p)) {
-		p->kill = false;
-		dp.clients[dp.nr_clients++] = p;
-	} else {
-		log_err("dp_clients: failed to attach proc.");
-	}
 }
 
 void proc_release(struct ref *r)

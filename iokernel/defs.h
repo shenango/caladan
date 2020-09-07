@@ -119,6 +119,7 @@ struct proc {
 	bool			has_directpath;
 	struct ref		ref;
 	unsigned int		kill:1;       /* the proc is being torn down */
+	unsigned int		attach_fail:1;
 	struct congestion_info	*congestion_info;
 	unsigned long		policy_data;
 

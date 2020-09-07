@@ -342,6 +342,10 @@ static void control_remove_client(struct proc *p)
 		return;
 	}
 
+	/* client failed to attach to scheduler, notify with signal */
+	if (p->attach_fail)
+		kill(p->pid, SIGINT);
+
 	control_destroy_proc(p);
 	clients[i] = clients[nr_clients - 1];
 
