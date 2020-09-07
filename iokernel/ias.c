@@ -46,7 +46,7 @@ static void ias_cleanup_core(unsigned int core)
 	cores[core] = NULL;
 }
 
-static int ias_attach(struct proc *p, struct sched_spec *cfg)
+static int ias_attach(struct proc *p, struct sched_spec *sched_cfg)
 {
 	struct ias_data *sd;
 	int i, core, sib;
@@ -54,7 +54,7 @@ static int ias_attach(struct proc *p, struct sched_spec *cfg)
 	/* validate parameters */
 	if (ias_procs_nr >= IAS_NPROC)
 		return -ENOENT;
-	if (cfg->guaranteed_cores % 2 != 0)
+	if (!cfg.noht && sched_cfg->guaranteed_cores % 2 != 0)
 		return -EINVAL;
 
 	/* allocate and initialize process state */
@@ -63,13 +63,13 @@ static int ias_attach(struct proc *p, struct sched_spec *cfg)
 		return -ENOMEM;
 	memset(sd, 0, sizeof(*sd));
 	sd->p = p;
-	sd->threads_guaranteed = cfg->guaranteed_cores;
-	sd->threads_max = cfg->max_cores;
-	sd->threads_limit = cfg->max_cores;
-	sd->is_lc = cfg->priority == SCHED_PRIO_LC;
+	sd->threads_guaranteed = sched_cfg->guaranteed_cores;
+	sd->threads_max = sched_cfg->max_cores;
+	sd->threads_limit = sched_cfg->max_cores;
+	sd->is_lc = sched_cfg->priority == SCHED_PRIO_LC;
 	if (sd->is_lc)
-		sd->ht_punish_us = cfg->ht_punish_us;
-	sd->qdelay_us = cfg->qdelay_us;
+		sd->ht_punish_us = sched_cfg->ht_punish_us;
+	sd->qdelay_us = sched_cfg->qdelay_us;
 	sd->threads_active = 0;
 	p->policy_data = (unsigned long)sd;
 	list_add(&all_procs, &sd->all_link);
@@ -81,15 +81,23 @@ static int ias_attach(struct proc *p, struct sched_spec *cfg)
 		if (core == NCPU)
 			goto fail_reserve;
 
-		sib = sched_siblings[core];
-#ifdef IAS_DEBUG
-		owners[core] = owners[sib] = p->pid;
-#endif
 		bitmap_set(sd->reserved_cores, core);
 		bitmap_set(ias_reserved_cores, core);
+		i--;
+#ifdef IAS_DEBUG
+		owners[core] = p->pid;
+#endif
+
+		if (cfg.noht)
+			continue;
+
+		sib = sched_siblings[core];
 		bitmap_set(sd->reserved_cores, sib);
 		bitmap_set(ias_reserved_cores, sib);
-		i -= 2;
+		i--;
+#ifdef IAS_DEBUG
+		owners[sib] = p->pid;
+#endif
 	}
 
 	/* reserve a unique index */
@@ -520,7 +528,7 @@ static void ias_sched_poll(uint64_t now, int idle_cnt, bitmap_ptr_t idle)
 	}
 
 	/* try to run the hyperthread controller */
-	if (now - last_ht_us >= IAS_HT_INTERVAL_US) {
+	if (!cfg.noht && now - last_ht_us >= IAS_HT_INTERVAL_US) {
 		last_ht_us = now;
 		ias_ht_poll();
 	}

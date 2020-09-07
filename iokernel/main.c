@@ -155,10 +155,6 @@ int main(int argc, char *argv[])
 
 	for (i = 2; i < argc; i++) {
 		if (!strcmp(argv[i], "noht")) {
-			if (sched_ops == &ias_ops) {
-				fprintf(stderr, "ias can't be used w/ noht\n");
-				return -EINVAL;
-			}
 			cfg.noht = true;
 		} else if (!strcmp(argv[i], "nobw")) {
 			cfg.nobw = true;
