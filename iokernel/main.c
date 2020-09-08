@@ -36,7 +36,6 @@ static const struct init_entry iok_init_handlers[] = {
 	IOK_INITIALIZER(ksched),
 	IOK_INITIALIZER(sched),
 	IOK_INITIALIZER(simple),
-	IOK_INITIALIZER(mis),
 	IOK_INITIALIZER(numa),
 	IOK_INITIALIZER(ias),
 
@@ -131,7 +130,7 @@ static void print_usage(void)
 {
 	printf("usage: POLICY [noht/core_list/nobw/mutualpair]\n");
 	printf("\tsimple: the standard, basic scheduler policy\n");
-	printf("\tmis: a policy aware of microarchitectural interference\n");
+	printf("\tias: a policy aware of CPU interference\n");
 	printf("\tnuma: a policy aware of NUMA architectures\n");
 }
 
@@ -142,8 +141,6 @@ int main(int argc, char *argv[])
 	if (argc >= 2) {
 		if (!strcmp(argv[1], "simple")) {
 			sched_ops = &simple_ops;
-		} else if (!strcmp(argv[1], "mis")) {
-			sched_ops = &mis_ops;
 		} else if (!strcmp(argv[1], "numa")) {
 			sched_ops = &numa_ops;
 		} else if (!strcmp(argv[1], "ias")) {
