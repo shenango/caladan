@@ -50,6 +50,7 @@ struct ias_data {
 	/* the hyperthread subcontroller */
 	uint64_t		ht_punish_us;
 	uint64_t		ht_punish_count;
+	float			ht_punish_us_inv;
 
 	/* memory bandwidth subcontroller */
 	float			bw_llc_miss_rate;
@@ -69,7 +70,7 @@ extern uint64_t now_us;
 
 extern int ias_idle_placeholder_on_core(struct ias_data *sd, unsigned int core);
 extern int ias_idle_on_core(unsigned int core);
-extern bool ias_can_add_kthread(struct ias_data *sd, bool new_phys_core);
+extern bool ias_can_add_kthread(struct ias_data *sd, bool ignore_ht_punish_cores);
 extern int ias_add_kthread(struct ias_data *sd);
 extern int ias_add_kthread_on_core(unsigned int core);
 
@@ -80,9 +81,26 @@ extern int ias_add_kthread_on_core(unsigned int core);
 
 DECLARE_BITMAP(ias_ht_punished_cores, NCPU);
 
+struct ias_ht_data {
+	/* the scheduler's generation counter */
+	uint64_t	sgen;
+	/* the runtime's generation counter */
+	uint64_t	rgen;
+	/* the last time these counters were updated */
+	uint64_t	last_us;
+	/* the fraction of the punish budget used so far */
+	float		budget_used;
+};
+
+extern struct ias_ht_data ias_ht_percore[NCPU];
+
 extern void ias_ht_poll(void);
 extern unsigned int ias_ht_relinquish_core(struct ias_data *sd);
 
+static inline float ias_ht_budget_used(unsigned int core)
+{
+	return ias_ht_percore[core].budget_used;
+}
 
 /*
  * Bandwidth (BW) subcontroller definitions

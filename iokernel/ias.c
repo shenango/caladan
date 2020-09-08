@@ -69,6 +69,8 @@ static int ias_attach(struct proc *p, struct sched_spec *sched_cfg)
 	sd->is_lc = sched_cfg->priority == SCHED_PRIO_LC;
 	if (sd->is_lc)
 		sd->ht_punish_us = sched_cfg->ht_punish_us;
+	if (sd->ht_punish_us)
+		sd->ht_punish_us_inv = 1.0 / (float)sd->ht_punish_us;
 	sd->qdelay_us = sched_cfg->qdelay_us;
 	sd->threads_active = 0;
 	p->policy_data = (unsigned long)sd;
@@ -282,6 +284,9 @@ static float ias_core_score(struct ias_data *sd, unsigned int core)
 			score += 2.0f;
 	}
 
+	/* bias in favor of cores whose siblings are most under HT budget */
+	score += 1.0 - MIN(1.0, ias_ht_budget_used(sched_siblings[core]));
+
 	return score;
 }
 
@@ -309,18 +314,21 @@ static unsigned int ias_choose_core(struct ias_data *sd)
 /**
  * ias_can_add_kthread - checks if a core can be added to a process
  * @sd: the process to check
- *
+ * @ignore_ht_punish_cores: exclude cores that may be pending HT punishment
+ * *
  * Returns true if a core can be added.
  */
-bool ias_can_add_kthread(struct ias_data *sd, bool new_phys_core)
+bool ias_can_add_kthread(struct ias_data *sd, bool ignore_ht_punish_cores)
 {
 	unsigned int core, tmp;
 
 	sched_for_each_allowed_core(core, tmp) {
-		if (new_phys_core && cores[sched_siblings[core]] == sd)
+		if (!ias_can_preempt_core(sd, core))
 			continue;
-		if (ias_can_preempt_core(sd, core))
-			return true;
+		if (ignore_ht_punish_cores &&
+		    ias_ht_budget_used(sched_siblings[core]) >= 1.0f)
+			continue;
+		return true;
 	}
 
 	return false;

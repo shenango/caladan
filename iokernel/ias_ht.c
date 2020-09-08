@@ -19,17 +19,25 @@ uint64_t ias_ht_relax_count;
 /* a bitmap of cores that are currently punished */
 DEFINE_BITMAP(ias_ht_punished_cores, NCPU);
 
-struct ias_ht_data {
-	/* the scheduler's generation counter */
-	uint64_t	sgen;
-	/* the runtime's generation counter */
-	uint64_t	rgen;
-	/* the last time these counters were updated */
-	uint64_t	last_us;
-};
-
 /* per-core data for this subcontroller */
-static struct ias_ht_data ias_ht_percore[NCPU];
+struct ias_ht_data ias_ht_percore[NCPU];
+
+static bool ias_ht_punish_selfpair(struct ias_data *sd, unsigned int sib)
+{
+	/* check if queues have built up for this sd */
+	if (sd->current_qdelay_us >= sd->ht_punish_us)
+		return false;
+
+	/* don't move a thread that is already over its HT budget */
+	if (ias_ht_budget_used(sib) >= 1.0f)
+		return false;
+
+	/* check if we can find a lane that isn't going to be punished */
+	if (!ias_can_add_kthread(sd, true))
+		return false;
+
+	return true;
+}
 
 static void ias_ht_punish(struct ias_data *sd, unsigned int core)
 {
@@ -41,9 +49,15 @@ static void ias_ht_punish(struct ias_data *sd, unsigned int core)
 	    bitmap_test(ias_ht_punished_cores, sib))
 		return;
 
-	/* don't preempt an LC task if we can't add back a core */
 	sib_sd = cores[sib];
-	if (sib_sd && sib_sd->is_lc && !ias_can_add_kthread(sib_sd, true))
+
+	/*
+	 * Breaking up self-pairings can harm throughput, ensure that there is
+	 * enough spare capacity to do so
+	 */
+	if (sib_sd == sd && !ias_ht_punish_selfpair(sd, sib))
+		return;
+	else if (sib_sd && sib_sd->is_lc && !ias_can_add_kthread(sd, false))
 		return;
 
 	/* idle the core, but mark it as in use by the process */
@@ -77,6 +91,8 @@ static void ias_ht_relax(struct ias_data *sd, unsigned int core)
 	WARN_ON(ias_idle_on_core(sib));
 }
 
+
+
 static uint64_t ias_ht_poll_one(unsigned int core)
 {
 	struct ias_ht_data *htd = &ias_ht_percore[core];
@@ -95,12 +111,13 @@ static uint64_t ias_ht_poll_one(unsigned int core)
 			htd->last_us = now_us;
 		}
 		/* skip if stuck in the runtime scheduler */
-		if ((rgen & 0x1) != 0x1)
-			return 0;
-
-		return now_us - htd->last_us;
+		if ((rgen & 0x1) == 0x1) {
+			htd->budget_used = (float)(now_us - htd->last_us) * sd->ht_punish_us_inv;
+			return now_us - htd->last_us;
+		}
 	}
 
+	htd->budget_used = 0;
 	return 0;
 }
 
@@ -133,6 +150,7 @@ void ias_ht_poll(void)
 
 	/* loop over cores to update service times */
 	sched_for_each_allowed_core(core, tmp) {
+		// TODO: weight by fraction of budget
 		arr[num].service_us = ias_ht_poll_one(core);
 		arr[num++].core = core;
 	}
