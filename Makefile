@@ -39,6 +39,7 @@ DPDK_LIBS= -L$(DPDK_PATH)/build/lib
 DPDK_LIBS += -Wl,-whole-archive -lrte_pmd_e1000 -Wl,-no-whole-archive
 DPDK_LIBS += -Wl,-whole-archive -lrte_pmd_ixgbe -Wl,-no-whole-archive
 DPDK_LIBS += -Wl,-whole-archive -lrte_mempool_ring -Wl,-no-whole-archive
+DPDK_LIBS += -Wl,-whole-archive -lrte_pmd_tap -Wl,-no-whole-archive
 DPDK_LIBS += -ldpdk
 DPDK_LIBS += -lrte_eal
 DPDK_LIBS += -lrte_ethdev

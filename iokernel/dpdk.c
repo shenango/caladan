@@ -194,7 +194,7 @@ void dpdk_print_eth_stats(void)
  */
 int dpdk_init(void)
 {
-	char *argv[4];
+	char *argv[5];
 	char buf[10];
 
 	/* init args */
@@ -204,9 +204,10 @@ int dpdk_init(void)
 	sprintf(buf, "%d", sched_dp_core);
 	argv[2] = buf;
 	argv[3] = "--socket-mem=128";
+	argv[4] = "--vdev=net_tap0";
 
 	/* initialize the Environment Abstraction Layer (EAL) */
-	int ret = rte_eal_init(sizeof(argv) / sizeof(argv[0]), argv);
+	int ret = rte_eal_init(ARRAY_SIZE(argv), argv);
 	if (ret < 0) {
 		log_err("dpdk: error with EAL initialization");
 		return -1;
