@@ -44,6 +44,9 @@ static void ias_ht_punish(struct ias_data *sd, unsigned int core)
 	struct ias_data *sib_sd;
 	unsigned int sib = sched_siblings[core];
 
+	if (!bitmap_test(sd->reserved_cores, core))
+		return;
+
 	/* check if the core is already punished */
 	if (bitmap_test(ias_ht_punished_cores, core) ||
 	    bitmap_test(ias_ht_punished_cores, sib))

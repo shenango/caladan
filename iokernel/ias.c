@@ -276,7 +276,7 @@ static float ias_core_score(struct ias_data *sd, unsigned int core)
 	score = ias_locality_score(sd, core);
 
 	if (bitmap_test(sd->reserved_cores, core))
-		score += 6.0f;
+		score += 7.0f;
 
 	if (cfg.mutualpair && sib_task != sd) {
 		score += 3.0f;
