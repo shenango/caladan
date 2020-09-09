@@ -189,6 +189,7 @@ int ias_idle_placeholder_on_core(struct ias_data *sd, unsigned int core)
 	ias_cleanup_core(core);
 	cores[core] = sd;
 	ias_gen[core]++;
+	bitmap_set(ias_idle_cores, core);
 	sd->threads_active++;
 	return 0;
 }
