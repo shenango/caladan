@@ -14,9 +14,6 @@ rm /dev/ksched
 insmod $(dirname $0)/../ksched/build/ksched.ko
 mknod /dev/ksched c 280 0
 chmod uga+rwx /dev/ksched
-rm /dev/pcicfg
-mknod /dev/pcicfg c 281 0
-chmod uga+rwx /dev/pcicfg
 
 # reserve huge pages
 echo 5192 > /sys/devices/system/node/node0/hugepages/hugepages-2048kB/nr_hugepages
@@ -24,3 +21,7 @@ echo 0 > /sys/devices/system/node/node1/hugepages/hugepages-2048kB/nr_hugepages
 for n in /sys/devices/system/node/node[2-9]; do
 	echo 0 > $n/hugepages/hugepages-2048kB/nr_hugepages
 done
+
+# load msr module
+modprobe msr
+

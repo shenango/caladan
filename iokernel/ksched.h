@@ -15,40 +15,10 @@
 #define __user
 #include "../ksched/ksched.h"
 
-// TODO: should not be hard-coded.
-#define SOCKET0_IMC_BUS_NO (0x7F)
-#define SOCKET0_IMC_DEVICE_NO (0x14)
-#define SOCKET0_CHANNEL0_IMC_FUNC_NO (0)
-#define SOCKET0_CHANNEL1_IMC_FUNC_NO (1)
-
-#define MC_CHy_PCI_PMON_CTL0 (0xD8)
-#define MC_CHy_PCI_PMON_CTL1 (0xDC)
-#define MC_CHy_PCI_PMON_CTL2 (0xE0)
-#define MC_CHy_PCI_PMON_CTL3 (0xE4)
-#define MC_CHy_PCI_PMON_CTR0_LOW (0xA0)
-#define MC_CHy_PCI_PMON_CTR0_HIGH (0xA4)
-#define MC_CHy_PCI_PMON_CTR1_LOW (0xA8)
-#define MC_CHy_PCI_PMON_CTR1_HIGH (0xAC)
-#define MC_CHy_PCI_PMON_CTR2_LOW (0xB0)
-#define MC_CHy_PCI_PMON_CTR2_HIGH (0xB4)
-#define MC_CHy_PCI_PMON_CTR3_LOW (0xB8)
-#define MC_CHy_PCI_PMON_CTR3_HIGH (0xBC)
-
-#define MC_CHy_PCI_PMON_CTL_ENV_SEL_SHIFT (0)
-#define MC_CHy_PCI_PMON_CTL_UMASK_SHIFT (8)
-#define MC_CHy_PCI_PMON_CTL_ENABLE_SHIFT (22)
-
-#define EVENT_CODE_CAS_COUNT (0x04)
-#define	UMASK_CAS_COUNT_ALL (0xF)
-
-#define PROBE_MEM_LAT_SAMPLE_NUM (5)
-
 extern int ksched_fd, ksched_count;
 extern struct ksched_shm_cpu *ksched_shm;
 extern cpu_set_t ksched_set;
 extern unsigned int ksched_gens[NCPU];
-extern volatile char *ucmem;
-extern unsigned int *low_cas_count_all_ptr;
 
 /**
  * ksched_run - runs a kthread on a specific core
@@ -177,24 +147,4 @@ static inline void ksched_send_intrs(void)
 	BUG_ON(ret);
 
 	CPU_ZERO(&ksched_set);
-}
-
-static inline unsigned int pci_cfg_index(unsigned int bus, unsigned int device,
-                                  unsigned int function, unsigned int offset) {
-	unsigned int byte_address;
-        assert(device >= 0);
-        assert(device < (1 << 5));
-        assert(function >= 0);
-        assert(function < (1 << 3));
-        assert(offset >= 0);
-        assert(offset < (1 << 12));
-        byte_address = (bus << 20) | (device << 15) | (function << 12) | offset;
-        return byte_address;
-}
-
-/* Get the number of DRAM read/write happens since the last call. This function
- * should be called every small time interval otherwise the counter will
- * overflow. */
-static inline uint32_t get_cas_count_all(void) {
-	return ACCESS_ONCE(*low_cas_count_all_ptr);
 }

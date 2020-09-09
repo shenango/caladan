@@ -24,9 +24,6 @@ cpu_set_t ksched_set;
 /* the generation number for each core */
 unsigned int ksched_gens[NCPU];
 
-int pci_cfg_fd;
-char *pci_cfg_base_ptr;
-unsigned int *low_cas_count_all_ptr;
 
 /**
  * ksched_init - initializes the ksched kernel module interface
@@ -60,35 +57,5 @@ int ksched_init(void)
 		ksched_idle_hint(i, 0);
 	}
 
-	/* mmap pci cfg space to userspace, this is found to be way more faster than 
-           using perf or pread/pwrite to read IMC counters. */
-        pci_cfg_fd = open("/dev/pcicfg", O_RDWR);
-        if (pci_cfg_fd < 0)
-                return -errno;
-        pci_cfg_base_ptr = (char *)mmap(NULL, PCI_CFG_SIZE, PROT_READ | PROT_WRITE,
-					MAP_SHARED, pci_cfg_fd, 0);
-	
-	/* program MC_CHy_PCI_PMON_CTL0, we only monitor one channel (out of 2 in zig/zag) 
-           of socket 0. But all DRAM traffics (read + write) are monitored */
-        unsigned int *ctrl_ptr =
-                (unsigned int *)(pci_cfg_base_ptr +
-                             pci_cfg_index(SOCKET0_IMC_BUS_NO,
-                                           SOCKET0_IMC_DEVICE_NO,
-                                           SOCKET0_CHANNEL0_IMC_FUNC_NO,
-                                           MC_CHy_PCI_PMON_CTL0));
-	*ctrl_ptr = (EVENT_CODE_CAS_COUNT << MC_CHy_PCI_PMON_CTL_ENV_SEL_SHIFT) |
-		(UMASK_CAS_COUNT_ALL << MC_CHy_PCI_PMON_CTL_UMASK_SHIFT) |
-		(1 /* enabled */ << MC_CHy_PCI_PMON_CTL_ENABLE_SHIFT);
-
-	/* a small trick is that we only monitor the low 32-bit reg in order 
-           to reduce the overhead. */
-	low_cas_count_all_ptr =
-		(unsigned int *)(pci_cfg_base_ptr +
-                             pci_cfg_index(SOCKET0_IMC_BUS_NO,
-                                           SOCKET0_IMC_DEVICE_NO,
-                                           SOCKET0_CHANNEL0_IMC_FUNC_NO,
-                                           MC_CHy_PCI_PMON_CTR0_LOW));
-
         return 0;
 }
-

@@ -34,6 +34,10 @@ test_src = $(wildcard tests/*.c)
 test_obj = $(test_src:.c=.o)
 test_targets = $(basename $(test_src))
 
+# pcm lib
+PCM_DEPS = $(ROOT_PATH)/deps/pcm/libPCM.a
+PCM_LIBS = -lm -lstdc++
+
 # dpdk libs
 DPDK_LIBS= -L$(DPDK_PATH)/build/lib
 DPDK_LIBS += -Wl,-whole-archive -lrte_pmd_e1000 -Wl,-no-whole-archive
@@ -69,9 +73,9 @@ libnet.a: $(net_obj)
 libruntime.a: $(runtime_obj)
 	$(AR) rcs $@ $^
 
-iokerneld: $(iokernel_obj) libbase.a libnet.a base/base.ld
+iokerneld: $(iokernel_obj) libbase.a libnet.a base/base.ld $(PCM_DEPS)
 	$(LD) $(LDFLAGS) -o $@ $(iokernel_obj) libbase.a libnet.a $(DPDK_LIBS) \
-	-lpthread -lnuma -ldl
+	$(PCM_DEPS) $(PCM_LIBS) -lpthread -lnuma -ldl
 
 $(test_targets): $(test_obj) libbase.a libruntime.a libnet.a base/base.ld
 	$(LD) $(LDFLAGS) -o $@ $@.o $(RUNTIME_LIBS)

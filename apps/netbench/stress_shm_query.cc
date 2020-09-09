@@ -2,6 +2,7 @@ extern "C" {
 #include <base/cpu.h>
 #include <base/log.h>
 #include <base/mem.h>
+#include "../../iokernel/pcm.h"
 }
 
 #include <fcntl.h>
@@ -14,7 +15,6 @@ extern "C" {
 #include <chrono>
 #include <iostream>
 
-#include "../../iokernel/ksched.h"
 #include "runtime.h"
 #include "sync.h"
 #include "synthetic_worker.h"
@@ -33,13 +33,10 @@ struct ShmMonitor {
 };
 
 struct MemBwMonitor {
-  int pci_cfg_fd = -1;
-  volatile unsigned int *low_cas_count_all_ptr;
-  int64_t next_us;
+  int64_t next_us = INT64_MAX;
   int64_t frequency_us;
   unsigned int last_read;
   double mbps_mult;
-  volatile uint64_t *mem;
   int64_t Poll(int64_t now);
   int Init(uint64_t freq_us);
 };
@@ -58,10 +55,9 @@ int64_t ShmMonitor::Poll(int64_t now) {
 }
 
 int64_t MemBwMonitor::Poll(int64_t now) {
-  if (pci_cfg_fd < 0) return INT64_MAX;
   if (now < next_us) return next_us;
 
-  unsigned int cur = *low_cas_count_all_ptr;
+  unsigned int cur = pcm_caladan_get_cas_count(0);
   printf("mem %.2f %lu\n", (double)(cur - last_read) * mbps_mult, rdtsc());
   last_read = cur;
 
@@ -70,38 +66,22 @@ int64_t MemBwMonitor::Poll(int64_t now) {
 }
 
 int MemBwMonitor::Init(uint64_t freq_us) {
-  pci_cfg_fd = open("/dev/pcicfg", O_RDWR);
-  if (pci_cfg_fd < 0) return -errno;
-  char *pci_cfg_base_ptr = (char *)mmap(
-      NULL, PCI_CFG_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, pci_cfg_fd, 0);
-  unsigned int *ctrl_ptr =
-      (unsigned int *)(pci_cfg_base_ptr +
-                       pci_cfg_index(SOCKET0_IMC_BUS_NO, SOCKET0_IMC_DEVICE_NO,
-                                     SOCKET0_CHANNEL0_IMC_FUNC_NO,
-                                     MC_CHy_PCI_PMON_CTL0));
-  *ctrl_ptr = (EVENT_CODE_CAS_COUNT << MC_CHy_PCI_PMON_CTL_ENV_SEL_SHIFT) |
-              (UMASK_CAS_COUNT_ALL << MC_CHy_PCI_PMON_CTL_UMASK_SHIFT) |
-              (1 /* enabled */ << MC_CHy_PCI_PMON_CTL_ENABLE_SHIFT);
-  low_cas_count_all_ptr =
-      (unsigned int *)(pci_cfg_base_ptr +
-                       pci_cfg_index(SOCKET0_IMC_BUS_NO, SOCKET0_IMC_DEVICE_NO,
-                                     SOCKET0_CHANNEL0_IMC_FUNC_NO,
-                                     MC_CHy_PCI_PMON_CTR0_LOW));
-
+  pcm_caladan_init(0);
+  uint32_t chan = pcm_caladan_get_active_channel_count();
   frequency_us = next_us = freq_us;
-  mbps_mult = 2.0 * 64.0 / (double)freq_us;
+  mbps_mult = (double)chan * (double)CACHE_LINE_SIZE / (double)freq_us;
   return 0;
 }
 
 void run(std::vector<ShmMonitor> &shms, MemBwMonitor &mem) {
   int64_t earliest_us, now = microtime();
   while (true) {
-    earliest_us = UINT64_MAX;
+    earliest_us = INT64_MAX;
     for (auto &shm : shms) earliest_us = MIN(earliest_us, shm.Poll(now));
     earliest_us = MIN(earliest_us, mem.Poll(now));
     now = microtime();
     if (earliest_us > now + 20) {
-      struct timespec req = {0, 1000L * earliest_us - now};
+      struct timespec req = {0, 1000L * (earliest_us - now)};
       nanosleep(&req, NULL);
       now = microtime();
     }

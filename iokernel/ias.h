@@ -12,7 +12,7 @@
 /* the maximum number of processes */
 #define IAS_NPROC			32
 /* the memory bandwidth limit */
-#define IAS_BW_LIMIT			0.09
+#define IAS_BW_LIMIT			25000.0
 /* the bandwidth controller's adjustment interval */
 #define IAS_BW_INTERVAL_US		10
 /* the HT controller's adjustment interval */
@@ -107,6 +107,8 @@ static inline float ias_ht_budget_used(unsigned int core)
  */
 
 extern void ias_bw_poll(void);
+extern int ias_bw_init(void);
+extern float ias_bw_estimate_multiplier;
 
 
 /*

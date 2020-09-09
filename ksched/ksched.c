@@ -36,7 +36,6 @@
 #include "ksched.h"
 #include "../iokernel/pmc.h"
 
-#define KSCHED_PMC_PROBE_DELAY (1)
 #define CORE_PERF_GLOBAL_CTRL_ENABLE_PMC_0 (0x1)
 #define CORE_PERF_GLOBAL_CTRL_ENABLE_PMC_1 (0x2)
 
@@ -72,8 +71,6 @@ int ipi_ldrs_num = 0;
 
 /* the character device that provides the ksched IOCTL interface */
 static struct cdev ksched_cdev;
-/* the character device that mmaps the PCI configuration space */
-static struct cdev pci_cfg_cdev;
 
 /* shared memory between the IOKernel and the Linux Kernel */
 static __read_mostly struct ksched_shm_cpu *shm;
@@ -507,23 +504,6 @@ static struct file_operations ksched_ops = {
 	.release	= ksched_release,
 };
 
-static int pci_cfg_mmap(struct file *file, struct vm_area_struct *vma)
-{
-        if (!capable(CAP_SYS_ADMIN))
-                return -EACCES;
-        vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
-        if (io_remap_pfn_range(vma, vma->vm_start, PCI_CFG_ADDRESS >> PAGE_SHIFT,
-			    vma->vm_end - vma->vm_start, vma->vm_page_prot)) {
-	        return -EAGAIN;
-	}
-	return 0;
-}
-
-static struct file_operations pci_cfg_ops = {
-	.owner		= THIS_MODULE,
-	.mmap		= pci_cfg_mmap,
-};
-
 /* TODO: This is a total hack to make ksched work as a module */
 static struct cpuidle_state backup_state;
 static int backup_state_count;
@@ -574,7 +554,6 @@ static void __init ksched_init_pmc(void *arg)
 static int __init ksched_init(void)
 {
 	dev_t devno_ksched = MKDEV(KSCHED_MAJOR, KSCHED_MINOR);
-	dev_t devno_pci_cfg;
 	int ret;
 
 #ifdef OS_SUPPORT_CUSTOMIZED_IPI_HANDER
@@ -614,27 +593,13 @@ static int __init ksched_init(void)
 	smp_call_function(ksched_init_pmc, NULL, 1);
 	printk(KERN_INFO "ksched: API V2 enabled");
 
-        devno_pci_cfg = MKDEV(PCI_CFG_MAJOR, PCI_CFG_MINOR);
-	ret = register_chrdev_region(devno_pci_cfg, 1, "pcicfg");
-	if (ret) {
-	  goto fail_pci_cfg_reg_cdev_region;
-	}
-	cdev_init(&pci_cfg_cdev, &pci_cfg_ops);
-	ret = cdev_add(&pci_cfg_cdev, devno_pci_cfg, 1);
-	if (ret) {
-	  goto fail_pci_cfg_cdev_add;
-	}
-
 #ifdef OS_SUPPORT_CUSTOMIZED_IPI_HANDER
 	set_customized_ipi_handler(ipi_handler);
 	prepare_ldrs();	
 #endif
-	
+
 	return 0;
-	
-fail_pci_cfg_cdev_add:
-	unregister_chrdev_region(devno_pci_cfg, 1);
-fail_pci_cfg_reg_cdev_region:
+
 fail_hijack:
 	vfree(shm);
 fail_shm:
@@ -650,14 +615,11 @@ static void __exit ksched_exit(void)
 	struct ksched_percpu *p;
 
 	dev_t devno_ksched = MKDEV(KSCHED_MAJOR, KSCHED_MINOR);
-	dev_t devno_pci_cfg = MKDEV(PCI_CFG_MAJOR, PCI_CFG_MINOR);
 
 	ksched_cpuidle_unhijack();
 	vfree(shm);
 	cdev_del(&ksched_cdev);
 	unregister_chrdev_region(devno_ksched, 1);
-	cdev_del(&pci_cfg_cdev);
-	unregister_chrdev_region(devno_pci_cfg, 1);
 
 	for_each_online_cpu(cpu) {
 		p = per_cpu_ptr(&kp, cpu);

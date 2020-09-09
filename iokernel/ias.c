@@ -470,8 +470,8 @@ static void ias_print_debug_info(void)
 
 	log_info("tsc %lu bw_cur %f bw_punish %ld bw_relax %ld bw_sample_failures %ld "
 		 "bw_sample_aborts %ld",
-		 now, ias_bw_estimate, ias_bw_punish_count, ias_bw_relax_count,
-		 ias_bw_sample_failures, ias_bw_sample_aborts);
+		 now, ias_bw_estimate * ias_bw_estimate_multiplier, ias_bw_punish_count,
+		 ias_bw_relax_count, ias_bw_sample_failures, ias_bw_sample_aborts);
 	log_info("tsc %lu ht_punish %ld ht_relax %ld", now, ias_ht_punish_count,
 		 ias_ht_relax_count);
 
@@ -552,5 +552,6 @@ int ias_init(void)
 	bitmap_init(ias_reserved_cores, true, NCPU);
 	bitmap_xor(ias_reserved_cores, ias_reserved_cores, sched_allowed_cores,
 		   NCPU);
-	return 0;
+
+	return ias_bw_init();
 }

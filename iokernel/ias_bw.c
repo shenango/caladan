@@ -10,6 +10,7 @@
 #include "ksched.h"
 #include "pmc.h"
 #include "ias.h"
+#include "pcm.h"
 
 /* statistics */
 uint64_t ias_bw_punish_count;
@@ -17,6 +18,10 @@ uint64_t ias_bw_relax_count;
 uint64_t ias_bw_sample_failures;
 uint64_t ias_bw_sample_aborts;
 float	 ias_bw_estimate;
+float	 ias_bw_estimate_multiplier;
+
+/* bandwidth threshold in cache lines per cycle for a single channel */
+static float ias_bw_thresh;
 
 struct pmc_sample {
 	uint64_t gen;
@@ -98,7 +103,7 @@ ias_bw_choose_victim(struct pmc_sample *start, struct pmc_sample *end,
 		if (sd->threads_limit == 0 ||
 		    sd->threads_limit <= sd->threads_guaranteed)
 			continue;
-		if (sd->bw_llc_miss_rate < IAS_BW_LIMIT / sched_cores_nr)
+		if (sd->bw_llc_miss_rate * sched_cores_nr < ias_bw_thresh)
 			continue;
 		if (sd->bw_llc_miss_rate <= highest_l3miss_rate)
 			continue;
@@ -180,7 +185,7 @@ static float ias_measure_bw(void)
 	barrier();
 	tsc = rdtsc();
 	barrier();
-	cur_cas = get_cas_count_all();
+	cur_cas = pcm_caladan_get_cas_count(0);
 	bw_estimate = (float)(cur_cas - last_cas) / (float)(tsc - last_tsc);
 	last_cas = cur_cas;
 	last_tsc = tsc;
@@ -205,8 +210,10 @@ void ias_bw_poll(void)
 	static int state;
 	bool throttle;
 
+	assert(!cfg.nobw);
+
 	/* detect if we're over the bandwidth threshold */
-	throttle = ias_measure_bw() >= IAS_BW_LIMIT;
+	throttle = ias_measure_bw() >= ias_bw_thresh;
 
 	/* run the state machine */
 	switch (state) {
@@ -240,4 +247,35 @@ void ias_bw_poll(void)
 	default:
 		panic("ias: invalid bw state");
 	}
+}
+
+int ias_bw_init(void)
+{
+	int ret;
+	unsigned int nr_channels;
+
+	if (cfg.nobw)
+		return 0;
+
+	ret = pcm_caladan_init(0);
+	if (ret)
+		return ret;
+
+	/* We monitor 1 channel, so multiply measurements by nr_channels to estimate real bw */
+	nr_channels = pcm_caladan_get_active_channel_count();
+	if (nr_channels == 0)
+		return -EINVAL;
+
+	/* Use default limit if none supplied */
+	if (!cfg.ias_bw_limit)
+		cfg.ias_bw_limit = IAS_BW_LIMIT;
+
+	/* Compute the multiplier to convert cache lines/cycle to bytes/us (= MB/s) */
+	ias_bw_estimate_multiplier = cycles_per_us * nr_channels * CACHE_LINE_SIZE;
+
+	/* convert from MB/s to per channel cache line/cycle */
+	ias_bw_thresh = cfg.ias_bw_limit / ias_bw_estimate_multiplier;
+
+	return 0;
+
 }

@@ -160,6 +160,13 @@ int main(int argc, char *argv[])
 			cfg.nobw = true;
 		} else if (!strcmp(argv[i], "mutualpair")) {
 			cfg.mutualpair = true;
+		} else if (!strcmp(argv[i], "bwlimit")) {
+			if (i == argc - 1) {
+				fprintf(stderr, "missing bwlimit argument\n");
+				return -EINVAL;
+			}
+			cfg.ias_bw_limit = atof(argv[++i]);
+			log_info("setting bwlimit to %.5f", cfg.ias_bw_limit);
 		} else if (string_to_bitmap(argv[i], input_allowed_cores, NCPU)) {
 			fprintf(stderr, "invalid cpu list: %s\n", argv[i]);
 			fprintf(stderr, "example list: 0-24,26-48:2,49-255\n");

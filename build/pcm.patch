@@ -1,0 +1,180 @@
+From 18b1133df02a9a32a66f81dfc40537bff083aab1 Mon Sep 17 00:00:00 2001
+From: Josh Fried <joshuafried@gmail.com>
+Date: Fri, 11 Sep 2020 01:22:33 -0400
+Subject: [PATCH] PCM for caladan
+
+---
+ Makefile        | 11 ++++++-----
+ cpucounters.cpp | 14 +++++++++-----
+ cpucounters.h   |  3 ++-
+ pcm-caladan.cpp | 33 +++++++++++++++++++++++++++++++++
+ 4 files changed, 50 insertions(+), 11 deletions(-)
+ create mode 100644 pcm-caladan.cpp
+
+diff --git a/Makefile b/Makefile
+index 2620526..5e82e8d 100644
+--- a/Makefile
++++ b/Makefile
+@@ -20,12 +20,13 @@ endif
+ CXXFLAGS += -Wall -g -O3 -Wno-unknown-pragmas -std=c++11 -fPIC
+ 
+ # uncomment if your Linux kernel supports access to /dev/mem from user space
+-# CXXFLAGS += -DPCM_USE_PCI_MM_LINUX
++CXXFLAGS += -DPCM_USE_PCI_MM_LINUX
++CXXFLAGS += -DPCM_SILENT
+ 
+ # rely on Linux perf support (user needs CAP_SYS_ADMIN privileges), comment out to disable
+-ifneq ($(wildcard /usr/include/linux/perf_event.h),)
+-CXXFLAGS += -DPCM_USE_PERF
+-endif
++#ifneq ($(wildcard /usr/include/linux/perf_event.h),)
++#CXXFLAGS += -DPCM_USE_PERF
++#endif
+ 
+ ifeq ($(UNAME), Linux)
+ LIB= -pthread -lrt
+@@ -49,7 +50,7 @@ CXX=c++
+ LIB= -lpthread -lc++
+ endif
+ 
+-COMMON_OBJS = msr.o cpucounters.o pci.o mmio.o client_bw.o utils.o topology.o dashboard.o debug.o threadpool.o
++COMMON_OBJS = msr.o cpucounters.o pci.o mmio.o client_bw.o utils.o topology.o dashboard.o debug.o threadpool.o pcm-caladan.o
+ EXE_OBJS = $(EXE:.x=.o)
+ OBJS = $(COMMON_OBJS) $(EXE_OBJS)
+ 
+diff --git a/cpucounters.cpp b/cpucounters.cpp
+index 5ae2bd8..93d2c46 100644
+--- a/cpucounters.cpp
++++ b/cpucounters.cpp
+@@ -1657,6 +1657,7 @@ void PCM::initUncorePMUsDirect()
+             }
+         }
+     }
++#if 0
+     if (hasPCICFGUncore() && MSR.size())
+     {
+         cboPMUs.resize(num_sockets);
+@@ -1689,6 +1690,7 @@ void PCM::initUncorePMUsDirect()
+             }
+         }
+     }
++#endif
+ }
+ 
+ #ifdef PCM_USE_PERF
+@@ -1866,12 +1868,12 @@ PCM::PCM() :
+ 
+     showSpecControlMSRs();
+ 
+-    initEnergyMonitoring();
++    // initEnergyMonitoring();
+ 
+     initUncoreObjects();
+ 
+     // Initialize RMID to the cores for QOS monitoring
+-    initRMID();
++    // initRMID();
+ 
+     readCPUMicrocodeLevel();
+ 
+@@ -1881,10 +1883,12 @@ PCM::PCM() :
+     perfEventHandle.resize(num_cores, dummy);
+ #endif
+ 
++#if 0
+     for (int32 i = 0; i < num_cores; ++i)
+     {
+         coreTaskQueues.push_back(std::make_shared<CoreTaskQueue>(i));
+     }
++#endif
+ }
+ 
+ void PCM::enableJKTWorkaround(bool enable)
+@@ -5105,7 +5109,7 @@ void ServerPCICFGUncore::initDirect(uint32 socket_, const PCM * pcm)
+                         std::make_shared<PCICFGRegister32>(handle, XPF_MC_CH_PCI_PMON_CTL1_ADDR),
+                         std::make_shared<PCICFGRegister32>(handle, XPF_MC_CH_PCI_PMON_CTL2_ADDR),
+                         std::make_shared<PCICFGRegister32>(handle, XPF_MC_CH_PCI_PMON_CTL3_ADDR),
+-                        std::make_shared<PCICFGRegister64>(handle, XPF_MC_CH_PCI_PMON_CTR0_ADDR),
++                        std::make_shared<PCICFGRegister32>(handle, XPF_MC_CH_PCI_PMON_CTR0_ADDR),
+                         std::make_shared<PCICFGRegister64>(handle, XPF_MC_CH_PCI_PMON_CTR1_ADDR),
+                         std::make_shared<PCICFGRegister64>(handle, XPF_MC_CH_PCI_PMON_CTR2_ADDR),
+                         std::make_shared<PCICFGRegister64>(handle, XPF_MC_CH_PCI_PMON_CTR3_ADDR),
+@@ -5573,7 +5577,7 @@ void ServerPCICFGUncore::programServerUncoreMemoryMetrics(const int rankA, const
+             EDCCntConfig[EventPosition::WRITE] = MC_CH_PCI_PMON_CTL_EVENT(0x02) + MC_CH_PCI_PMON_CTL_UMASK(1);  // monitor reads on counter 1: WPQ
+             break;
+         default:
+-            MCCntConfig[EventPosition::READ] = MC_CH_PCI_PMON_CTL_EVENT(0x04) + MC_CH_PCI_PMON_CTL_UMASK(3);  // monitor reads on counter 0: CAS_COUNT.RD
++            MCCntConfig[EventPosition::READ] = MC_CH_PCI_PMON_CTL_EVENT(0x04) + MC_CH_PCI_PMON_CTL_UMASK(0xf);  // monitor reads AND WRITES on counter 0: CAS_COUNT.RD
+             MCCntConfig[EventPosition::WRITE] = MC_CH_PCI_PMON_CTL_EVENT(0x04) + MC_CH_PCI_PMON_CTL_UMASK(12); // monitor writes on counter 1: CAS_COUNT.WR
+             if (PMM)
+             {
+@@ -6849,4 +6853,4 @@ void PCM::setupCustomCoreEventsForNuma(PCM::ExtendedCustomCoreEventDescription&
+     }
+ }
+ 
+-} // namespace pcm
+\ No newline at end of file
++} // namespace pcm
+diff --git a/cpucounters.h b/cpucounters.h
+index 12f7fdf..abb461a 100644
+--- a/cpucounters.h
++++ b/cpucounters.h
+@@ -567,7 +567,6 @@ class PCM_API PCM
+     bool allow_multiple_instances;
+     bool programmed_pmu;
+     std::vector<std::shared_ptr<SafeMsrHandle> > MSR;
+-    std::vector<std::shared_ptr<ServerPCICFGUncore> > server_pcicfg_uncore;
+     std::vector<UncorePMU> pcuPMUs;
+     std::vector<std::map<int32, UncorePMU> > iioPMUs;
+     std::vector<UncorePMU> uboxPMUs;
+@@ -604,6 +603,8 @@ class PCM_API PCM
+     bool forceRTMAbortMode;
+ 
+ public:
++    std::vector<std::shared_ptr<ServerPCICFGUncore> > server_pcicfg_uncore;
++
+     enum { MAX_C_STATE = 10 }; // max C-state on Intel architecture
+ 
+     //! \brief Returns true if the specified core C-state residency metric is supported
+diff --git a/pcm-caladan.cpp b/pcm-caladan.cpp
+new file mode 100644
+index 0000000..896f2a4
+--- /dev/null
++++ b/pcm-caladan.cpp
+@@ -0,0 +1,33 @@
++
++#include "cpucounters.h"
++
++using namespace pcm;
++
++extern "C" {
++
++	std::shared_ptr<ServerPCICFGUncore> server_pcicfg_uncore;
++	ServerPCICFGUncore *caladan_cfg;
++	PCM *cpcm;
++
++	uint32_t pcm_caladan_get_cas_count(uint32 channel)
++	{
++		return caladan_cfg->getMCCounter(channel, 0);
++	}
++
++	uint32_t pcm_caladan_get_active_channel_count(void)
++	{
++		uint32_t count = 0;
++		for (uint32_t i = 0; i < cpcm->getMCChannelsPerSocket(); i++)
++			count += pcm_caladan_get_cas_count(i) != 0;
++		return count;
++	}
++
++	int pcm_caladan_init(int socket)
++	{
++		cpcm = PCM::getInstance();
++		server_pcicfg_uncore = cpcm->server_pcicfg_uncore.at(socket);
++		caladan_cfg = server_pcicfg_uncore.get();
++		caladan_cfg->programServerUncoreMemoryMetrics(-1, -1, false, false);
++		return 0;
++	}
++}
+-- 
+2.17.1
+
