@@ -21,6 +21,10 @@ static void main_handler(void *arg)
 	log_info("num blocks: %lu", storage_num_blocks());
 	log_info("block size: %u", block_size);
 	log_info("writing 'hello world' to device...");
+	if (block_size == 0) {
+		log_info("storage support is disabled, skipping test");
+		return;
+	}
 	buf = malloc(block_size);
 	BUG_ON(!buf);
 	sprintf(buf, "hello world");
