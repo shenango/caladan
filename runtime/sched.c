@@ -236,8 +236,9 @@ static bool steal_work(struct kthread *l, struct kthread *r)
 		spin_unlock(&r->lock);
 
 		l->rq_head = avail;
+		update_oldest_tsc(l);
 		ACCESS_ONCE(l->q_ptrs->rq_head) += avail + overflow;
-		STAT(THREADS_STOLEN) += avail;
+		STAT(THREADS_STOLEN) += avail + overflow;
 		return true;
 	}
 
@@ -252,18 +253,21 @@ static bool steal_work(struct kthread *l, struct kthread *r)
 	/* check for softirqs */
 	th = softirq_run_thread(r, RUNTIME_SOFTIRQ_REMOTE_BUDGET);
 	if (th) {
+		th->ready_tsc = rdtsc();
 		STAT(SOFTIRQS_STOLEN)++;
 		goto done;
 	}
 
 done:
+	spin_unlock(&r->lock);
+
 	if (th) {
 		l->rq[l->rq_head++ % RUNTIME_RQ_SIZE] = th;
+		ACCESS_ONCE(l->q_ptrs->oldest_tsc) = th->ready_tsc;
 		ACCESS_ONCE(l->q_ptrs->rq_head)++;
 		STAT(THREADS_STOLEN)++;
 	}
 
-	spin_unlock(&r->lock);
 	return th != NULL;
 }
 
@@ -552,13 +556,13 @@ void thread_ready(thread_t *th)
 	else
 		STAT(REMOTE_WAKES)++;
 	rq_tail = load_acquire(&k->rq_tail);
-	ACCESS_ONCE(k->q_ptrs->rq_head)++;
 	th->ready_tsc = rdtsc();
 	if (unlikely(k->rq_head - rq_tail >= RUNTIME_RQ_SIZE)) {
 		assert(k->rq_head - rq_tail == RUNTIME_RQ_SIZE);
 		spin_lock(&k->lock);
 		list_add_tail(&k->rq_overflow, &th->link);
 		spin_unlock(&k->lock);
+		ACCESS_ONCE(k->q_ptrs->rq_head)++;
 		putk();
 		STAT(RQ_OVERFLOW)++;
 		return;
@@ -569,6 +573,8 @@ void thread_ready(thread_t *th)
 
 	if (load_acquire(&k->rq_tail) == k->rq_head - 1)
 		ACCESS_ONCE(k->q_ptrs->oldest_tsc) = th->ready_tsc;
+	ACCESS_ONCE(k->q_ptrs->rq_head)++;
+
 	putk();
 }
 
@@ -588,15 +594,15 @@ static void thread_finish_cede(void)
 	 * possibly displacing the newest element in a full runqueue
 	 * into the overflow queue
 	 */
-	ACCESS_ONCE(k->q_ptrs->rq_head)++;
 	spin_lock(&k->lock);
+	ACCESS_ONCE(k->q_ptrs->oldest_tsc) = myth->ready_tsc;
+	ACCESS_ONCE(k->q_ptrs->rq_head)++;
 	th = k->rq[--k->rq_tail % RUNTIME_RQ_SIZE];
 	k->rq[k->rq_tail % RUNTIME_RQ_SIZE] = myth;
 	if (unlikely(k->rq_head - k->rq_tail > RUNTIME_RQ_SIZE)) {
 		list_add(&k->rq_overflow, &th->link);
 		k->rq_head--;
 	}
-	ACCESS_ONCE(k->q_ptrs->oldest_tsc) = myth->ready_tsc;
 	spin_unlock(&k->lock);
 
 	/* increment the RCU generation number (even - pretend in sched) */
