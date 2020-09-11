@@ -227,11 +227,12 @@ void ias_bw_poll(void)
 
 	case IAS_BW_STATE_PUNISH:
 		ias_bw_gather_pmc(end);
-		if (!throttle || unlikely(ias_bw_punish(start, end))) {
+		if (!throttle) {
 			ias_bw_sample_aborts++;
 			state = IAS_BW_STATE_RELAX;
 			break;
 		}
+		ias_bw_punish(start, end);
 		swapvars(start, end);
 		ias_bw_request_pmc(PMC_LLC_MISSES, end);
 		break;
