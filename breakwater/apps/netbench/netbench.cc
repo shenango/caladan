@@ -1041,6 +1041,9 @@ int main(int argc, char *argv[]) {
   } else if (olc.compare("dagor") == 0) {
     crpc_ops = &cdg_ops;
     srpc_ops = &sdg_ops;
+  } else if (olc.compare("nocontrol") == 0) {
+    crpc_ops = &cnc_ops;
+    srpc_ops = &snc_ops;
   } else {
     std::cerr << "invalid algorithm: " << olc << std::endl;
     std::cerr << "usage: [alg] [cfg_file] [cmd] ...\n"

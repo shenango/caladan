@@ -7,7 +7,7 @@ from util import *
 from config_remote import *
 
 ### Experiemnt Configuration ###
-# Server overload algorithm (breakwater, seda, dagor)
+# Server overload algorithm (breakwater, seda, dagor, nocontrol)
 OVERLOAD_ALG = "breakwater"
 
 # The number of client connections
@@ -36,7 +36,7 @@ NUM_CORES_CLIENT = 16
 slo = (ST_AVG + NET_RTT) * 10
 
 # Verify configs #
-if OVERLOAD_ALG not in ["breakwater", "seda", "dagor"]:
+if OVERLOAD_ALG not in ["breakwater", "seda", "dagor", "nocontrol"]:
     print("Unknown overload algorithm: " + OVERLOAD_ALG)
     exit()
 
@@ -176,7 +176,7 @@ for offered_load in OFFERED_LOADS:
     # - server
     print("\tExecuting server...")
     cmd = "cd ~/{}/breakwater && sudo ./apps/netbench/netbench {} server.config server"\
-            .format(SHENANGO_PATH, OVERLOAD_ALG)
+            " >stdout.out 2>&1".format(SHENANGO_PATH, OVERLOAD_ALG)
     server_session = execute_remote([server_conn], cmd, False)
     server_session = server_session[0]
     
@@ -186,7 +186,7 @@ for offered_load in OFFERED_LOADS:
     print("\tExecuting client...")
     client_agent_sessions = []
     cmd = "cd ~/{}/breakwater && sudo ./apps/netbench/netbench {} client.config client"\
-            " {:d} {} {:d} {} {:d} {:d} {:d}"\
+            " {:d} {} {:d} {} {:d} {:d} {:d} >stdout.out 2>&1"\
             .format(SHENANGO_PATH, OVERLOAD_ALG, NUM_CONNS, server_ip, ST_AVG, ST_DIST,
                     slo ,NUM_AGENT, offered_load)
     client_agent_sessions += execute_remote([client_conn], cmd, False)
@@ -196,7 +196,7 @@ for offered_load in OFFERED_LOADS:
     # - agent
     print("\tExecuting agents...")
     cmd = "cd ~/{}/breakwater && sudo ./apps/netbench/netbench {} client.config agent"\
-            " {}".format(SHENANGO_PATH, OVERLOAD_ALG, client_ip)
+            " {} >stdout.out 2>&1".format(SHENANGO_PATH, OVERLOAD_ALG, client_ip)
     client_agent_sessions += execute_remote(agent_conns, cmd, False)
 
     # Wait for client and agents
