@@ -253,7 +253,6 @@ static bool steal_work(struct kthread *l, struct kthread *r)
 	/* check for softirqs */
 	th = softirq_run_thread(r, RUNTIME_SOFTIRQ_REMOTE_BUDGET);
 	if (th) {
-		th->ready_tsc = rdtsc();
 		STAT(SOFTIRQS_STOLEN)++;
 		goto done;
 	}
