@@ -222,7 +222,7 @@ static void crpc_update_tb_rate(struct csd_session *s, uint64_t us)
 	if (now - s->seda_last_update > SEDA_TIMEOUT) {
 		len = s->res_idx % SEDA_NREQ;
 		qsort(s->res_ts, len, sizeof(uint32_t), cmpfunc);
-		idx = (int)((len - 1) * 0.9);
+		idx = (int)((len - 1) * 0.99);
 		samp = s->res_ts[idx];
 		s->cur = SEDA_ALPHA * s->cur + (1 - SEDA_ALPHA) * samp;
 
@@ -244,7 +244,7 @@ static void crpc_update_tb_rate(struct csd_session *s, uint64_t us)
 
 	// sort res_ts;
 	qsort(s->res_ts, SEDA_NREQ, sizeof(uint32_t), cmpfunc);
-	samp = s->res_ts[(int)(SEDA_NREQ * 0.9)];
+	samp = s->res_ts[(int)(SEDA_NREQ * 0.99)];
 	s->cur = SEDA_ALPHA * s->cur + (1 - SEDA_ALPHA) * samp;
 
 	err = (s->cur - SEDA_TARGET) / (double)SEDA_TARGET;

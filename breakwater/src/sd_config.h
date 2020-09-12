@@ -10,39 +10,39 @@
 * (bimod) #define CSD_MAX_CLIENT_DELAY_US	10
 *         #define CSD_TB_INIT_RATE		4
 *         #define CSD_TB_MIN_RATE		2
-*         #define SEDA_TARGET			80
+*         #define SEDA_TARGET			60
 *         #define SEDA_ADJ_I			130
 *         #define SEDA_ADJ_D			1.1
 * (exp) #define CSD_MAX_CLIENT_DELAY_US		10
 *       #define CSD_TB_INIT_RATE		4
 *       #define CSD_TB_MIN_RATE			2
-*       #define SEDA_TARGET			80
+*       #define SEDA_TARGET			60
 *       #define SEDA_ADJ_I			100
 *       #define SEDA_ADJ_D			1.1
 * (const) #define CSD_MAX_CLIENT_DELAY_US	10
 *         #define CSD_TB_INIT_RATE		4
 *         #define CSD_TB_MIN_RATE		2
-*         #define SEDA_TARGET			90
-*         #define SEDA_ADJ_I			90
+*         #define SEDA_TARGET			70
+*         #define SEDA_ADJ_I			70
 *         #define SEDA_ADJ_D			1.1
 *
 * - 10 us average service time
 * (bimod) #define CSD_MAX_CLIENT_DELAY_US	100
 *         #define CSD_TB_INIT_RATE		4
 *         #define CSD_TB_MIN_RATE		2
-*         #define SEDA_TARGET			220
+*         #define SEDA_TARGET			100
 *         #define SEDA_ADJ_I			50
 *         #define SEDA_ADJ_D			1.1
 * (exp) #define CSD_MAX_CLIENT_DELAY_US		100
 *       #define CSD_TB_INIT_RATE		4
 *       #define CSD_TB_MIN_RATE			2
-*       #define SEDA_TARGET			200
+*       #define SEDA_TARGET			100
 *       #define SEDA_ADJ_I			30
 *       #define SEDA_ADJ_D			1.1
 * (const) #define CSD_MAX_CLIENT_DELAY_US	100
 *         #define CSD_TB_INIT_RATE		4
 *         #define CSD_TB_MIN_RATE		2
-*         #define SEDA_TARGET			160
+*         #define SEDA_TARGET			100
 *         #define SEDA_ADJ_I			30
 *         #define SEDA_ADJ_D			1.1
 *
@@ -50,19 +50,19 @@
 * (bimod) #define CSD_MAX_CLIENT_DELAY_US	100
 *         #define CSD_TB_INIT_RATE		4
 *         #define CSD_TB_MIN_RATE		2
-*         #define SEDA_TARGET			900
+*         #define SEDA_TARGET			800
 *         #define SEDA_ADJ_I			10
 *         #define SEDA_ADJ_D			1.3
 * (exp) #define CSD_MAX_CLIENT_DELAY_US		100
 *       #define CSD_TB_INIT_RATE		4
 *       #define CSD_TB_MIN_RATE			2
-*       #define SEDA_TARGET			800
+*       #define SEDA_TARGET			720
 *       #define SEDA_ADJ_I			10
 *       #define SEDA_ADJ_D			1.3
 * (const) #define CSD_MAX_CLIENT_DELAY_US	100
 *         #define CSD_TB_INIT_RATE		4
 *         #define CSD_TB_MIN_RATE		2
-*         #define SEDA_TARGET			800
+*         #define SEDA_TARGET			720
 *         #define SEDA_ADJ_I			10
 *         #define SEDA_ADJ_D			1.3
 */
@@ -78,7 +78,7 @@
 /* EWMA filter constant */
 #define SEDA_ALPHA			0.7
 /* target 90th percentile delay */
-#define SEDA_TARGET			200
+#define SEDA_TARGET			100
 /* time before controller run */
 #define SEDA_TIMEOUT			1000
 /* % error to trigger decrease */
