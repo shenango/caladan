@@ -122,6 +122,7 @@ struct proc {
 	unsigned int		attach_fail:1;
 	struct congestion_info	*congestion_info;
 	unsigned long		policy_data;
+	float			load;
 
 	/* scheduler data */
 	struct sched_spec	sched_cfg;

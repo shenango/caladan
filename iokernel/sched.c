@@ -256,8 +256,9 @@ static uint32_t hwq_find_head(struct hwq *h, uint32_t cur_tail, uint32_t last_he
 	return i + start_idx;
 }
 
-static bool hardware_queue_congested(struct thread *th, struct hwq *h,
-				bool update_pointers)
+static bool
+sched_measure_hardware_delay(struct thread *th, struct hwq *h,
+			     bool update_pointers)
 {
 	uint32_t cur_tail, cur_head, last_head, last_tail;
 
@@ -290,91 +291,122 @@ static bool hardware_queue_congested(struct thread *th, struct hwq *h,
 				 cur_head != cur_tail;
 }
 
-static void sched_detect_congestion(struct proc *p)
+static uint64_t calc_delay_tsc(uint64_t tsc)
 {
-	DEFINE_BITMAP(threads, NCPU);
-	DEFINE_BITMAP(ios, NCPU);
-	struct thread *th;
+	return cur_tsc - MIN(tsc, cur_tsc);
+}
+
+static bool
+sched_measure_kthread_delay(struct thread *th,
+			    uint64_t *rxq_tsc, uint64_t *uthread_tsc,
+			    uint64_t *storage_tsc, uint64_t *timer_tsc)
+{
 	uint32_t cur_tail, cur_head, last_head, last_tail;
-	uint64_t timer_tsc;
-	uint64_t rq_oldest_tsc = UINT64_MAX;
-	uint64_t pkq_oldest_tsc = UINT64_MAX;
+	uint64_t tmp;
+	bool busy = false;
+
+	/* UTHREAD: measure delay */
+	last_tail = th->last_rq_tail;
+	cur_tail = load_acquire(&th->q_ptrs->rq_tail);
+	last_head = th->last_rq_head;
+	cur_head = ACCESS_ONCE(th->q_ptrs->rq_head);
+	th->last_rq_head = cur_head;
+	th->last_rq_tail = cur_tail;
+
+	/* UTHREAD: update old standing queue signal */
+	if (th->active ? wraps_lt(cur_tail, last_head) :
+			 cur_head != cur_tail) {
+		busy = true;
+	}
+
+	/* UTHREAD: update new queueing delay signal */
+	if (cur_head != cur_tail) {
+		tmp = ACCESS_ONCE(th->q_ptrs->oldest_tsc);
+		*uthread_tsc = calc_delay_tsc(tmp);
+	} else {
+		*uthread_tsc = 0;
+	}
+
+	/* RXQ: measure delay */
+	last_tail = th->last_rxq_tail;
+	cur_tail = lrpc_poll_send_tail(&th->rxq);
+	last_head = th->last_rxq_head;
+	cur_head = ACCESS_ONCE(th->rxq.send_head);
+	th->last_rxq_head = cur_head;
+	th->last_rxq_tail = cur_tail;
+
+	/* RXQ: update old standing queue signal */
+	if (th->active ? wraps_lt(cur_tail, last_head) :
+			 cur_head != cur_tail) {
+		busy = true;
+	}
+
+	/* RXQ: update new queueing delay signal */
+	/* FIXME: this only approximates queueing delay */
+	if (cur_head == cur_tail)
+		th->rxq_busy_since = UINT64_MAX;
+	else if (cur_tail != last_tail || th->rxq_busy_since == UINT64_MAX)
+		th->rxq_busy_since = cur_tsc;
+	 *rxq_tsc = calc_delay_tsc(th->rxq_busy_since);
+
+	/* TIMER: measure delay and update signals */
+	tmp = ACCESS_ONCE(*th->timer_heap.next_tsc);
+	if (!tmp)
+		tmp = UINT64_MAX;
+	if (tmp <= cur_tsc)
+		busy = true;
+	*timer_tsc = calc_delay_tsc(tmp);
+
+	/* DIRECTPATH: measure delay and update signals */
+	if (sched_measure_hardware_delay(th, &th->directpath_hwq, true))
+		busy = true;
+	*rxq_tsc = MAX(*rxq_tsc, calc_delay_tsc(th->directpath_hwq.busy_since));
+
+	/* STORAGE: measure delay and update signals */
+	if (sched_measure_hardware_delay(th, &th->storage_hwq, true))
+		busy = true;
+	*storage_tsc = calc_delay_tsc(th->storage_hwq.busy_since);
+
+	return busy;
+}
+
+#define EWMA_WEIGHT     0.1f
+
+static void sched_report_metrics(struct proc *p, uint64_t delay)
+{
+	struct congestion_info *info = p->congestion_info;
+	float instant_load;
+
+	instant_load = (float)p->active_thread_count;
+	p->load = p->load * (1 - EWMA_WEIGHT) + instant_load * EWMA_WEIGHT;
+	ACCESS_ONCE(info->load) = p->load;
+	ACCESS_ONCE(info->delay_us) = delay;
+}
+
+static void sched_measure_delay(struct proc *p)
+{
+	uint64_t hdelay = 0;
 	int i;
-	bool timeout = false;
+	bool busy = false;
 
-	bitmap_init(threads, NCPU, false);
-	bitmap_init(ios, NCPU, false);
-
-	/* detect uthread runqueue congestion */
+	/* detect per-kthread delay */
 	for (i = 0; i < p->thread_count; i++) {
-		uint64_t oldest_tsc;
+		uint64_t rxq_tsc, uthread_tsc, storage_tsc, timer_tsc;
 
-		th = &p->threads[i];
-		last_tail = th->last_rq_tail;
-		cur_tail = load_acquire(&th->q_ptrs->rq_tail);
-		last_head = th->last_rq_head;
-		cur_head = ACCESS_ONCE(th->q_ptrs->rq_head);
-		th->last_rq_head = cur_head;
-		th->last_rq_tail = cur_tail;
-
-		/* update old standing queue time signal */
-		if (th->active ? wraps_lt(cur_tail, last_head) :
-				 cur_head != cur_tail) {
-			bitmap_set(threads, i);
-		}
-
-		/* update new queueing delay signal */
-		if (cur_head == cur_tail)
-			continue;
-		oldest_tsc = ACCESS_ONCE(th->q_ptrs->oldest_tsc);
-		rq_oldest_tsc = MIN(rq_oldest_tsc, oldest_tsc);
+		busy |= sched_measure_kthread_delay(&p->threads[i],
+			&rxq_tsc, &uthread_tsc, &storage_tsc, &timer_tsc);
+		hdelay = MAX(rxq_tsc + uthread_tsc + storage_tsc + timer_tsc,
+			     hdelay);
 	}
 
-	/* detect RX queue congestion */
-	for (i = 0; i < p->thread_count; i++) {
-		th = &p->threads[i];
-		last_tail = th->last_rxq_tail;
-		cur_tail = lrpc_poll_send_tail(&th->rxq);
-		last_head = th->last_rxq_head;
-		cur_head = ACCESS_ONCE(th->rxq.send_head);
-		th->last_rxq_head = cur_head;
-		th->last_rxq_tail = cur_tail;
-		if (th->active ? wraps_lt(cur_tail, last_head) :
-				 cur_head != cur_tail) {
-			bitmap_set(ios, i);
-		}
+	/* convert the highest delay experienced by the runtime to us */
+	hdelay /= cycles_per_us;
 
-		/* update oldest tsc of rxq */
-		if (cur_head == cur_tail)
-			th->rxq_busy_since = UINT64_MAX;
-		else if (cur_tail != last_tail || th->rxq_busy_since == UINT64_MAX)
-			th->rxq_busy_since = cur_tsc;
+	/* report delay back to runtime */
+	sched_report_metrics(p, hdelay);
 
-		if (hardware_queue_congested(th, &th->directpath_hwq, true))
-			bitmap_set(ios, i);
-
-		if (hardware_queue_congested(th, &th->storage_hwq, true))
-			bitmap_set(ios, i);
-
-		pkq_oldest_tsc = MIN(pkq_oldest_tsc, th->directpath_hwq.busy_since);
-		pkq_oldest_tsc = MIN(pkq_oldest_tsc, th->rxq_busy_since);
-	}
-
-	/* detect expired timers */
-	for (i = 0; i < p->thread_count; i++) {
-		th = &p->threads[i];
-		timer_tsc = ACCESS_ONCE(*th->timer_heap.next_tsc);
-		if (!timer_tsc || timer_tsc > cur_tsc)
-			continue;
-		if (timer_tsc + IOKERNEL_POLL_INTERVAL * cycles_per_us <= cur_tsc) {
-			timeout = true;
-			break;
-		}
-	}
-
-	/* notify the scheduler policy of the current congestion */
-	sched_ops->notify_congested(p, threads, ios, rq_oldest_tsc,
-				    pkq_oldest_tsc, timeout);
+	/* notify the scheduler policy of the current delay */
+	sched_ops->notify_congested(p, busy, hdelay);
 }
 
 /*
@@ -389,7 +421,7 @@ static void sched_detect_io_for_idle_runtime(struct proc *p)
 	for (i = 0; i < p->thread_count; i++) {
 		th = &p->threads[i];
 
-		if (hardware_queue_congested(th, &th->directpath_hwq, false)) {
+		if (sched_measure_hardware_delay(th, &th->directpath_hwq, false)) {
 			sched_add_core(p);
 			return;
 		}
@@ -449,7 +481,7 @@ void sched_poll(void)
 
 		last_time = now;
 		for (i = 0; i < dp.nr_clients; i++)
-			sched_detect_congestion(dp.clients[i]);
+			sched_measure_delay(dp.clients[i]);
 	} else {
 		/* check if any idle directpath runtimes have received I/Os */
 		for (i = 0; i < dp.nr_clients; i++) {

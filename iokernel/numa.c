@@ -23,6 +23,7 @@ struct numa_data {
 	unsigned int		is_congested:1;
 	struct list_node	congested_link;
 	bool			waking;
+	uint64_t		qdelay_us;
 
 	/* thread usage limits */
 	int			threads_guaranteed;
@@ -104,6 +105,7 @@ static int numa_attach(struct proc *p, struct sched_spec *cfg)
 	sd->threads_active = 0;
 	sd->waking = false;
 	sd->preferred_socket = cfg->preferred_socket;
+	sd->qdelay_us = cfg->qdelay_us;
 	for (i = 0; i < NRECENT; i++)
 		sd->recent_cores[i] = sched_cores_tbl[0];
 	p->policy_data = (unsigned long)sd;
@@ -262,12 +264,14 @@ static int numa_notify_core_needed(struct proc *p)
 	return numa_add_kthread(p);
 }
 
-static void numa_notify_congested(struct proc *p, bitmap_ptr_t threads,
-				    bitmap_ptr_t io, uint64_t rq_oldest_tsc,
-				    uint64_t pkq_oldest_tsc, bool timeout)
+static void numa_notify_congested(struct proc *p,  bool busy, uint64_t delay)
 {
 	struct numa_data *sd = (struct numa_data *)p->policy_data;
 	int ret;
+	bool congested;
+
+	/* detect congestion */
+	congested = sd->qdelay_us == 0 ? busy : delay >= sd->qdelay_us;
 
 	/* do nothing if we woke up a core during the last interval */
 	if (sd->waking) {
@@ -276,8 +280,7 @@ static void numa_notify_congested(struct proc *p, bitmap_ptr_t threads,
 	}
 
 	/* check if congested */
-	if (bitmap_popcount(threads, NCPU) +
-            bitmap_popcount(io, NCPU) + timeout == 0) {
+	if (!congested) {
 		numa_unmark_congested(sd);
 		return;
 	}

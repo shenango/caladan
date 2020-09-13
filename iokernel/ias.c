@@ -368,33 +368,17 @@ static int ias_notify_core_needed(struct proc *p)
 	return ias_add_kthread(sd);
 }
 
-static void ias_notify_congested(struct proc *p, bitmap_ptr_t threads,
-				 bitmap_ptr_t io, uint64_t rq_oldest_tsc,
-				 uint64_t pkq_oldest_tsc, bool timeout)
+static void ias_notify_congested(struct proc *p, bool busy, uint64_t delay)
 {
 	struct ias_data *sd = (struct ias_data *)p->policy_data;
 	int ret;
-	bool norq, noio;
+	bool congested;
 
 	/* detect congestion */
-	if (sd->qdelay_us == 0) {
-		norq = bitmap_popcount(threads, NCPU) == 0;
-		noio = bitmap_popcount(io, NCPU) == 0;
-	} else {
-		uint64_t tsc = rdtsc();
-		uint64_t queue_since = MIN(rq_oldest_tsc, pkq_oldest_tsc);
-		if (queue_since < tsc)
-			sd->current_qdelay_us = (tsc - queue_since) / cycles_per_us;
-		else
-			sd->current_qdelay_us = 0;
-		norq = rq_oldest_tsc == UINT64_MAX ||
-		       tsc - rq_oldest_tsc < sd->qdelay_us * cycles_per_us;
-		noio = pkq_oldest_tsc == UINT64_MAX ||
-		       tsc - pkq_oldest_tsc < sd->qdelay_us * cycles_per_us;
-	}
+	congested = sd->qdelay_us == 0 ? busy : delay >= sd->qdelay_us;
 
 	/* stop if there is no congestion */
-	if (norq && noio && !timeout) {
+	if (!congested) {
 		sd->is_congested = false;
 		return;
 	}

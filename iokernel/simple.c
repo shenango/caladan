@@ -19,6 +19,7 @@ struct simple_data {
 	struct proc		*p;
 	unsigned int		is_congested:1;
 	struct list_node	congested_link;
+	uint64_t		qdelay_us;
 
 	/* thread usage limits */
 	int			threads_guaranteed;
@@ -26,10 +27,6 @@ struct simple_data {
 	int			threads_active;
 
 	/* congestion info */
-	float			load;
-	uint64_t		standing_queue_us;
-	uint64_t		rq_oldest_tsc;
-	uint64_t		pkq_oldest_tsc;
 	bool			waking;
 };
 
@@ -95,6 +92,7 @@ static int simple_attach(struct proc *p, struct sched_spec *cfg)
 	sd->threads_max = cfg->max_cores;
 	sd->threads_active = 0;
 	sd->waking = false;
+	sd->qdelay_us = cfg->qdelay_us;
 	p->policy_data = (unsigned long)sd;
 	return 0;
 }
@@ -220,67 +218,38 @@ static int simple_notify_core_needed(struct proc *p)
 	return simple_add_kthread(p);
 }
 
-#define EWMA_WEIGHT	0.1f
-
-static void simple_update_congestion_info(struct simple_data *sd)
-{
-	struct congestion_info *info = sd->p->congestion_info;
-	float instant_load;
-
-	/* update the standing queue congestion microseconds */
-	if (sd->is_congested)
-		sd->standing_queue_us += IOKERNEL_POLL_INTERVAL;
-	else
-		sd->standing_queue_us = 0;
-	ACCESS_ONCE(info->standing_queue_us) = sd->standing_queue_us;
-
-	ACCESS_ONCE(info->rq_oldest_tsc) = sd->rq_oldest_tsc;
-	ACCESS_ONCE(info->pkq_oldest_tsc) = sd->pkq_oldest_tsc;
-
-	/* update the CPU load */
-	/* TODO: handle using more than guaranteed cores */
-        instant_load = (float)sd->threads_active / (float)sd->threads_max;
-	sd->load = sd->load * (1 - EWMA_WEIGHT) + instant_load * EWMA_WEIGHT;
-	ACCESS_ONCE(info->load) = sd->load;
-}
-
-static void simple_notify_congested(struct proc *p, bitmap_ptr_t threads,
-				    bitmap_ptr_t io, uint64_t rq_oldest_tsc,
-				    uint64_t pkq_oldest_tsc, bool timeout)
+static void simple_notify_congested(struct proc *p, bool busy, uint64_t delay)
 {
 	struct simple_data *sd = (struct simple_data *)p->policy_data;
 	int ret;
+	bool congested;
 
-	sd->rq_oldest_tsc = rq_oldest_tsc;
-	sd->pkq_oldest_tsc = pkq_oldest_tsc;
+	/* detect congestion */
+	congested = sd->qdelay_us == 0 ? busy : delay >= sd->qdelay_us;
 
 	/* do nothing if we woke up a core during the last interval */
 	if (sd->waking) {
 		sd->waking = false;
-		goto done;
+		return;
 	}
 
 	/* check if congested */
-	if (bitmap_popcount(threads, NCPU) +
-            bitmap_popcount(io, NCPU) + timeout == 0) {
+	if (!congested) {
 		simple_unmark_congested(sd);
-		goto done;
+		return;
 	}
 
 	/* do nothing if already marked as congested */
 	if (sd->is_congested)
-		goto done;
+		return;
 
 	/* try to add an additional core right away */
 	ret = simple_add_kthread(p);
 	if (ret == 0)
-		goto done;
+		return;
 
 	/* otherwise mark the process as congested, cores can be added later */
 	simple_mark_congested(sd);
-
-done:
-	simple_update_congestion_info(sd);
 }
 
 static struct simple_data *simple_choose_kthread(unsigned int core)

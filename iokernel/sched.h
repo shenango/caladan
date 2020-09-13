@@ -34,15 +34,13 @@ struct sched_ops {
 	/**
 	 * notify_congested - notifies the scheduler of process congestion
 	 * @p: the process for which congestion has changed
-	 * @threads: a bitmap of congested uthreads (a bit per kthread)
-	 * @io: a bitmap of congested I/Os (a bit per kthread)
+	 * @congested: did the old shenango congestion signal trigger
+	 * @delay: the new queueing delay signal in microseconds
 	 *
 	 * This notifier informs the scheduler of when processes become
 	 * congested or uncongested, driving core allocation decisions.
 	 */
-	void (*notify_congested)(struct proc *p, bitmap_ptr_t threads,
-			         bitmap_ptr_t io, uint64_t rq_oldest_tsc,
-				 uint64_t pkq_oldest_tsc, bool timeout);
+	void (*notify_congested)(struct proc *p, bool congested, uint64_t delay);
 
 	/**
 	 * notify_core_needed - notifies the scheduler that a core is needed

@@ -25,39 +25,18 @@ extern unsigned int guaranteedks;
 extern atomic_t runningks;
 
 /**
- * runtime_standing_queue_us - returns the us a queue has been left standing
- */
-static inline uint64_t runtime_standing_queue_us(void)
-{
-	return ACCESS_ONCE(runtime_congestion->standing_queue_us);
-}
-
-/**
  * runtime_queue_us - returns the us of packet queueing delay + runtime queueing
  * delay
  */
 static inline uint64_t runtime_queue_us(void)
 {
-	uint64_t now = rdtsc();
-	uint64_t rq_oldest_tsc = ACCESS_ONCE(runtime_congestion->rq_oldest_tsc);
-	uint64_t pkq_oldest_tsc = ACCESS_ONCE(runtime_congestion->pkq_oldest_tsc);
-	uint64_t rq_delay = 0;
-	uint64_t pkq_delay = 0;
-
 	if ((unsigned int)atomic_read(&runningks) < maxks)
 		return 0;
-
-	if (now > rq_oldest_tsc)
-		rq_delay = now - rq_oldest_tsc;
-
-	if (now > pkq_oldest_tsc)
-		pkq_delay = now - pkq_oldest_tsc;
-
-	return (rq_delay + pkq_delay) / cycles_per_us;
+	return ACCESS_ONCE(runtime_congestion->delay_us);
 }
 
 /**
- * runtime_load - returns the current CPU usage load
+ * runtime_load - returns the current CPU usage (number of cores)
  */
 static inline float runtime_load(void)
 {
