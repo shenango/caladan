@@ -279,7 +279,7 @@ static float ias_core_score(struct ias_data *sd, unsigned int core)
 	if (bitmap_test(sd->reserved_cores, core))
 		score += 7.0f;
 
-	if (cfg.mutualpair && sib_task != sd) {
+	if (!cfg.ias_prefer_selfpair && sib_task != sd) {
 		score += 3.0f;
 		if (sib_task == NULL && cores[core] == NULL)
 			score += 2.0f;
@@ -341,11 +341,9 @@ int ias_add_kthread(struct ias_data *sd)
 
 	/* check if we're constrained by the thread limit */
 	if (sd->threads_active >= sd->threads_limit) {
-		if (sd->ht_punish_us > 0 && sd->current_qdelay_us >= sd->ht_punish_us) {
-			core = ias_ht_relinquish_core(sd);
-			if (core != NCPU)
-				goto done;
-		}
+		core = ias_ht_relinquish_core(sd);
+		if (core != NCPU)
+			goto done;
 		return -ENOENT;
 	}
 

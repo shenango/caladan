@@ -26,7 +26,7 @@
 struct iokernel_cfg {
 	bool	noht; /* disable hyperthreads */
 	bool	nobw; /* disable bandwidth controller */
-	bool	mutualpair; /* prefer mutual pairings */
+	bool	ias_prefer_selfpair; /* prefer self-pairings */
 	float	ias_bw_limit; /* IAS bw limit, (MB/s) */
 };
 

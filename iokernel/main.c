@@ -158,8 +158,8 @@ int main(int argc, char *argv[])
 			cfg.noht = true;
 		} else if (!strcmp(argv[i], "nobw")) {
 			cfg.nobw = true;
-		} else if (!strcmp(argv[i], "mutualpair")) {
-			cfg.mutualpair = true;
+		} else if (!strcmp(argv[i], "selfpair")) {
+			cfg.ias_prefer_selfpair = true;
 		} else if (!strcmp(argv[i], "bwlimit")) {
 			if (i == argc - 1) {
 				fprintf(stderr, "missing bwlimit argument\n");

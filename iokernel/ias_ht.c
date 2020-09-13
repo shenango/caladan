@@ -3,6 +3,7 @@
  */
 
 #include <stdlib.h>
+#include <float.h>
 
 #include <base/stddef.h>
 #include <base/log.h>
@@ -24,10 +25,6 @@ struct ias_ht_data ias_ht_percore[NCPU];
 
 static bool ias_ht_punish_selfpair(struct ias_data *sd, unsigned int sib)
 {
-	/* check if queues have built up for this sd */
-	if (sd->current_qdelay_us >= sd->ht_punish_us)
-		return false;
-
 	/* don't move a thread that is already over its HT budget */
 	if (ias_ht_budget_used(sib) >= 1.0f)
 		return false;
@@ -94,9 +91,7 @@ static void ias_ht_relax(struct ias_data *sd, unsigned int core)
 	WARN_ON(ias_idle_on_core(sib));
 }
 
-
-
-static uint64_t ias_ht_poll_one(unsigned int core)
+static float ias_ht_poll_one(unsigned int core)
 {
 	struct ias_ht_data *htd = &ias_ht_percore[core];
 	struct ias_data *sd = cores[core];
@@ -115,8 +110,9 @@ static uint64_t ias_ht_poll_one(unsigned int core)
 		}
 		/* skip if stuck in the runtime scheduler */
 		if ((rgen & 0x1) == 0x1) {
-			htd->budget_used = (float)(now_us - htd->last_us) * sd->ht_punish_us_inv;
-			return now_us - htd->last_us;
+			htd->budget_used =
+			  (float)(now_us - htd->last_us) * sd->ht_punish_us_inv;
+			return htd->budget_used;
 		}
 	}
 
@@ -125,7 +121,7 @@ static uint64_t ias_ht_poll_one(unsigned int core)
 }
 
 struct tarr {
-	uint64_t service_us;
+	float budget_used;
 	unsigned int core;
 };
 
@@ -134,9 +130,9 @@ static int cmptarr(const void *p1, const void *p2)
 	const struct tarr *t1 = p1;
 	const struct tarr *t2 = p2;
 
-	if (t1->service_us < t2->service_us) {
+	if (t1->budget_used < t2->budget_used) {
 		return 1;
-	} else if (t1->service_us > t2->service_us) {
+	} else if (t1->budget_used > t2->budget_used) {
 		return -1;
 	} else {
 		return 0;
@@ -153,8 +149,7 @@ void ias_ht_poll(void)
 
 	/* loop over cores to update service times */
 	sched_for_each_allowed_core(core, tmp) {
-		// TODO: weight by fraction of budget
-		arr[num].service_us = ias_ht_poll_one(core);
+		arr[num].budget_used = ias_ht_poll_one(core);
 		arr[num++].core = core;
 	}
 
@@ -167,7 +162,7 @@ void ias_ht_poll(void)
 		struct ias_data *sd = cores[ta->core];
 
 		if (sd && sd->ht_punish_us > 0 &&
-		    ta->service_us >= sd->ht_punish_us) {
+		    ta->budget_used >= 1.0) {
 			ias_ht_punish(sd, ta->core);
 		} else {
 			ias_ht_relax(sd, ta->core);
@@ -184,8 +179,11 @@ void ias_ht_poll(void)
 unsigned int ias_ht_relinquish_core(struct ias_data *sd)
 {
 	struct ias_ht_data *htd;
-	uint64_t service_us, shortest_service_us = UINT64_MAX;
-	unsigned int core, tmp, best_core;
+	float best_budget = FLT_MAX;
+	unsigned int core, tmp, best_core = NCPU;
+
+	if (!sd->ht_punish_us)
+		return NCPU;
 
 	sched_for_each_allowed_core(core, tmp) {
 		if (cores[core] != sd)
@@ -194,15 +192,14 @@ unsigned int ias_ht_relinquish_core(struct ias_data *sd)
 			continue;
 
 		htd = &ias_ht_percore[sched_siblings[core]];
-		service_us = now_us - htd->last_us;
-		if (service_us < shortest_service_us) {
+		if (htd->budget_used < best_budget) {
 			best_core = core;
-			shortest_service_us = service_us;
+			best_budget = htd->budget_used;
 		}
 	}
 
 	/* relax a core if we found one */
-	if (shortest_service_us < UINT64_MAX) {
+	if (best_core != NCPU) {
 		ias_ht_relax_count++;
 		bitmap_clear(ias_ht_punished_cores, best_core);
 		WARN_ON(ias_idle_on_core(best_core));
