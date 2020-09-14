@@ -32,19 +32,6 @@ index 2d037d7..d871aad 100644
  		return -1;
 diff --git a/iokernel/ksched.h b/iokernel/ksched.h
 index 92fe7e9..8f12a1f 100644
---- a/iokernel/ksched.h
-+++ b/iokernel/ksched.h
-@@ -16,7 +16,7 @@
- #include "../ksched/ksched.h"
- 
- // TODO: should not be hard-coded.
--#define SOCKET0_IMC_BUS_NO (0x7F)
-+#define SOCKET0_IMC_BUS_NO (0xFF)
- #define SOCKET0_IMC_DEVICE_NO (0x14)
- #define SOCKET0_CHANNEL0_IMC_FUNC_NO (0)
- #define SOCKET0_CHANNEL1_IMC_FUNC_NO (1)
-diff --git a/runtime/net/directpath/mlx5/mlx5_init.c b/runtime/net/directpath/mlx5/mlx5_init.c
-index e344f3f..57e7b39 100644
 --- a/runtime/net/directpath/mlx5/mlx5_init.c
 +++ b/runtime/net/directpath/mlx5/mlx5_init.c
 @@ -335,7 +335,7 @@ int mlx5_common_init(struct hardware_q **rxq_out, struct direct_txq **txq_out,

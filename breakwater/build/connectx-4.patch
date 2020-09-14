@@ -1,8 +1,8 @@
 diff --git a/inc/iokernel/control.h b/inc/iokernel/control.h
-index b784879..bcd16ed 100644
+index d057e06..a39a36e 100644
 --- a/inc/iokernel/control.h
 +++ b/inc/iokernel/control.h
-@@ -44,6 +44,7 @@ struct congestion_info {
+@@ -42,6 +42,7 @@ struct congestion_info {
  enum {
  	HWQ_INVALID = 0,
  	HWQ_MLX5,
@@ -11,7 +11,7 @@ index b784879..bcd16ed 100644
  	NR_HWQ,
  };
 diff --git a/iokernel/control.c b/iokernel/control.c
-index 50e2a96..5bd2093 100644
+index 8743bed..1eeb6b8 100644
 --- a/iokernel/control.c
 +++ b/iokernel/control.c
 @@ -77,6 +77,7 @@ static int control_init_hwq(struct shm_region *r,
@@ -23,10 +23,10 @@ index 50e2a96..5bd2093 100644
  	if (!h->descriptor_table || !h->consumer_idx)
  		return -EINVAL;
 diff --git a/iokernel/defs.h b/iokernel/defs.h
-index aeb1655..e77fcc4 100644
+index 7ac71e0..75f5899 100644
 --- a/iokernel/defs.h
 +++ b/iokernel/defs.h
-@@ -54,6 +54,7 @@ struct proc;
+@@ -55,6 +55,7 @@ struct proc;
  
  struct hwq {
  	bool			enabled;
@@ -35,19 +35,19 @@ index aeb1655..e77fcc4 100644
  	uint32_t		*consumer_idx;
  	uint32_t		descriptor_log_size;
 diff --git a/iokernel/sched.c b/iokernel/sched.c
-index 407b62d..52a99f8 100644
+index b9514f6..1037a87 100644
 --- a/iokernel/sched.c
 +++ b/iokernel/sched.c
-@@ -256,7 +256,7 @@ static uint32_t hwq_find_head(struct hwq *h, uint32_t cur_tail, uint32_t last_he
- 	return i + start_idx;
+@@ -257,7 +257,7 @@ static uint32_t hwq_find_head(struct hwq *h, uint32_t cur_tail, uint32_t last_he
  }
  
--static bool hardware_queue_congested(struct thread *th, struct hwq *h,
-+static bool hardware_queue_congested(struct proc *p, struct thread *th, struct hwq *h,
- 				bool update_pointers)
+ static bool
+-sched_measure_hardware_delay(struct thread *th, struct hwq *h,
++sched_measure_hardware_delay(struct proc *p, struct thread *th, struct hwq *h,
+ 			     bool update_pointers)
  {
  	uint32_t cur_tail, cur_head, last_head, last_tail;
-@@ -286,8 +286,8 @@ static bool hardware_queue_congested(struct thread *th, struct hwq *h,
+@@ -287,8 +287,8 @@ sched_measure_hardware_delay(struct thread *th, struct hwq *h,
  	if (cur_tail != last_tail || h->busy_since == UINT64_MAX)
  		h->busy_since = cur_tsc;
  
@@ -57,31 +57,51 @@ index 407b62d..52a99f8 100644
 +		wraps_lt(cur_tail, last_head) : cur_head != cur_tail;
  }
  
- static void sched_detect_congestion(struct proc *p)
-@@ -350,10 +350,10 @@ static void sched_detect_congestion(struct proc *p)
- 		else if (cur_tail != last_tail || th->rxq_busy_since == UINT64_MAX)
- 			th->rxq_busy_since = cur_tsc;
+ static uint64_t calc_delay_tsc(uint64_t tsc)
+@@ -297,7 +297,7 @@ static uint64_t calc_delay_tsc(uint64_t tsc)
+ }
  
--		if (hardware_queue_congested(th, &th->directpath_hwq, true))
-+		if (hardware_queue_congested(p, th, &th->directpath_hwq, true))
- 			bitmap_set(ios, i);
+ static bool
+-sched_measure_kthread_delay(struct thread *th,
++sched_measure_kthread_delay(struct proc *p, struct thread *th,
+ 			    uint64_t *rxq_tsc, uint64_t *uthread_tsc,
+ 			    uint64_t *storage_tsc, uint64_t *timer_tsc)
+ {
+@@ -358,12 +358,12 @@ sched_measure_kthread_delay(struct thread *th,
+ 	*timer_tsc = calc_delay_tsc(tmp);
  
--		if (hardware_queue_congested(th, &th->storage_hwq, true))
-+		if (hardware_queue_congested(p, th, &th->storage_hwq, true))
- 			bitmap_set(ios, i);
+ 	/* DIRECTPATH: measure delay and update signals */
+-	if (sched_measure_hardware_delay(th, &th->directpath_hwq, true))
++	if (sched_measure_hardware_delay(p, th, &th->directpath_hwq, true))
+ 		busy = true;
+ 	*rxq_tsc = MAX(*rxq_tsc, calc_delay_tsc(th->directpath_hwq.busy_since));
  
- 		pkq_oldest_tsc = MIN(pkq_oldest_tsc, th->directpath_hwq.busy_since);
-@@ -389,7 +389,7 @@ static void sched_detect_io_for_idle_runtime(struct proc *p)
+ 	/* STORAGE: measure delay and update signals */
+-	if (sched_measure_hardware_delay(th, &th->storage_hwq, true))
++	if (sched_measure_hardware_delay(p, th, &th->storage_hwq, true))
+ 		busy = true;
+ 	*storage_tsc = calc_delay_tsc(th->storage_hwq.busy_since);
+ 
+@@ -393,7 +393,7 @@ static void sched_measure_delay(struct proc *p)
+ 	for (i = 0; i < p->thread_count; i++) {
+ 		uint64_t rxq_tsc, uthread_tsc, storage_tsc, timer_tsc;
+ 
+-		busy |= sched_measure_kthread_delay(&p->threads[i],
++		busy |= sched_measure_kthread_delay(p, &p->threads[i],
+ 			&rxq_tsc, &uthread_tsc, &storage_tsc, &timer_tsc);
+ 		hdelay = MAX(rxq_tsc + uthread_tsc + storage_tsc + timer_tsc,
+ 			     hdelay);
+@@ -421,7 +421,7 @@ static void sched_detect_io_for_idle_runtime(struct proc *p)
  	for (i = 0; i < p->thread_count; i++) {
  		th = &p->threads[i];
  
--		if (hardware_queue_congested(th, &th->directpath_hwq, false)) {
-+		if (hardware_queue_congested(p, th, &th->directpath_hwq, false)) {
+-		if (sched_measure_hardware_delay(th, &th->directpath_hwq, false)) {
++		if (sched_measure_hardware_delay(p, th, &th->directpath_hwq, false)) {
  			sched_add_core(p);
  			return;
  		}
 diff --git a/runtime/cfg.c b/runtime/cfg.c
-index c598152..70634b9 100644
+index 143f017..c801141 100644
 --- a/runtime/cfg.c
 +++ b/runtime/cfg.c
 @@ -297,6 +297,7 @@ static int parse_enable_directpath(const char *name, const char *val)
@@ -93,10 +113,10 @@ index c598152..70634b9 100644
  #else
  	log_err("cfg: cannot enable directpath, "
 diff --git a/runtime/defs.h b/runtime/defs.h
-index ad57982..5854ad2 100644
+index b4b322d..6083e9a 100644
 --- a/runtime/defs.h
 +++ b/runtime/defs.h
-@@ -545,6 +545,7 @@ struct net_driver_ops {
+@@ -548,6 +548,7 @@ struct net_driver_ops {
  	int (*register_flow)(unsigned int affininty, struct trans_entry *e, void **handle_out);
  	int (*deregister_flow)(struct trans_entry *e, void *handle);
  	uint32_t (*get_flow_affinity)(uint8_t ipproto, uint16_t local_port, struct netaddr remote);
@@ -104,7 +124,7 @@ index ad57982..5854ad2 100644
  };
  
  extern struct net_driver_ops net_ops;
-@@ -552,11 +553,12 @@ extern struct net_driver_ops net_ops;
+@@ -555,11 +556,12 @@ extern struct net_driver_ops net_ops;
  #ifdef DIRECTPATH
  
  extern bool cfg_directpath_enabled;
@@ -143,7 +163,7 @@ index 3dc2598..bfb1747 100644
  
  /**
 diff --git a/runtime/net/directpath/common.c b/runtime/net/directpath/common.c
-index 37aa515..13b3a24 100644
+index 0beaa40..a4e0bc2 100644
 --- a/runtime/net/directpath/common.c
 +++ b/runtime/net/directpath/common.c
 @@ -2,7 +2,7 @@
