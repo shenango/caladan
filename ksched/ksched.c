@@ -250,6 +250,12 @@ static long ksched_park(void)
 
 	local_set(&p->busy, false);
 
+	if (unlikely(signal_pending(current))) {
+		local_set(&p->busy, true);
+		put_cpu();
+		return -ERESTARTSYS;
+	}
+
 	/* clear blocked signals */
 	sigemptyset(&em);
 	WARN_ON_ONCE(sigprocmask(SIG_SETMASK, &em, NULL));
