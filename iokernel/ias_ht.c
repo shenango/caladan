@@ -91,33 +91,30 @@ static void ias_ht_relax(struct ias_data *sd, unsigned int core)
 	WARN_ON(ias_idle_on_core(sib));
 }
 
-static float ias_ht_poll_one(unsigned int core)
+static float ias_ht_poll_one(unsigned int core, uint64_t cur_tsc)
 {
 	struct ias_ht_data *htd = &ias_ht_percore[core];
 	struct ias_data *sd = cores[core];
 	struct thread *th = sched_get_thread_on_core(core);
-	uint64_t sgen, rgen;
+	uint64_t sgen, start_ts, delay_ts;
+	float budget_used = 0;
 
 	/* check if we might be able to punish the sibling's HT lane */
 	if (sd && sd->ht_punish_us > 0 && th != NULL) {
 		/* update generation counters */
 		sgen = ias_gen[core];
-		rgen = ACCESS_ONCE(th->q_ptrs->rcu_gen);
-		if (htd->sgen != sgen || htd->rgen != rgen) {
-			htd->sgen = sgen;
-			htd->rgen = rgen;
-			htd->last_us = now_us;
+
+		/* relax once if scheduler gen changes */
+		if (sgen == htd->sgen) {
+			start_ts = ACCESS_ONCE(th->q_ptrs->run_start_tsc);
+			delay_ts = cur_tsc - MIN(cur_tsc, start_ts);
+			budget_used = (float)delay_ts * sd->ht_punish_tsc_inv;
 		}
-		/* skip if stuck in the runtime scheduler */
-		if ((rgen & 0x1) == 0x1) {
-			htd->budget_used =
-			  (float)(now_us - htd->last_us) * sd->ht_punish_us_inv;
-			return htd->budget_used;
-		}
+		htd->sgen = sgen;
 	}
 
-	htd->budget_used = 0;
-	return 0;
+	htd->budget_used = budget_used;
+	return budget_used;
 }
 
 struct tarr {
@@ -146,10 +143,11 @@ void ias_ht_poll(void)
 {
 	struct tarr arr[NCPU];
 	unsigned int core, tmp, num = 0;
+	uint64_t now_tsc = rdtsc();
 
 	/* loop over cores to update service times */
 	sched_for_each_allowed_core(core, tmp) {
-		arr[num].budget_used = ias_ht_poll_one(core);
+		arr[num].budget_used = ias_ht_poll_one(core, now_tsc);
 		arr[num++].core = core;
 	}
 

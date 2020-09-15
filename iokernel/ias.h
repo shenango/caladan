@@ -49,7 +49,7 @@ struct ias_data {
 	/* the hyperthread subcontroller */
 	uint64_t		ht_punish_us;
 	uint64_t		ht_punish_count;
-	float			ht_punish_us_inv;
+	float			ht_punish_tsc_inv;
 
 	/* memory bandwidth subcontroller */
 	float			bw_llc_miss_rate;

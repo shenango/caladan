@@ -305,6 +305,9 @@ static __noreturn __noinline void schedule(void)
 		__self = NULL;
 	}
 
+	/* clear thread run start time */
+	ACCESS_ONCE(l->q_ptrs->run_start_tsc) = UINT64_MAX;
+
 	/* detect misuse of preempt disable */
 	BUG_ON((preempt_cnt & ~PREEMPT_NOT_PENDING) != 1);
 
@@ -423,6 +426,10 @@ done:
 	else
 		STAT(REMOTE_RUNS)++;
 
+	/* update exported thread run start time */
+	th->run_start_tsc = MIN(last_tsc, th->run_start_tsc);
+	ACCESS_ONCE(l->q_ptrs->run_start_tsc) = th->run_start_tsc;
+
 	/* increment the RCU generation number (odd is in thread) */
 	store_release(&l->rcu_gen, l->rcu_gen + 1);
 	ACCESS_ONCE(l->q_ptrs->rcu_gen) += 1;
@@ -437,6 +444,9 @@ static __always_inline void enter_schedule(thread_t *myth)
 	struct kthread *k = myk();
 	thread_t *th;
 	uint64_t now;
+
+	/* voluntarily yielding clears this thread's start time */
+	myth->run_start_tsc = UINT64_MAX;
 
 	assert_preempt_disabled();
 
@@ -464,6 +474,10 @@ static __always_inline void enter_schedule(thread_t *myth)
 	ACCESS_ONCE(k->q_ptrs->rq_tail)++;
 	update_oldest_tsc(k);
 	spin_unlock(&k->lock);
+
+	/* update exported thread run start time */
+	th->run_start_tsc = MIN(last_tsc, th->run_start_tsc);
+	ACCESS_ONCE(k->q_ptrs->run_start_tsc) = th->run_start_tsc;
 
 	/* increment the RCU generation number (odd is in thread) */
 	store_release(&k->rcu_gen, k->rcu_gen + 2);
@@ -587,6 +601,9 @@ static void thread_finish_cede(void)
 	myth->last_cpu = k->curr_cpu;
 	__self = NULL;
 
+	/* clear thread run start time */
+	ACCESS_ONCE(k->q_ptrs->run_start_tsc) = UINT64_MAX;
+
 	STAT(PROGRAM_CYCLES) += rdtsc() - last_tsc;
 
 	/* ensure preempted thread cuts the line,
@@ -659,6 +676,7 @@ static __always_inline thread_t *__thread_create(void)
 	th->state = THREAD_STATE_SLEEPING;
 	th->main_thread = false;
 	th->last_cpu = myk()->curr_cpu;
+	th->run_start_tsc = UINT64_MAX;
 
 	return th;
 }

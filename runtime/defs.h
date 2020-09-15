@@ -104,6 +104,7 @@ struct thread {
 	unsigned int		state;
 	unsigned int		stack_busy;
 	unsigned int		last_cpu;
+	uint64_t		run_start_tsc;
 	uint64_t		ready_tsc;
 	uint64_t		tlsvar;
 #ifdef GC

@@ -32,7 +32,10 @@ struct q_ptrs {
 	uint32_t		pad;
 	uint64_t		oldest_tsc;
 	uint64_t		rcu_gen;
+	uint64_t		run_start_tsc;
 };
+
+BUILD_ASSERT(sizeof(struct q_ptrs) <= CACHE_LINE_SIZE);
 
 struct congestion_info {
 	float			load;

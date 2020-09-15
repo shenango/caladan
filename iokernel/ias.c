@@ -70,7 +70,7 @@ static int ias_attach(struct proc *p, struct sched_spec *sched_cfg)
 	if (sd->is_lc)
 		sd->ht_punish_us = sched_cfg->ht_punish_us;
 	if (sd->ht_punish_us)
-		sd->ht_punish_us_inv = 1.0 / (float)sd->ht_punish_us;
+		sd->ht_punish_tsc_inv = 1.0 / (float)(sd->ht_punish_us * cycles_per_us);
 	sd->qdelay_us = sched_cfg->qdelay_us;
 	sd->threads_active = 0;
 	p->policy_data = (unsigned long)sd;
