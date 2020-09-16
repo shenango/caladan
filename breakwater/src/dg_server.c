@@ -185,6 +185,7 @@ static int srpc_send_completion_vector(struct sdg_session *s,
 		shdr[nrhdr].len = c->cmn.resp_len;
 		shdr[nrhdr].id = c->cmn.id;
 		shdr[nrhdr].prio = atomic_read(&dagor_prio_thresh);
+		shdr[nrhdr].ts_sent = c->ts_sent;
 
 		v[nriov].iov_base = &shdr[nrhdr];
 		v[nriov].iov_len = sizeof(struct sdg_hdr);
@@ -294,6 +295,7 @@ again:
 
 			s->slots[idx]->cmn.resp_len = 0;
 			s->slots[idx]->drop = true;
+			s->slots[idx]->ts_sent = chdr.ts_sent;
 			spin_lock_np(&s->lock);
 			bitmap_set(s->completed_slots, idx);
 			th = s->sender_th;
@@ -309,6 +311,7 @@ again:
 		s->slots[idx]->cmn.req_len = chdr.len;
 		s->slots[idx]->cmn.resp_len = 0;
 		s->slots[idx]->cmn.id = chdr.id;
+		s->slots[idx]->ts_sent = chdr.ts_sent;
 
 		spin_lock_np(&s->lock);
 		s->num_pending++;

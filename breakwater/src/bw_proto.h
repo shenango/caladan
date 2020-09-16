@@ -22,6 +22,7 @@ struct cbw_hdr {
 	size_t		len;   /* length of request in bytes */
 	uint64_t	id;    /* Request / Response ID */
 	uint64_t	demand;/* the demanded window size */
+	uint64_t	ts_sent;
 	bool		sync;
 };
 
@@ -32,4 +33,5 @@ struct sbw_hdr {
 	size_t		len;   /* length of response in bytes */
 	uint64_t	id;    /* Request / Response ID */
 	uint64_t	win;   /* the offered window size */
+	uint64_t	ts_sent;
 };

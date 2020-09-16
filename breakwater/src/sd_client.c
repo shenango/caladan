@@ -534,6 +534,16 @@ uint64_t csd_stat_req_dropped(struct crpc_session *s_)
 	return s->req_dropped_;
 }
 
+uint64_t csd_stat_fail_nreq(struct crpc_session *s_)
+{
+	return 0;
+}
+
+uint64_t csd_stat_fail_sdel(struct crpc_session *s_)
+{
+	return 0;
+}
+
 struct crpc_ops csd_ops = {
 	.crpc_send_one		= csd_send_one,
 	.crpc_recv_one		= csd_recv_one,
@@ -546,4 +556,6 @@ struct crpc_ops csd_ops = {
 	.crpc_stat_resp_rx	= csd_stat_resp_rx,
 	.crpc_stat_req_tx	= csd_stat_req_tx,
 	.crpc_stat_req_dropped	= csd_stat_req_dropped,
+	.crpc_stat_fail_nreq	= csd_stat_fail_nreq,
+	.crpc_stat_fail_sdel	= csd_stat_fail_sdel,
 };

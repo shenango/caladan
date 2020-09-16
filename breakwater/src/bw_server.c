@@ -236,6 +236,7 @@ static int srpc_send_completion_vector(struct sbw_session *s,
 		shdr[nrhdr].len = c->cmn.resp_len;
 		shdr[nrhdr].id = c->cmn.id;
 		shdr[nrhdr].win = (uint64_t)s->win;
+		shdr[nrhdr].ts_sent = c->ts_sent;
 
 		v[nriov].iov_base = &shdr[nrhdr];
 		v[nriov].iov_len = sizeof(struct sbw_hdr);
@@ -453,6 +454,7 @@ again:
 		s->slots[idx]->cmn.req_len = chdr.len;
 		s->slots[idx]->cmn.resp_len = 0;
 		s->slots[idx]->cmn.id = chdr.id;
+		s->slots[idx]->ts_sent = chdr.ts_sent;
 
 		spin_lock_np(&s->lock);
 		old_demand = s->demand;

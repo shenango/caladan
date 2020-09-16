@@ -23,6 +23,7 @@ struct cdg_hdr {
 	size_t		len;   /* length of request in bytes */
 	uint64_t	id;    /* Request / Response ID */
 	int		prio;  /* the demanded window size */
+	uint64_t	ts_sent;
 };
 
 /* header used for SERVER -> CLIENT */
@@ -32,4 +33,5 @@ struct sdg_hdr {
 	size_t		len;   /* length of response in bytes */
 	uint64_t	id;    /* Request / Response ID */
 	int		prio;  /* the offered window size */
+	uint64_t	ts_sent;
 };

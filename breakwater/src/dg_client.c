@@ -30,6 +30,7 @@ static ssize_t crpc_send_request_vector(struct cdg_session *s)
 	int nriov = 0;
 	int nrhdr = 0;
 	ssize_t ret;
+	uint64_t now = microtime();
 
 	while (s->head != s->tail) {
 		struct cdg_ctx *c = s->qreq[s->tail++ % CRPC_QLEN];
@@ -39,6 +40,7 @@ static ssize_t crpc_send_request_vector(struct cdg_session *s)
 		chdr[nrhdr].id = c->cmn.id;
 		chdr[nrhdr].len = c->cmn.len;
 		chdr[nrhdr].prio = c->prio;
+		chdr[nrhdr].ts_sent = now;
 
 		v[nriov].iov_base = &chdr[nrhdr];
 		v[nriov].iov_len = sizeof(struct cdg_hdr);
@@ -150,6 +152,12 @@ again:
 
 		mutex_lock(&s->lock);
 		s->local_prio = shdr.prio;
+		if (shdr.len == 0) {
+			s->fail_nreq_++;
+			s->fail_sdel_ += (microtime() - shdr.ts_sent);
+			mutex_unlock(&s->lock);
+			goto again;
+		}
 		mutex_unlock(&s->lock);
 
 #if CDG_TRACK_FLOW
@@ -158,9 +166,6 @@ again:
 			       now, shdr.id, shdr.prio);
 		}
 #endif
-
-		if (shdr.len == 0)
-			goto again;
 
 		break;
 	case DG_OP_WINUPDATE:
@@ -317,6 +322,18 @@ uint64_t cdg_stat_req_dropped(struct crpc_session *s_)
 	return s->req_dropped_;
 }
 
+uint64_t cdg_stat_fail_nreq(struct crpc_session *s_)
+{
+	struct cdg_session *s = (struct cdg_session *)s_;
+	return s->fail_nreq_;
+}
+
+uint64_t cdg_stat_fail_sdel(struct crpc_session *s_)
+{
+	struct cdg_session *s = (struct cdg_session *)s_;
+	return s->fail_sdel_;
+}
+
 struct crpc_ops cdg_ops = {
 	.crpc_send_one		= cdg_send_one,
 	.crpc_recv_one		= cdg_recv_one,
@@ -329,4 +346,6 @@ struct crpc_ops cdg_ops = {
 	.crpc_stat_resp_rx	= cdg_stat_resp_rx,
 	.crpc_stat_req_tx	= cdg_stat_req_tx,
 	.crpc_stat_req_dropped	= cdg_stat_req_dropped,
+	.crpc_stat_fail_nreq	= cdg_stat_fail_nreq,
+	.crpc_stat_fail_sdel	= cdg_stat_fail_sdel,
 };

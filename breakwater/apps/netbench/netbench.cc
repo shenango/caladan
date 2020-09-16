@@ -130,6 +130,8 @@ struct cstat_raw {
   uint64_t req_tx;
   uint64_t win_expired;
   uint64_t req_dropped;
+  uint64_t fail_nreq;
+  uint64_t fail_sdel;
 };
 
 struct cstat {
@@ -144,6 +146,7 @@ struct cstat {
   double req_tx_pps;
   double win_expired_wps;
   double req_dropped_rps;
+  double fail_mean_del;
 };
 
 struct work_unit {
@@ -241,6 +244,8 @@ class NetBarrier {
         csr->req_tx += rem_csr.req_tx;
         csr->win_expired += rem_csr.win_expired;
         csr->req_dropped += rem_csr.req_dropped;
+	csr->fail_nreq += rem_csr.fail_nreq;
+	csr->fail_sdel += rem_csr.fail_sdel;
       }
     } else {
       BUG_ON(conns[0]->WriteFull(csr, sizeof(*csr)) <= 0);
@@ -653,6 +658,8 @@ std::vector<work_unit> RunExperiment(
       csr->req_tx += c->StatReqTx();
       csr->win_expired += c->StatWinExpired();
       csr->req_dropped += c->StatReqDropped();
+      csr->fail_nreq += c->StatFailNreq();
+      csr->fail_sdel += c->StatFailSdel();
       c->Close();
     }
   }
@@ -846,39 +853,39 @@ void PrintStatResults(std::vector<work_unit> w, struct cstat *cs,
   double mean_stime = sum_stime / w.size();
   double p99_stime = w[count * 0.99].server_time;
 
-  std::cout << std::setprecision(4) << std::fixed << threads * total_agents
-            << "," << cs->offered_rps << "," << cs->rps << "," << cs->goodput
-            << "," << ss->cpu_usage << "," << min << "," << mean << "," << p50
-            << "," << p90 << "," << p99 << "," << p999 << "," << p9999 << ","
-            << max << "," << p1_win << "," << mean_win << ","
-            << p99_win << "," << p1_que << "," << mean_que << "," << p99_que
-            << "," << mean_stime << "," << p99_stime << "," << ss->rx_pps << ","
-            << ss->tx_pps << "," << ss->rx_bps << "," << ss->tx_bps << ","
-            << ss->rx_drops_pps << "," << ss->rx_ooo_pps << ","
-            << ss->winu_rx_pps << "," << ss->winu_tx_pps << ","
-            << ss->win_tx_wps << "," << ss->req_rx_pps << ","
-            << ss->req_drop_rate << "," << ss->resp_tx_pps << ","
-            << cs->min_percli_tput << "," << cs->max_percli_tput << ","
-            << cs->winu_rx_pps << "," << cs->resp_rx_pps
-            << "," << cs->req_tx_pps << "," << cs->win_expired_wps << ","
-            << cs->req_dropped_rps << std::endl;
+  std::cout << std::setprecision(4) << std::fixed << threads * total_agents << ","
+	    << cs->offered_rps << "," << cs->rps << "," << cs->goodput << ","
+	    << ss->cpu_usage << "," << min << "," << mean << "," << p50 << ","
+	    << p90 << "," << p99 << "," << p999 << "," << p9999 << ","
+	    << max << "," << cs->fail_mean_del << "," << p1_win << ","
+	    << mean_win << "," << p99_win << "," << p1_que << ","
+	    << mean_que << "," << p99_que << "," << mean_stime << ","
+	    << p99_stime << "," << ss->rx_pps << "," << ss->tx_pps << ","
+	    << ss->rx_bps << "," << ss->tx_bps << "," << ss->rx_drops_pps << ","
+	    << ss->rx_ooo_pps << "," << ss->winu_rx_pps << ","
+	    << ss->winu_tx_pps << "," << ss->win_tx_wps << ","
+	    << ss->req_rx_pps << "," << ss->req_drop_rate << ","
+	    << ss->resp_tx_pps << "," << cs->min_percli_tput << ","
+	    << cs->max_percli_tput << "," << cs->winu_rx_pps << ","
+	    << cs->resp_rx_pps << "," << cs->req_tx_pps << ","
+	    << cs->win_expired_wps << "," << cs->req_dropped_rps << std::endl;
 
   csv_out << std::setprecision(4) << std::fixed << threads * total_agents << ","
           << cs->offered_rps << "," << cs->rps << "," << cs->goodput << ","
           << ss->cpu_usage << "," << min << "," << mean << "," << p50 << ","
-          << p90 << "," << p99 << "," << p999 << "," << p9999 << "," << max
-          << "," << p1_win << "," << mean_win << ","
-          << p99_win << "," << p1_que << "," << mean_que << "," << p99_que
-          << "," << mean_stime << "," << p99_stime << "," << ss->rx_pps << ","
+          << p90 << "," << p99 << "," << p999 << "," << p9999 << "," << max << ","
+	  << cs->fail_mean_del << "," << p1_win << "," << mean_win << ","
+          << p99_win << "," << p1_que << "," << mean_que << "," << p99_que << ","
+	  << mean_stime << "," << p99_stime << "," << ss->rx_pps << ","
           << ss->tx_pps << "," << ss->rx_bps << "," << ss->tx_bps << ","
-          << ss->rx_drops_pps << "," << ss->rx_ooo_pps << "," << ss->winu_rx_pps
-          << "," << ss->winu_tx_pps << "," << ss->win_tx_wps << ","
-          << ss->req_rx_pps << "," << ss->req_drop_rate << ","
-          << ss->resp_tx_pps << "," << cs->min_percli_tput << ","
-          << cs->max_percli_tput << "," << cs->winu_rx_pps
-          << "," << cs->resp_rx_pps << "," << cs->req_tx_pps << ","
-          << cs->win_expired_wps << "," << cs->req_dropped_rps << std::endl
-          << std::flush;
+          << ss->rx_drops_pps << "," << ss->rx_ooo_pps << ","
+	  << ss->winu_rx_pps << "," << ss->winu_tx_pps << ","
+	  << ss->win_tx_wps << "," << ss->req_rx_pps << ","
+	  << ss->req_drop_rate << "," << ss->resp_tx_pps << ","
+	  << cs->min_percli_tput << "," << cs->max_percli_tput << ","
+	  << cs->winu_rx_pps << "," << cs->resp_rx_pps << ","
+	  << cs->req_tx_pps << "," << cs->win_expired_wps << ","
+	  << cs->req_dropped_rps << std::endl << std::flush;
 
   json_out << "{"
            << "\"num_threads\":" << threads * total_agents << ","
@@ -894,6 +901,7 @@ void PrintStatResults(std::vector<work_unit> w, struct cstat *cs,
            << "\"p999\":" << p999 << ","
            << "\"p9999\":" << p9999 << ","
            << "\"max\":" << max << ","
+	   << "\"fail_mean_del\":" << cs->fail_mean_del << ","
            << "\"p1_win\":" << p1_win << ","
            << "\"mean_win\":" << mean_win << ","
            << "\"p99_win\":" << p99_win << ","
@@ -958,7 +966,9 @@ void SteadyStateExperiment(int threads, double offered_rps,
              static_cast<double>(csr.resp_rx) / elapsed * 1000000,
              static_cast<double>(csr.req_tx) / elapsed * 1000000,
              static_cast<double>(csr.win_expired) / elapsed * 1000000,
-             static_cast<double>(csr.req_dropped) / elapsed * 1000000};
+             static_cast<double>(csr.req_dropped) / elapsed * 1000000,
+	     (csr.fail_nreq == 0) ? 0 :
+		     static_cast<double>(csr.fail_sdel) / csr.fail_nreq};
 
   // Print the results.
   PrintStatResults(w, &cs, &ss);

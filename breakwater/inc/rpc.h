@@ -121,6 +121,8 @@ struct crpc_ops {
 	uint64_t (*crpc_stat_resp_rx)(struct crpc_session *s);
 	uint64_t (*crpc_stat_req_tx)(struct crpc_session *s);
 	uint64_t (*crpc_stat_req_dropped)(struct crpc_session *s);
+	uint64_t (*crpc_stat_fail_nreq)(struct crpc_session *s);
+	uint64_t (*crpc_stat_fail_sdel)(struct crpc_session *s);
 };
 
 /*

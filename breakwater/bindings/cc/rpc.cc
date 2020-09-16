@@ -59,6 +59,14 @@ uint64_t RpcClient::StatReqDropped() {
   return crpc_ops->crpc_stat_req_dropped(s_);
 }
 
+uint64_t RpcClient::StatFailNreq() {
+  return crpc_ops->crpc_stat_fail_nreq(s_);
+}
+
+uint64_t RpcClient::StatFailSdel() {
+  return crpc_ops->crpc_stat_fail_sdel(s_);
+}
+
 int RpcClient::Shutdown(int how) {
   return tcp_shutdown(s_->c, how);
 }

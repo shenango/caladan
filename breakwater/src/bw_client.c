@@ -66,7 +66,7 @@ static ssize_t crpc_send_request_vector(struct cbw_session *s)
 	int nriov = 0;
 	int nrhdr = 0;
 	ssize_t ret;
-//	uint64_t now = microtime();
+	uint64_t now = microtime();
 
 	assert_mutex_held(&s->lock);
 
@@ -81,6 +81,7 @@ static ssize_t crpc_send_request_vector(struct cbw_session *s)
 		chdr[nrhdr].id = c->id;
 		chdr[nrhdr].len = c->len;
 		chdr[nrhdr].demand = s->head - s->tail;
+		chdr[nrhdr].ts_sent = now;
 		chdr[nrhdr].sync = s->demand_sync;
 
 		v[nriov].iov_base = &chdr[nrhdr];
@@ -92,7 +93,6 @@ static ssize_t crpc_send_request_vector(struct cbw_session *s)
 			v[nriov].iov_base = c->buf;
 			v[nriov++].iov_len = c->len;
 		}
-//		c->ts = now - c->ts;
 
 		s->win_used++;
 	}
@@ -125,6 +125,7 @@ static ssize_t crpc_send_raw(struct cbw_session *s,
 	struct iovec vec[2];
 	struct cbw_hdr chdr;
 	ssize_t ret;
+	uint64_t now = microtime();
 
 	/* initialize the header */
 	chdr.magic = BW_REQ_MAGIC;
@@ -132,6 +133,7 @@ static ssize_t crpc_send_raw(struct cbw_session *s,
 	chdr.id = id;
 	chdr.len = len;
 	chdr.demand = s->head - s->tail;
+	chdr.ts_sent = now;
 	chdr.sync = s->demand_sync;
 
 	/* initialize the SG vector */
@@ -150,7 +152,7 @@ static ssize_t crpc_send_raw(struct cbw_session *s,
 #if CBW_TRACK_FLOW
 	if (s->id == CBW_TRACK_FLOW_ID) {
 		printf("[%lu] <=== request: id=%lu, demand = %lu, win = %u/%u\n",
-		       microtime(), chdr.id, chdr.demand, s->win_used, s->win_avail);
+		       now, chdr.id, chdr.demand, s->win_used, s->win_avail);
 	}
 #endif
 	return len;
@@ -325,10 +327,15 @@ again:
 		if (s->win_avail > 0) {
 			crpc_drain_queue(s);
 		}
-		mutex_unlock(&s->lock);
 
-		if (shdr.len == 0)
+		if (shdr.len == 0) {
+			s->fail_nreq_++;
+			s->fail_sdel_ += (microtime() - shdr.ts_sent);
+			mutex_unlock(&s->lock);
 			goto again;
+		}
+
+		mutex_unlock(&s->lock);
 
 		break;
 	case BW_OP_WINUPDATE:
@@ -540,6 +547,18 @@ uint64_t cbw_stat_req_dropped(struct crpc_session *s_)
 	return s->req_dropped_;
 }
 
+uint64_t cbw_stat_fail_nreq(struct crpc_session *s_)
+{
+	struct cbw_session *s = (struct cbw_session *)s_;
+	return s->fail_nreq_;
+}
+
+uint64_t cbw_stat_fail_sdel(struct crpc_session *s_)
+{
+	struct cbw_session *s = (struct cbw_session *)s_;
+	return s->fail_sdel_;
+}
+
 struct crpc_ops cbw_ops = {
 	.crpc_send_one		= cbw_send_one,
 	.crpc_recv_one		= cbw_recv_one,
@@ -552,4 +571,6 @@ struct crpc_ops cbw_ops = {
 	.crpc_stat_resp_rx	= cbw_stat_resp_rx,
 	.crpc_stat_req_tx	= cbw_stat_req_tx,
 	.crpc_stat_req_dropped	= cbw_stat_req_dropped,
+	.crpc_stat_fail_nreq	= cbw_stat_fail_nreq,
+	.crpc_stat_fail_sdel	= cbw_stat_fail_sdel,
 };

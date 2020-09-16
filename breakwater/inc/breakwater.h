@@ -14,6 +14,7 @@
 
 struct sbw_ctx {
 	struct srpc_ctx		cmn;
+	uint64_t		ts_sent;
 	bool			drop;
 };
 
@@ -45,4 +46,6 @@ struct cbw_session {
 	uint64_t		req_tx_;
 	uint64_t		win_expired_;
 	uint64_t		req_dropped_;
+	uint64_t		fail_nreq_;
+	uint64_t		fail_sdel_;
 };
