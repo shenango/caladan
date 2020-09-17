@@ -280,6 +280,7 @@ ssize_t cbw_recv_one(struct crpc_session *s_, void *buf, size_t len)
 	struct cbw_session *s = (struct cbw_session *)s_;
 	struct sbw_hdr shdr;
 	ssize_t ret;
+	uint64_t now;
 
 again:
 	/* read the server header */
@@ -299,6 +300,7 @@ again:
 		return -EINVAL;
 	}
 
+	now = microtime();
 	switch (shdr.op) {
 	case BW_OP_CALL:
 		/* read the payload */
@@ -329,8 +331,8 @@ again:
 		}
 
 		if (shdr.len == 0) {
-			s->fail_nreq_++;
-			s->fail_sdel_ += (microtime() - shdr.ts_sent);
+			s->reject_delay_[s->reject_cnt_++ % NUM_RDEL] =
+				MIN(now - shdr.ts_sent, 65535);
 			mutex_unlock(&s->lock);
 			goto again;
 		}
@@ -547,16 +549,66 @@ uint64_t cbw_stat_req_dropped(struct crpc_session *s_)
 	return s->req_dropped_;
 }
 
-uint64_t cbw_stat_fail_nreq(struct crpc_session *s_)
-{
-	struct cbw_session *s = (struct cbw_session *)s_;
-	return s->fail_nreq_;
+static int cmpfunc(const void *a, const void *b) {
+	return (*(int*)a - *(int*)b);
 }
 
-uint64_t cbw_stat_fail_sdel(struct crpc_session *s_)
+uint16_t cbw_stat_min_rdel(struct crpc_session *s_)
 {
 	struct cbw_session *s = (struct cbw_session *)s_;
-	return s->fail_sdel_;
+	int num_sample = MIN(s->reject_cnt_, NUM_RDEL);
+	int i;
+	uint16_t min = 65535;
+
+	if (num_sample == 0)
+		return 0;
+
+	for(i = 0; i < num_sample; ++i)
+		min = MIN(min, s->reject_delay_[i]);
+
+	return min;
+}
+
+double cbw_stat_mean_rdel(struct crpc_session *s_)
+{
+	struct cbw_session *s = (struct cbw_session *)s_;
+	int num_sample = MIN(s->reject_cnt_, NUM_RDEL);
+	int i;
+	double sum = 0.0;
+
+	if (num_sample == 0)
+		return 0;
+
+	for(i = 0; i < num_sample; ++i)
+		sum += s->reject_delay_[i];
+
+	return sum / (double)num_sample;
+}
+
+uint16_t cbw_stat_p50_rdel(struct crpc_session *s_)
+{
+	struct cbw_session *s = (struct cbw_session *)s_;
+	int num_sample = MIN(s->reject_cnt_, NUM_RDEL);
+
+	if (num_sample == 0)
+		return 0;
+
+	qsort(s->reject_delay_, num_sample, sizeof(uint16_t), cmpfunc);
+
+	return s->reject_delay_[(num_sample-1)/2];
+}
+
+uint16_t cbw_stat_p99_rdel(struct crpc_session *s_)
+{
+	struct cbw_session *s = (struct cbw_session *)s_;
+	int num_sample = MIN(s->reject_cnt_, NUM_RDEL);
+
+	if (num_sample == 0)
+		return 0;
+
+	qsort(s->reject_delay_, num_sample, sizeof(uint16_t), cmpfunc);
+
+	return s->reject_delay_[(int)((num_sample-1)*0.99)];
 }
 
 struct crpc_ops cbw_ops = {
@@ -571,6 +623,8 @@ struct crpc_ops cbw_ops = {
 	.crpc_stat_resp_rx	= cbw_stat_resp_rx,
 	.crpc_stat_req_tx	= cbw_stat_req_tx,
 	.crpc_stat_req_dropped	= cbw_stat_req_dropped,
-	.crpc_stat_fail_nreq	= cbw_stat_fail_nreq,
-	.crpc_stat_fail_sdel	= cbw_stat_fail_sdel,
+	.crpc_stat_min_rdel	= cbw_stat_min_rdel,
+	.crpc_stat_mean_rdel	= cbw_stat_mean_rdel,
+	.crpc_stat_p50_rdel	= cbw_stat_p50_rdel,
+	.crpc_stat_p99_rdel	= cbw_stat_p99_rdel,
 };

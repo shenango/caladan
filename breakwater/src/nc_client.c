@@ -312,12 +312,22 @@ uint64_t cnc_stat_req_dropped(struct crpc_session *s_)
 	return s->req_dropped_;
 }
 
-uint64_t cnc_stat_fail_nreq(struct crpc_session *s_)
+uint16_t cnc_stat_min_rdel(struct crpc_session *s_)
 {
 	return 0;
 }
 
-uint64_t cnc_stat_fail_sdel(struct crpc_session *s_)
+double cnc_stat_mean_rdel(struct crpc_session *s_)
+{
+	return 0;
+}
+
+uint16_t cnc_stat_p50_rdel(struct crpc_session *s_)
+{
+	return 0;
+}
+
+uint16_t cnc_stat_p99_rdel(struct crpc_session *s_)
 {
 	return 0;
 }
@@ -334,6 +344,8 @@ struct crpc_ops cnc_ops = {
 	.crpc_stat_resp_rx	= cnc_stat_resp_rx,
 	.crpc_stat_req_tx	= cnc_stat_req_tx,
 	.crpc_stat_req_dropped	= cnc_stat_req_dropped,
-	.crpc_stat_fail_nreq	= cnc_stat_fail_nreq,
-	.crpc_stat_fail_sdel	= cnc_stat_fail_sdel,
+	.crpc_stat_min_rdel	= cnc_stat_min_rdel,
+	.crpc_stat_mean_rdel	= cnc_stat_mean_rdel,
+	.crpc_stat_p50_rdel	= cnc_stat_p50_rdel,
+	.crpc_stat_p99_rdel	= cnc_stat_p99_rdel,
 };

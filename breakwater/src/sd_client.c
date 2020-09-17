@@ -534,12 +534,22 @@ uint64_t csd_stat_req_dropped(struct crpc_session *s_)
 	return s->req_dropped_;
 }
 
-uint64_t csd_stat_fail_nreq(struct crpc_session *s_)
+uint16_t csd_stat_min_rdel(struct crpc_session *s_)
 {
 	return 0;
 }
 
-uint64_t csd_stat_fail_sdel(struct crpc_session *s_)
+double csd_stat_mean_rdel(struct crpc_session *s_)
+{
+	return 0;
+}
+
+uint16_t csd_stat_p50_rdel(struct crpc_session *s_)
+{
+	return 0;
+}
+
+uint16_t csd_stat_p99_rdel(struct crpc_session *s_)
 {
 	return 0;
 }
@@ -556,6 +566,8 @@ struct crpc_ops csd_ops = {
 	.crpc_stat_resp_rx	= csd_stat_resp_rx,
 	.crpc_stat_req_tx	= csd_stat_req_tx,
 	.crpc_stat_req_dropped	= csd_stat_req_dropped,
-	.crpc_stat_fail_nreq	= csd_stat_fail_nreq,
-	.crpc_stat_fail_sdel	= csd_stat_fail_sdel,
+	.crpc_stat_min_rdel	= csd_stat_min_rdel,
+	.crpc_stat_mean_rdel	= csd_stat_mean_rdel,
+	.crpc_stat_p50_rdel	= csd_stat_p50_rdel,
+	.crpc_stat_p99_rdel	= csd_stat_p99_rdel,
 };

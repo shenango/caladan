@@ -43,9 +43,13 @@ class RpcClient {
 
   uint64_t StatReqDropped();
 
-  uint64_t StatFailNreq();
+  uint16_t StatMinRdel();
 
-  uint64_t StatFailSdel();
+  double StatMeanRdel();
+
+  double StatP50Rdel();
+
+  uint16_t StatP99Rdel();
 
   // Shuts down the RPC connection.
   int Shutdown(int how);
