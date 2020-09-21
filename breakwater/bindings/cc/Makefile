@@ -3,9 +3,10 @@ ROOT_PATH=../../..
 include $(ROOT_PATH)/build/shared.mk
 
 CXXFLAGS += -I$(ROOT_PATH)/breakwater/inc
+CXXFLAGS += -I$(ROOT_PATH)/breakwater/bindings/cc/inc
 
 # libbw+++.a - the c++ breakwater library
-bw_src = rpc.cc
+bw_src = rpc++.cc
 bw_obj = $(bw_src:.cc=.o)
 
 all: libbw++.a

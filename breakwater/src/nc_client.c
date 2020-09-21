@@ -12,7 +12,7 @@
 #include <runtime/sync.h>
 #include <runtime/timer.h>
 
-#include <nocontrol.h>
+#include <breakwater/nocontrol.h>
 
 #include "util.h"
 #include "nc_proto.h"

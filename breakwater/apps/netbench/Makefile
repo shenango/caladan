@@ -2,7 +2,7 @@
 ROOT_PATH=../../..
 include $(ROOT_PATH)/build/shared.mk
 
-BW_LIBS = $(ROOT_PATH)/breakwater/libbreakwater.a
+BW_LIBS = $(ROOT_PATH)/breakwater/libbw.a
 
 lib_src = synthetic_worker.cc util.cc
 lib_obj = $(lib_src:.cc=.o)
@@ -14,7 +14,7 @@ librt_libs = $(ROOT_PATH)/bindings/cc/librt++.a
 libbw_libs = $(ROOT_PATH)/breakwater/bindings/cc/libbw++.a
 INC += -I$(ROOT_PATH)/breakwater/inc
 INC += -I$(ROOT_PATH)/bindings
-INC += -I$(ROOT_PATH)/breakwater/bindings
+INC += -I$(ROOT_PATH)/breakwater/bindings/cc/inc
 
 RUNTIME_LIBS := $(RUNTIME_LIBS) $(BW_LIBS) -lnuma
 

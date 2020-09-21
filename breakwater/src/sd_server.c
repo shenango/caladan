@@ -16,7 +16,7 @@
 #include <runtime/timer.h>
 #include <runtime/runtime.h>
 
-#include <seda.h>
+#include <breakwater/seda.h>
 
 #include "util.h"
 #include "sd_proto.h"

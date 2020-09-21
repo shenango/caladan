@@ -17,7 +17,7 @@
 #include <runtime/timer.h>
 #include <runtime/runtime.h>
 
-#include <dagor.h>
+#include <breakwater/dagor.h>
 
 #include "util.h"
 #include "dg_proto.h"

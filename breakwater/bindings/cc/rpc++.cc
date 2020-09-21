@@ -1,7 +1,4 @@
-#include "rpc.h"
-
-const struct crpc_ops *crpc_ops;
-const struct srpc_ops *srpc_ops;
+#include <breakwater/rpc++.h>
 
 namespace rpc {
 

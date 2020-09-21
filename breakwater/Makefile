@@ -7,9 +7,9 @@ CFLAGS += -I$(ROOT_PATH)/breakwater/inc
 breakwater_src = $(wildcard src/*.c)
 breakwater_obj = $(breakwater_src:.c=.o)
 
-all: libbreakwater.a
+all: libbw.a
 
-libbreakwater.a: $(breakwater_obj)
+libbw.a: $(breakwater_obj)
 	$(AR) rcs $@ $^
 
 # general build rules for all targets
@@ -29,4 +29,4 @@ endif
 
 .PHONY: clean
 clean:
-	rm -f $(obj) $(dep) libbreakwater.a
+	rm -f $(obj) $(dep) libbw.a

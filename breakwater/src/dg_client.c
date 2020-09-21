@@ -13,7 +13,7 @@
 #include <runtime/sync.h>
 #include <runtime/timer.h>
 
-#include <dagor.h>
+#include <breakwater/dagor.h>
 
 #include "util.h"
 #include "dg_proto.h"

@@ -3,8 +3,10 @@ extern "C" {
 #include <base/time.h>
 #include <net/ip.h>
 #include <unistd.h>
-#include <breakwater.h>
-#include <seda.h>
+#include <breakwater/breakwater.h>
+#include <breakwater/seda.h>
+#include <breakwater/dagor.h>
+#include <breakwater/nocontrol.h>
 }
 
 #include "cc/net.h"
@@ -12,7 +14,7 @@ extern "C" {
 #include "cc/sync.h"
 #include "cc/thread.h"
 #include "cc/timer.h"
-#include "cc/rpc.h"
+#include "breakwater/rpc++.h"
 
 #include "synthetic_worker.h"
 
@@ -36,6 +38,9 @@ std::time_t timex;
 barrier_t barrier;
 
 constexpr uint16_t kBarrierPort = 41;
+
+const struct crpc_ops *crpc_ops;
+const struct srpc_ops *srpc_ops;
 
 namespace {
 
@@ -501,7 +506,12 @@ std::vector<work_unit> GenerateWork(Arrival a, Service s, double cur_us,
   std::vector<work_unit> w;
   double st_us;
   while (true) {
-    cur_us += a();
+    if (cur_us < 4000000)
+      cur_us += a();
+    else if (cur_us < 6000000)
+      cur_us += a() / 2.0;
+    else
+      cur_us += a();
     if (cur_us > last_us) break;
     switch (st_type) {
       case 1: // exponential
@@ -699,7 +709,7 @@ std::vector<work_unit> RunExperiment(
     v.erase(std::remove_if(v.begin(), v.end(),
                            [](const work_unit &s) {
                              return (s.duration_us == 0 ||
-                                     s.start_us < kWarmUpTime);
+                                     (s.start_us + s.duration_us) < kWarmUpTime);
                            }),
             v.end());
     slo_success = std::count_if(v.begin(), v.end(), [](const work_unit &s) {
@@ -825,7 +835,39 @@ void PrintStatResults(std::vector<work_unit> w, struct cstat *cs,
               << "-" << std::endl;
     return;
   }
+/*
+  double cur_us = 2000000;
+  double gran_us = 20000;
+  int resp_cnt = 0;
+  std::vector<double> durations;
 
+  // sort!
+  std::sort(w.begin(), w.end(), [](const work_unit &s1, const work_unit &s2) {
+    return (s1.start_us + s1.duration_us) < (s2.start_us + s2.duration_us);
+  });
+
+  for(const work_unit &s: w) {
+    double arr_us = s.start_us + s.duration_us;
+
+    if (arr_us < cur_us) continue;
+    if (arr_us >= cur_us + gran_us) {
+      cur_us += gran_us;
+      if (resp_cnt == 0) continue;
+
+      std::sort(durations.begin(), durations.end(), [](const double &d1, const double &d2) {
+        return d1 < d2;
+      });
+  
+      printf("%lf,%lf,%lf\n", cur_us/1000000.0 - 2.0, resp_cnt * (1000000/gran_us),
+		      durations[resp_cnt * 0.99]);
+      durations.clear();
+      resp_cnt = 0;
+    }
+
+    durations.push_back(s.duration_us);
+    resp_cnt++;
+  }
+*/
   std::sort(w.begin(), w.end(), [](const work_unit &s1, const work_unit &s2) {
     return s1.duration_us < s2.duration_us;
   });

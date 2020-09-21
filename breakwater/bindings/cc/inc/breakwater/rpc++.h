@@ -4,7 +4,7 @@
 
 extern "C" {
 #include <base/stddef.h>
-#include <rpc.h>
+#include <breakwater/rpc.h>
 }
 
 #include <functional>

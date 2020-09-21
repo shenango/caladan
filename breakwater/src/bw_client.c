@@ -11,7 +11,7 @@
 #include <runtime/sync.h>
 #include <runtime/timer.h>
 
-#include <breakwater.h>
+#include <breakwater/breakwater.h>
 
 #include "util.h"
 #include "bw_proto.h"

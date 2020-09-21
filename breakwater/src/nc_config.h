@@ -7,4 +7,4 @@
 /* turn on AQM? */
 #define SNC_AQM_ON		false
 /* AQM Threshold */
-#define SNC_AQM_THRESH		200
+#define SNC_AQM_THRESH		2000

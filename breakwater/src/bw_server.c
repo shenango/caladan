@@ -16,7 +16,7 @@
 #include <runtime/timer.h>
 #include <runtime/runtime.h>
 
-#include <breakwater.h>
+#include <breakwater/breakwater.h>
 
 #include "util.h"
 #include "bw_proto.h"

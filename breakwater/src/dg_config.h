@@ -12,18 +12,18 @@
 * (const) #define DAGOR_OVERLOAD_THRESH		30
 *
 * - 10 us average service time
-* (bimod) #define DAGOR_OVERLOAD_THRESH		100
-* (exp) #define DAGOR_OVERLOAD_THRESH		100
-* (const) #define DAGOR_OVERLOAD_THRESH		100
+* (bimod) #define DAGOR_OVERLOAD_THRESH		70
+* (exp) #define DAGOR_OVERLOAD_THRESH		60
+* (const) #define DAGOR_OVERLOAD_THRESH		50
 *
 * - 100 us average service time
-* (bimod) #define DAGOR_OVERLOAD_THRESH		820
-* (exp) #define DAGOR_OVERLOAD_THRESH		820
-* (const) #define DAGOR_OVERLOAD_THRESH		820
+* (bimod) #define DAGOR_OVERLOAD_THRESH		450
+* (exp) #define DAGOR_OVERLOAD_THRESH		400
+* (const) #define DAGOR_OVERLOAD_THRESH		350
 */
 
 /* delay threshold to detect congestion */
-#define DAGOR_OVERLOAD_THRESH	100	// in us
+#define DAGOR_OVERLOAD_THRESH	60	// in us
 /* max priority update interval */
 #define DAGOR_PRIO_UPDATE_INT	1000	// in us
 /* max # requests for priority update */

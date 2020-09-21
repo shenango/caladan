@@ -12,7 +12,7 @@
 #include <runtime/sync.h>
 #include <runtime/timer.h>
 
-#include <seda.h>
+#include <breakwater/seda.h>
 
 #include "util.h"
 #include "sd_proto.h"
