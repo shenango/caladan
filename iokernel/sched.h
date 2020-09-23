@@ -36,11 +36,12 @@ struct sched_ops {
 	 * @p: the process for which congestion has changed
 	 * @congested: did the old shenango congestion signal trigger
 	 * @delay: the new queueing delay signal in microseconds
+	 * @parked_thread_congested: queueing delay is non-zero for a parked thread
 	 *
 	 * This notifier informs the scheduler of when processes become
 	 * congested or uncongested, driving core allocation decisions.
 	 */
-	void (*notify_congested)(struct proc *p, bool congested, uint64_t delay);
+	void (*notify_congested)(struct proc *p, bool congested, uint64_t delay, bool parked_thread_delay);
 
 	/**
 	 * notify_core_needed - notifies the scheduler that a core is needed

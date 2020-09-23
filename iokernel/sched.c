@@ -388,15 +388,17 @@ static void sched_measure_delay(struct proc *p)
 	uint64_t hdelay = 0;
 	int i;
 	bool busy = false;
+	bool parked_thread_busy = false;
 
 	/* detect per-kthread delay */
 	for (i = 0; i < p->thread_count; i++) {
-		uint64_t rxq_tsc, uthread_tsc, storage_tsc, timer_tsc;
+		uint64_t delay, rxq_tsc, uthread_tsc, storage_tsc, timer_tsc;
 
 		busy |= sched_measure_kthread_delay(&p->threads[i],
 			&rxq_tsc, &uthread_tsc, &storage_tsc, &timer_tsc);
-		hdelay = MAX(rxq_tsc + uthread_tsc + storage_tsc + timer_tsc,
-			     hdelay);
+		delay = rxq_tsc + uthread_tsc + storage_tsc + timer_tsc;
+		hdelay = MAX(delay, hdelay);
+		parked_thread_busy |= delay > 0 && !p->threads[i].active;
 	}
 
 	/* convert the highest delay experienced by the runtime to us */
@@ -406,7 +408,7 @@ static void sched_measure_delay(struct proc *p)
 	sched_report_metrics(p, hdelay);
 
 	/* notify the scheduler policy of the current delay */
-	sched_ops->notify_congested(p, busy, hdelay);
+	sched_ops->notify_congested(p, busy, hdelay, parked_thread_busy);
 }
 
 /*
