@@ -1,5 +1,5 @@
 diff --git a/providers/mlx5/dr_domain.c b/providers/mlx5/dr_domain.c
-index 11af45895..61dc6e451 100644
+index 11af4589..61dc6e45 100644
 --- a/providers/mlx5/dr_domain.c
 +++ b/providers/mlx5/dr_domain.c
 @@ -188,9 +188,9 @@ static int dr_domain_caps_init(struct ibv_context *ctx,
@@ -24,7 +24,7 @@ index 11af45895..61dc6e451 100644
  	if (dr_domain_caps_init(ctx, dmn)) {
  		dr_dbg(dmn, "Failed init domain, no caps\n");
 diff --git a/providers/mlx5/dr_rule.c b/providers/mlx5/dr_rule.c
-index 7a3bf633f..f6f90a602 100644
+index 7a3bf633..f6f90a60 100644
 --- a/providers/mlx5/dr_rule.c
 +++ b/providers/mlx5/dr_rule.c
 @@ -32,6 +32,7 @@
@@ -78,7 +78,7 @@ index 7a3bf633f..f6f90a602 100644
  {
  	struct mlx5dv_dr_matcher *matcher = rule->matcher;
 diff --git a/providers/mlx5/dr_send.c b/providers/mlx5/dr_send.c
-index 64d892eae..c10bb720e 100644
+index 64d892ea..c10bb720 100644
 --- a/providers/mlx5/dr_send.c
 +++ b/providers/mlx5/dr_send.c
 @@ -39,7 +39,7 @@
@@ -132,7 +132,7 @@ index 64d892eae..c10bb720e 100644
  				   struct dr_ste_htbl *htbl,
  				   uint8_t **data,
 diff --git a/providers/mlx5/libmlx5.map b/providers/mlx5/libmlx5.map
-index 1558e0932..aeb4820b1 100644
+index 1558e093..aeb4820b 100644
 --- a/providers/mlx5/libmlx5.map
 +++ b/providers/mlx5/libmlx5.map
 @@ -105,4 +105,7 @@ MLX5_1.10 {
@@ -143,11 +143,45 @@ index 1558e0932..aeb4820b1 100644
 +		postsend_lock;
 +		postsend_unlock;
  } MLX5_1.9;
+diff --git a/providers/mlx5/mlx5.c b/providers/mlx5/mlx5.c
+index d818ce6d..53e5183e 100644
+--- a/providers/mlx5/mlx5.c
++++ b/providers/mlx5/mlx5.c
+@@ -740,6 +740,13 @@ int mlx5dv_query_device(struct ibv_context *ctx_in,
+ 		comp_mask_out |= MLX5DV_CONTEXT_MASK_FLOW_ACTION_FLAGS;
+ 	}
+ 
++	if (attrs_out->comp_mask & MLX5DV_CONTEXT_MASK_HCA_CORE_CLOCK) {
++		if (mctx->hca_core_clock) {
++			attrs_out->hca_core_clock = mctx->hca_core_clock;
++			comp_mask_out |= MLX5DV_CONTEXT_MASK_HCA_CORE_CLOCK;
++		}
++	}
++
+ 	attrs_out->comp_mask = comp_mask_out;
+ 
+ 	return 0;
 diff --git a/providers/mlx5/mlx5dv.h b/providers/mlx5/mlx5dv.h
-index 4e9c2733a..2ef14f23e 100644
+index 4e9c2733..a14e53c7 100644
 --- a/providers/mlx5/mlx5dv.h
 +++ b/providers/mlx5/mlx5dv.h
-@@ -1416,6 +1416,13 @@ mlx5dv_dr_rule_create(struct mlx5dv_dr_matcher *matcher,
+@@ -72,6 +72,7 @@ enum mlx5dv_context_comp_mask {
+ 	MLX5DV_CONTEXT_MASK_DYN_BFREGS		= 1 << 4,
+ 	MLX5DV_CONTEXT_MASK_CLOCK_INFO_UPDATE	= 1 << 5,
+ 	MLX5DV_CONTEXT_MASK_FLOW_ACTION_FLAGS	= 1 << 6,
++	MLX5DV_CONTEXT_MASK_HCA_CORE_CLOCK	 = 1 << 8,
+ };
+ 
+ struct mlx5dv_cqe_comp_caps {
+@@ -122,6 +123,7 @@ struct mlx5dv_context {
+ 	uint32_t	max_dynamic_bfregs;
+ 	uint64_t	max_clock_info_update_nsec;
+ 	uint32_t        flow_action_flags; /* use enum mlx5dv_flow_action_cap_flags */
++	void            *hca_core_clock;
+ };
+ 
+ enum mlx5dv_context_flags {
+@@ -1416,6 +1418,13 @@ mlx5dv_dr_rule_create(struct mlx5dv_dr_matcher *matcher,
  		      size_t num_actions,
  		      struct mlx5dv_dr_action *actions[]);
  
@@ -162,7 +196,7 @@ index 4e9c2733a..2ef14f23e 100644
  
  enum mlx5dv_dr_action_flags {
 diff --git a/providers/mlx5/mlx5dv_dr.h b/providers/mlx5/mlx5dv_dr.h
-index ffc400d7c..89188c0b9 100644
+index ffc400d7..89188c0b 100644
 --- a/providers/mlx5/mlx5dv_dr.h
 +++ b/providers/mlx5/mlx5dv_dr.h
 @@ -629,6 +629,7 @@ struct mlx5dv_dr_domain {

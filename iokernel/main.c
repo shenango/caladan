@@ -48,6 +48,8 @@ static const struct init_entry iok_init_handlers[] = {
 	IOK_INITIALIZER(tx),
 	IOK_INITIALIZER(dp_clients),
 	IOK_INITIALIZER(dpdk_late),
+	IOK_INITIALIZER(hw_timestamp),
+
 };
 
 static int run_init_handlers(const char *phase, const struct init_entry *h,
@@ -158,6 +160,8 @@ int main(int argc, char *argv[])
 			cfg.noht = true;
 		} else if (!strcmp(argv[i], "nobw")) {
 			cfg.nobw = true;
+		} else if (!strcmp(argv[i], "no_hw_qdel")) {
+			cfg.no_hw_qdel = true;
 		} else if (!strcmp(argv[i], "selfpair")) {
 			cfg.ias_prefer_selfpair = true;
 		} else if (!strcmp(argv[i], "bwlimit")) {

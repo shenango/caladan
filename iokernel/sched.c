@@ -14,6 +14,7 @@
 #include "defs.h"
 #include "sched.h"
 #include "ksched.h"
+#include "hw_timestamp.h"
 
 /* a bitmap of cores available to be allocated by the scheduler */
 DEFINE_BITMAP(sched_allowed_cores, NCPU);
@@ -256,6 +257,21 @@ static uint32_t hwq_find_head(struct hwq *h, uint32_t cur_tail, uint32_t last_he
 	return i + start_idx;
 }
 
+static uint64_t sched_measure_mlx5_delay(struct hwq *h)
+{
+	uint32_t cur_tail;
+	struct mlx5_cqe64 *cqe;
+
+	assert(h->enabled);
+	cur_tail = ACCESS_ONCE(*h->consumer_idx);
+	if (!hwq_busy(h, cur_tail))
+		return 0;
+
+	cur_tail &= h->nr_descriptors - 1;
+	cqe = h->descriptor_table + (cur_tail << h->descriptor_log_size);
+	return hw_timestamp_delay_us(cqe) * cycles_per_us;
+}
+
 static bool
 sched_measure_hardware_delay(struct thread *th, struct hwq *h,
 			     bool update_pointers)
@@ -360,7 +376,14 @@ sched_measure_kthread_delay(struct thread *th,
 	/* DIRECTPATH: measure delay and update signals */
 	if (sched_measure_hardware_delay(th, &th->directpath_hwq, true))
 		busy = true;
-	*rxq_tsc = MAX(*rxq_tsc, calc_delay_tsc(th->directpath_hwq.busy_since));
+
+	// TODO: use sched_measure_mlx5_delay() instead of scanning the descriptor
+	// ring for the producer index
+	if (is_hw_timestamp_enabled() && th->directpath_hwq.enabled &&
+	    th->directpath_hwq.hwq_type == HWQ_MLX5)
+		*rxq_tsc = MAX(*rxq_tsc, sched_measure_mlx5_delay(&th->directpath_hwq));
+	else
+		*rxq_tsc = MAX(*rxq_tsc, calc_delay_tsc(th->directpath_hwq.busy_since));
 
 	/* STORAGE: measure delay and update signals */
 	if (sched_measure_hardware_delay(th, &th->storage_hwq, true))
@@ -480,6 +503,9 @@ void sched_poll(void)
 	now = (cur_tsc - start_tsc) / cycles_per_us;
 	if (now - last_time >= IOKERNEL_POLL_INTERVAL) {
 		int i;
+
+		/* retrieve current network device tick */
+		hw_timestamp_update();
 
 		last_time = now;
 		for (i = 0; i < dp.nr_clients; i++)

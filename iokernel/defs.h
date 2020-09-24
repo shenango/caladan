@@ -28,6 +28,7 @@ struct iokernel_cfg {
 	bool	nobw; /* disable bandwidth controller */
 	bool	ias_prefer_selfpair; /* prefer self-pairings */
 	float	ias_bw_limit; /* IAS bw limit, (MB/s) */
+	bool	no_hw_qdel; /* Disable use of hardware timestamps for qdelay */
 };
 
 extern struct iokernel_cfg cfg;
@@ -335,6 +336,7 @@ extern int rx_init(void);
 extern int tx_init(void);
 extern int dp_clients_init(void);
 extern int dpdk_late_init(void);
+extern int hw_timestamp_init(void);
 
 extern bool allowed_cores_supplied;
 extern DEFINE_BITMAP(input_allowed_cores, NCPU);

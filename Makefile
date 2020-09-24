@@ -54,7 +54,8 @@ DPDK_LIBS += -lrte_mempool_stack
 DPDK_LIBS += -lrte_ring
 # additional libs for running with Mellanox NICs
 ifeq ($(CONFIG_MLX5),y)
-DPDK_LIBS +=  -lrte_pmd_mlx5 -libverbs -lmlx5 -lmnl
+DPDK_LIBS += $(MLX5_LIBS) -lrte_pmd_mlx5
+$(iokernel_obj): INC += $(MLX5_INC)
 else
 ifeq ($(CONFIG_MLX4),y)
 DPDK_LIBS += -lrte_pmd_mlx4 -libverbs -lmlx4

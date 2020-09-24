@@ -24,6 +24,11 @@ RUNTIME_DEPS = $(ROOT_PATH)/libruntime.a $(ROOT_PATH)/libnet.a \
 RUNTIME_LIBS = $(ROOT_PATH)/libruntime.a $(ROOT_PATH)/libnet.a \
 	       $(ROOT_PATH)/libbase.a -lpthread
 
+# mlx5 build
+MLX5_INC = -I$(ROOT_PATH)/rdma-core/build/include
+MLX5_LIBS = -L$(ROOT_PATH)/rdma-core/build/lib/statics/
+MLX5_LIBS += -lmlx5 -libverbs -lnl-3 -lnl-route-3
+
 # parse configuration options
 ifeq ($(CONFIG_DEBUG),y)
 FLAGS += -DDEBUG -DCCAN_LIST_DEBUG -rdynamic -O0 -ggdb -mssse3
@@ -51,9 +56,8 @@ RUNTIME_LIBS += -lspdk_nvme -lspdk_util -lspdk_env_dpdk -lspdk_log -lspdk_sock \
 INC += -I$(ROOT_PATH)/spdk/include
 endif
 ifeq ($(CONFIG_DIRECTPATH),y)
-RUNTIME_LIBS += -L$(ROOT_PATH)/rdma-core/build/lib/statics/
-RUNTIME_LIBS += -lmlx5 -libverbs -lnl-3 -lnl-route-3
-INC += -I$(ROOT_PATH)/rdma-core/build/include
+RUNTIME_LIBS += $(MLX5_LIBS)
+INC += $(MLX5_INC)
 FLAGS += -DDIRECTPATH
 endif
 
