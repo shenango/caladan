@@ -25,7 +25,6 @@ unsigned int sched_siblings[NCPU];
 /* core assignments */
 unsigned int sched_dp_core;	/* used for the iokernel's dataplane */
 unsigned int sched_ctrl_core;	/* used for the iokernel's controlplane */
-unsigned int sched_linux_core;	/* used by normal linux scheduler */
 
 /* keeps track of which cores are in each NUMA socket */
 struct socket socket_state[NNUMA];
@@ -696,11 +695,10 @@ int sched_init(void)
 	sib = sched_siblings[i];
 	bitmap_clear(sched_allowed_cores, i);
 	bitmap_clear(sched_allowed_cores, sib);
-	sched_dp_core = i;
-	sched_ctrl_core = sib;
-	sched_linux_core = sib;
-	log_info("sched: dataplane on %d, control on %d, linux on %d",
-		 sched_dp_core, sched_ctrl_core, sched_linux_core);
+	sched_dp_core = sib;
+	sched_ctrl_core = i;
+	log_info("sched: dataplane on %d, control on %d",
+		 sched_dp_core, sched_ctrl_core);
 
 	/* check if configuration disables hyperthreads */
 	if (cfg.noht) {
