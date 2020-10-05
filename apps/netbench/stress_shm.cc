@@ -16,6 +16,7 @@ extern "C" {
 #define SHM_KEY (0x123)
 
 barrier_t barrier;
+bool use_barrier = false;
 bool synth_barrier_wait() { return barrier_wait(&barrier); }
 namespace {
 
@@ -45,7 +46,10 @@ void MainHandler(void *arg) {
       while (true) {
         w->Work(n);
         cnt[i * 8]++;
-        rt::Yield();
+        if (use_barrier)
+          synth_barrier_wait();
+        else
+          rt::Yield();
       }
     });
   }
@@ -56,18 +60,31 @@ void MainHandler(void *arg) {
 
 }  // anonymous namespace
 
+void PrintUsage() {
+  std::cerr
+      << "usage: [config_file] [#threads] [#n] [worker_spec] <use_barrier>"
+      << std::endl;
+}
+
 int main(int argc, char *argv[]) {
   int ret;
 
-  if (argc != 5) {
-    std::cerr << "usage: [config_file] [#threads] [#n] [worker_spec]"
-              << std::endl;
+  if (argc < 5) {
+    PrintUsage();
     return -EINVAL;
   }
 
   threads = std::stoi(argv[2], nullptr, 0);
   n = std::stoul(argv[3], nullptr, 0);
   worker_spec = std::string(argv[4]);
+
+  if (argc > 5) {
+    if (std::string(argv[5]) != "use_barrier") {
+      PrintUsage();
+      return -EINVAL;
+    }
+    use_barrier = true;
+  }
 
   ret = runtime_init(argv[1], MainHandler, NULL);
   if (ret) {
