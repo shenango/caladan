@@ -15,6 +15,10 @@ enum {
 	BW_OP_MAX,	  /* maximum number of opcodes */
 };
 
+#define BW_CFLAG_DSYNC	0x01
+
+#define BW_SFLAG_DROP	0x01
+
 /* header used for CLIENT -> SERVER */
 struct cbw_hdr {
 	uint32_t	magic; /* must be set to RPC_REQ_MAGIC */
@@ -23,7 +27,7 @@ struct cbw_hdr {
 	uint64_t	id;    /* Request / Response ID */
 	uint64_t	demand;/* the demanded window size */
 	uint64_t	ts_sent;
-	bool		sync;
+	uint8_t		flags;
 };
 
 /* header used for SERVER -> CLIENT */
@@ -34,4 +38,5 @@ struct sbw_hdr {
 	uint64_t	id;    /* Request / Response ID */
 	uint64_t	win;   /* the offered window size */
 	uint64_t	ts_sent;
+	uint8_t		flags;
 };

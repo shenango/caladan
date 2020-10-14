@@ -16,6 +16,8 @@ enum {
 	DG_OP_MAX,	  /* maximum number of opcodes */
 };
 
+#define DG_SFLAG_DROP	0x01
+
 /* header used for CLIENT -> SERVER */
 struct cdg_hdr {
 	uint32_t	magic; /* must be set to RPC_REQ_MAGIC */
@@ -34,4 +36,5 @@ struct sdg_hdr {
 	uint64_t	id;    /* Request / Response ID */
 	int		prio;  /* the offered window size */
 	uint64_t	ts_sent;
+	uint8_t		flags;
 };

@@ -27,9 +27,11 @@ class RpcClient {
   ssize_t Send(const void *buf, size_t len, int hash);
 
   // Receives an RPC request.
-  ssize_t Recv(void *buf, size_t len);
+  ssize_t Recv(void *buf, size_t len, uint64_t *latency);
 
   uint32_t WinAvail();
+
+  void StatClear();
 
   uint64_t StatWinuRx();
 
@@ -42,14 +44,6 @@ class RpcClient {
   uint64_t StatWinExpired();
 
   uint64_t StatReqDropped();
-
-  uint16_t StatMinRdel();
-
-  double StatMeanRdel();
-
-  double StatP50Rdel();
-
-  uint16_t StatP99Rdel();
 
   // Shuts down the RPC connection.
   int Shutdown(int how);

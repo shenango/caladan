@@ -259,7 +259,8 @@ static void crpc_update_tb_rate(struct csd_session *s, uint64_t us)
 	s->seda_last_update = now;
 }
 
-ssize_t csd_recv_one(struct crpc_session *s_, void *buf, size_t len)
+ssize_t csd_recv_one(struct crpc_session *s_, void *buf, size_t len,
+		     uint64_t *latency)
 {
 	struct csd_session *s = (struct csd_session *)s_;
 	struct ssd_hdr shdr;
@@ -498,6 +499,11 @@ uint32_t csd_win_avail(struct crpc_session *s_)
 	return 0;
 }
 
+void csd_stat_clear(struct crpc_session *s_)
+{
+	return;
+}
+
 uint64_t csd_stat_win_expired(struct crpc_session *s_)
 {
 	struct csd_session *s = (struct csd_session *)s_;
@@ -534,40 +540,17 @@ uint64_t csd_stat_req_dropped(struct crpc_session *s_)
 	return s->req_dropped_;
 }
 
-uint16_t csd_stat_min_rdel(struct crpc_session *s_)
-{
-	return 0;
-}
-
-double csd_stat_mean_rdel(struct crpc_session *s_)
-{
-	return 0;
-}
-
-uint16_t csd_stat_p50_rdel(struct crpc_session *s_)
-{
-	return 0;
-}
-
-uint16_t csd_stat_p99_rdel(struct crpc_session *s_)
-{
-	return 0;
-}
-
 struct crpc_ops csd_ops = {
 	.crpc_send_one		= csd_send_one,
 	.crpc_recv_one		= csd_recv_one,
 	.crpc_open		= csd_open,
 	.crpc_close		= csd_close,
 	.crpc_win_avail		= csd_win_avail,
+	.crpc_stat_clear	= csd_stat_clear,
 	.crpc_stat_winu_rx	= csd_stat_winu_rx,
 	.crpc_stat_win_expired	= csd_stat_win_expired,
 	.crpc_stat_winu_tx	= csd_stat_winu_tx,
 	.crpc_stat_resp_rx	= csd_stat_resp_rx,
 	.crpc_stat_req_tx	= csd_stat_req_tx,
 	.crpc_stat_req_dropped	= csd_stat_req_dropped,
-	.crpc_stat_min_rdel	= csd_stat_min_rdel,
-	.crpc_stat_mean_rdel	= csd_stat_mean_rdel,
-	.crpc_stat_p50_rdel	= csd_stat_p50_rdel,
-	.crpc_stat_p99_rdel	= csd_stat_p99_rdel,
 };

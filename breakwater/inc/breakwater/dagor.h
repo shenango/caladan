@@ -25,7 +25,6 @@ struct cdg_ctx {
 	int			prio;
 };
 
-#define NUM_RDEL		1000
 struct cdg_session {
 	struct crpc_session	cmn;
 	uint64_t		id;
@@ -48,6 +47,4 @@ struct cdg_session {
 	uint64_t		req_tx_;
 	uint64_t		win_expired_;
 	uint64_t		req_dropped_;
-	uint64_t		reject_cnt_;
-	uint16_t		reject_delay_[NUM_RDEL];
 };

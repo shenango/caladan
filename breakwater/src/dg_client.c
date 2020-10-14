@@ -115,14 +115,14 @@ ssize_t cdg_send_one(struct crpc_session *s_,
 	return len;
 }
 
-ssize_t cdg_recv_one(struct crpc_session *s_, void *buf, size_t len)
+ssize_t cdg_recv_one(struct crpc_session *s_, void *buf, size_t len,
+		     uint64_t *latency)
 {
 	struct cdg_session *s = (struct cdg_session *)s_;
 	struct sdg_hdr shdr;
 	ssize_t ret;
 	uint64_t now;
 
-again:
 	/* read the server header */
 	ret = tcp_read_full(s->cmn.c, &shdr, sizeof(shdr));
 	if (unlikely(ret <= 0))
@@ -154,12 +154,10 @@ again:
 
 		mutex_lock(&s->lock);
 		s->local_prio = shdr.prio;
-		if (shdr.len == 0) {
-			s->reject_delay_[s->reject_cnt_++ % NUM_RDEL] =
-				MIN(now - shdr.ts_sent, 65535);
-			mutex_unlock(&s->lock);
-			goto again;
-		}
+
+		if ((shdr.flags & DG_SFLAG_DROP) && latency)
+			*latency = now - shdr.ts_sent;
+
 		mutex_unlock(&s->lock);
 
 #if CDG_TRACK_FLOW
@@ -291,6 +289,11 @@ uint32_t cdg_win_avail(struct crpc_session *s_)
 	return 0;
 }
 
+void cdg_stat_clear(struct crpc_session *s_)
+{
+	return;
+}
+
 uint64_t cdg_stat_win_expired(struct crpc_session *s_)
 {
 	return 0;
@@ -324,82 +327,17 @@ uint64_t cdg_stat_req_dropped(struct crpc_session *s_)
 	return s->req_dropped_;
 }
 
-static int cmpfunc(const void *a, const void *b) {
-	return (*(int*)a - *(int*)b);
-}
-
-uint16_t cdg_stat_min_rdel(struct crpc_session *s_)
-{
-	struct cdg_session *s = (struct cdg_session *)s_;
-	int num_sample = MIN(s->reject_cnt_, NUM_RDEL);
-	int i;
-	uint16_t min = 65535;
-
-	if (num_sample == 0)
-		return 0;
-
-	for(i = 0; i < num_sample; ++i)
-		min = MIN(min, s->reject_delay_[i]);
-
-	return min;
-}
-
-double cdg_stat_mean_rdel(struct crpc_session *s_)
-{
-	struct cdg_session *s = (struct cdg_session *)s_;
-	int num_sample = MIN(s->reject_cnt_, NUM_RDEL);
-	int i;
-	double sum = 0.0;
-
-	if (num_sample == 0)
-		return 0;
-
-	for(i = 0; i < num_sample; ++i)
-		sum += s->reject_delay_[i];
-
-	return sum / (double)num_sample;
-}
-
-uint16_t cdg_stat_p50_rdel(struct crpc_session *s_)
-{
-	struct cdg_session *s = (struct cdg_session *)s_;
-	int num_sample = MIN(s->reject_cnt_, NUM_RDEL);
-
-	if (num_sample == 0)
-		return 0;
-
-	qsort(s->reject_delay_, num_sample, sizeof(uint16_t), cmpfunc);
-
-	return s->reject_delay_[(num_sample-1)/2];
-}
-
-uint16_t cdg_stat_p99_rdel(struct crpc_session *s_)
-{
-	struct cdg_session *s = (struct cdg_session *)s_;
-	int num_sample = MIN(s->reject_cnt_, NUM_RDEL);
-
-	if (num_sample == 0)
-		return 0;
-
-	qsort(s->reject_delay_, num_sample, sizeof(uint16_t), cmpfunc);
-
-	return s->reject_delay_[(int)((num_sample-1)*0.99)];
-}
-
 struct crpc_ops cdg_ops = {
 	.crpc_send_one		= cdg_send_one,
 	.crpc_recv_one		= cdg_recv_one,
 	.crpc_open		= cdg_open,
 	.crpc_close		= cdg_close,
 	.crpc_win_avail		= cdg_win_avail,
+	.crpc_stat_clear	= cdg_stat_clear,
 	.crpc_stat_winu_rx	= cdg_stat_winu_rx,
 	.crpc_stat_win_expired	= cdg_stat_win_expired,
 	.crpc_stat_winu_tx	= cdg_stat_winu_tx,
 	.crpc_stat_resp_rx	= cdg_stat_resp_rx,
 	.crpc_stat_req_tx	= cdg_stat_req_tx,
 	.crpc_stat_req_dropped	= cdg_stat_req_dropped,
-	.crpc_stat_min_rdel	= cdg_stat_min_rdel,
-	.crpc_stat_mean_rdel	= cdg_stat_mean_rdel,
-	.crpc_stat_p50_rdel	= cdg_stat_p50_rdel,
-	.crpc_stat_p99_rdel	= cdg_stat_p99_rdel,
 };

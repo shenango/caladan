@@ -119,7 +119,8 @@ ssize_t cnc_send_one(struct crpc_session *s_,
 	return ret;
 }
 
-ssize_t cnc_recv_one(struct crpc_session *s_, void *buf, size_t len)
+ssize_t cnc_recv_one(struct crpc_session *s_, void *buf, size_t len,
+		     uint64_t *latency)
 {
 	struct cnc_session *s = (struct cnc_session *)s_;
 	struct snc_hdr shdr;
@@ -276,6 +277,11 @@ uint32_t cnc_win_avail(struct crpc_session *s_)
 	return 0;
 }
 
+void cnc_stat_clear(struct crpc_session *s_)
+{
+	return;
+}
+
 uint64_t cnc_stat_win_expired(struct crpc_session *s_)
 {
 	struct cnc_session *s = (struct cnc_session *)s_;
@@ -312,40 +318,17 @@ uint64_t cnc_stat_req_dropped(struct crpc_session *s_)
 	return s->req_dropped_;
 }
 
-uint16_t cnc_stat_min_rdel(struct crpc_session *s_)
-{
-	return 0;
-}
-
-double cnc_stat_mean_rdel(struct crpc_session *s_)
-{
-	return 0;
-}
-
-uint16_t cnc_stat_p50_rdel(struct crpc_session *s_)
-{
-	return 0;
-}
-
-uint16_t cnc_stat_p99_rdel(struct crpc_session *s_)
-{
-	return 0;
-}
-
 struct crpc_ops cnc_ops = {
 	.crpc_send_one		= cnc_send_one,
 	.crpc_recv_one		= cnc_recv_one,
 	.crpc_open		= cnc_open,
 	.crpc_close		= cnc_close,
 	.crpc_win_avail		= cnc_win_avail,
+	.crpc_stat_clear	= cnc_stat_clear,
 	.crpc_stat_winu_rx	= cnc_stat_winu_rx,
 	.crpc_stat_win_expired	= cnc_stat_win_expired,
 	.crpc_stat_winu_tx	= cnc_stat_winu_tx,
 	.crpc_stat_resp_rx	= cnc_stat_resp_rx,
 	.crpc_stat_req_tx	= cnc_stat_req_tx,
 	.crpc_stat_req_dropped	= cnc_stat_req_dropped,
-	.crpc_stat_min_rdel	= cnc_stat_min_rdel,
-	.crpc_stat_mean_rdel	= cnc_stat_mean_rdel,
-	.crpc_stat_p50_rdel	= cnc_stat_p50_rdel,
-	.crpc_stat_p99_rdel	= cnc_stat_p99_rdel,
 };

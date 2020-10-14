@@ -135,10 +135,6 @@ struct cstat_raw {
   uint64_t req_tx;
   uint64_t win_expired;
   uint64_t req_dropped;
-  uint16_t reject_min_delay;
-  double reject_mean_delay;
-  double reject_p50_delay;
-  uint16_t reject_p99_delay;
 };
 
 struct cstat {
@@ -153,10 +149,6 @@ struct cstat {
   double req_tx_pps;
   double win_expired_wps;
   double req_dropped_rps;
-  uint16_t reject_min_delay;
-  double reject_mean_delay;
-  double reject_p50_delay;
-  uint16_t reject_p99_delay;
 };
 
 struct work_unit {
@@ -167,6 +159,7 @@ struct work_unit {
   uint32_t cpu;
   uint64_t server_queue;
   uint64_t server_time;
+  bool success;
 };
 
 class NetBarrier {
@@ -254,15 +247,7 @@ class NetBarrier {
         csr->req_tx += rem_csr.req_tx;
         csr->win_expired += rem_csr.win_expired;
         csr->req_dropped += rem_csr.req_dropped;
-	csr->reject_min_delay = MIN(csr->reject_min_delay,
-				    rem_csr.reject_min_delay);
-	csr->reject_mean_delay += rem_csr.reject_mean_delay;
-	csr->reject_p50_delay += rem_csr.reject_p50_delay;
-	csr->reject_p99_delay = MAX(csr->reject_p99_delay,
-				    rem_csr.reject_p99_delay);
       }
-      csr->reject_mean_delay /= total_agents;
-      csr->reject_p50_delay /= total_agents;
     } else {
       BUG_ON(conns[0]->WriteFull(csr, sizeof(*csr)) <= 0);
     }
@@ -451,6 +436,7 @@ shstat_raw ReadShenangoStat() {
 
 constexpr uint64_t kNetbenchPort = 8001;
 struct payload {
+  bool success;
   uint64_t work_iterations;
   uint64_t index;
   uint64_t tsc_end;
@@ -480,6 +466,7 @@ void RpcServer(struct srpc_ctx *ctx) {
   ctx->resp_len = sizeof(payload);
   payload *out = reinterpret_cast<payload *>(ctx->resp_buf);
   memcpy(out, in, sizeof(*out));
+  out->success = true;
   out->tsc_end = hton64(rdtscp(&out->cpu));
   out->cpu = hton32(out->cpu);
   out->server_queue = hton64(rt::RuntimeQueueUS());
@@ -546,22 +533,31 @@ std::vector<work_unit> ClientWorker(
   // Start the receiver thread.
   auto th = rt::Thread([&] {
     payload rp;
+    uint64_t latency;
 
     while (true) {
-      ssize_t ret = c->Recv(&rp, sizeof(rp));
+      ssize_t ret = c->Recv(&rp, sizeof(rp), &latency);
       if (ret != static_cast<ssize_t>(sizeof(rp))) {
         if (ret == 0 || ret < 0) break;
-        panic("read failed, ret = %ld", ret);
+	panic("read failed, ret = %ld", ret);
       }
 
       uint64_t now = microtime();
       uint64_t idx = ntoh64(rp.index);
+
+      if (!rp.success) {
+        w[idx].duration_us = latency;
+        w[idx].success = false;
+	continue;
+      }
+
       w[idx].duration_us = now - timings[idx];
       w[idx].window = c->WinAvail();
       w[idx].tsc = ntoh64(rp.tsc_end);
       w[idx].cpu = ntoh32(rp.cpu);
       w[idx].server_queue = ntoh64(rp.server_queue);
       w[idx].server_time = w[idx].work_us + w[idx].server_queue;
+      w[idx].success = true;
     }
   });
 
@@ -583,6 +579,11 @@ std::vector<work_unit> ClientWorker(
     if (duration_cast<sec>(now - expstart).count() < w[i].start_us) {
       rt::Sleep(w[i].start_us - duration_cast<sec>(now - expstart).count());
     }
+
+    if (i > 1 && w[i-1].start_us <= kWarmUpTime &&
+	w[i].start_us >= kWarmUpTime)
+      c->StatClear();
+
     if (duration_cast<sec>(now - expstart).count() - w[i].start_us >
         kMaxCatchUpUS)
       continue;
@@ -590,6 +591,7 @@ std::vector<work_unit> ClientWorker(
     timings[i] = microtime();
 
     // Send an RPC request.
+    p.success = false;
     p.work_iterations = hton64(w[i].work_us * kIterationsPerUS);
     p.index = hton64(i);
     ssize_t ret = c->Send(&p, sizeof(p), w[i].hash);
@@ -672,7 +674,6 @@ std::vector<work_unit> RunExperiment(
 
   // Aggregate client stats
   if (csr) {
-    csr->reject_min_delay = 65535;
     for (auto &c : conns) {
       csr->winu_rx += c->StatWinuRx();
       csr->winu_tx += c->StatWinuTx();
@@ -680,16 +681,8 @@ std::vector<work_unit> RunExperiment(
       csr->req_tx += c->StatReqTx();
       csr->win_expired += c->StatWinExpired();
       csr->req_dropped += c->StatReqDropped();
-      csr->reject_min_delay = MIN(csr->reject_min_delay,
-				  c->StatMinRdel());
-      csr->reject_mean_delay += c->StatMeanRdel();
-      csr->reject_p50_delay += c->StatP50Rdel();
-      csr->reject_p99_delay = MAX(csr->reject_p99_delay,
-				  c->StatP99Rdel());
       c->Close();
     }
-    csr->reject_mean_delay /= threads;
-    csr->reject_p50_delay /= threads;
   }
 
   // Aggregate all the samples together.
@@ -838,7 +831,9 @@ void PrintStatResults(std::vector<work_unit> w, struct cstat *cs,
 /*
   double cur_us = 2000000;
   double gran_us = 20000;
-  int resp_cnt = 0;
+  int good_resp_cnt = 0;
+  uint64_t reject_sum_ = 0;
+  uint64_t reject_cnt_ = 0;
   std::vector<double> durations;
 
   // sort!
@@ -852,22 +847,80 @@ void PrintStatResults(std::vector<work_unit> w, struct cstat *cs,
     if (arr_us < cur_us) continue;
     if (arr_us >= cur_us + gran_us) {
       cur_us += gran_us;
-      if (resp_cnt == 0) continue;
 
-      std::sort(durations.begin(), durations.end(), [](const double &d1, const double &d2) {
-        return d1 < d2;
-      });
-  
-      printf("%lf,%lf,%lf\n", cur_us/1000000.0 - 2.0, resp_cnt * (1000000/gran_us),
-		      durations[resp_cnt * 0.99]);
+      int duration_cnt = durations.size();
+      double time_s = cur_us / 1000000.0 - 2.0;
+      double goodput = 0.0;
+      double p99 = 0.0;
+      double reject_mean = 0.0;
+
+      if (duration_cnt > 0) {
+        std::sort(durations.begin(), durations.end(), [](const double &d1, const double &d2) {
+          return d1 < d2;
+        });
+	goodput = good_resp_cnt * (1000000 / gran_us);
+	p99 = durations[(duration_cnt - 1) * 0.99];
+      }
+
+      if (reject_cnt_ > 0) {
+        reject_mean = static_cast<double>(reject_sum_) / reject_cnt_;
+      }
+
+      printf("%lf,%lf,%lf\n", time_s, goodput,p99, reject_mean);
+
       durations.clear();
-      resp_cnt = 0;
+      good_resp_cnt = 0;
+      reject_sum_ = 0;
+      reject_cnt_ = 0;
+    }
+
+    if (!s.success) {
+      reject_cnt_++;
+      reject_sum_ += s.duration_us;
+      continue;
     }
 
     durations.push_back(s.duration_us);
-    resp_cnt++;
+    if (s.duration_us <= slo) {
+      good_resp_cnt++;
+    }
   }
 */
+  std::vector<work_unit> rejected;
+
+  std::copy_if(w.begin(), w.end(), std::back_inserter(rejected), [](work_unit &s) {
+    return !s.success;
+  });
+
+  uint64_t reject_cnt = rejected.size();
+  uint64_t reject_min = 0;
+  uint64_t reject_p50 = 0;
+  double reject_mean = 0.0;
+  uint64_t reject_p99 = 0;
+
+  if (reject_cnt > 0) {
+    double sum;
+
+    std::sort(rejected.begin(), rejected.end(),
+	      [](const work_unit &s1, const work_unit &s2) {
+        return s1.duration_us < s2.duration_us;
+    });
+    sum = std::accumulate(rejected.begin(), rejected.end(), 0.0,
+			  [](double s, const work_unit &c) {
+			      return s + c.duration_us;
+			  });
+
+    reject_min = rejected[0].duration_us;
+    reject_mean = static_cast<double>(sum) / reject_cnt;
+    reject_p50 = rejected[(reject_cnt - 1) * 0.5].duration_us;
+    reject_p99 = rejected[(reject_cnt - 1) * 0.99].duration_us;
+  }
+
+  w.erase(std::remove_if(w.begin(), w.end(),
+			 [](const work_unit &s) {
+			   return !s.success;
+	}), w.end());
+
   std::sort(w.begin(), w.end(), [](const work_unit &s1, const work_unit &s2) {
     return s1.duration_us < s2.duration_us;
   });
@@ -917,9 +970,9 @@ void PrintStatResults(std::vector<work_unit> w, struct cstat *cs,
 	    << cs->offered_rps << "," << cs->rps << "," << cs->goodput << ","
 	    << ss->cpu_usage << "," << min << "," << mean << "," << p50 << ","
 	    << p90 << "," << p99 << "," << p999 << "," << p9999 << ","
-	    << max << "," << cs->reject_min_delay << ","
-	    << cs->reject_mean_delay << "," << cs->reject_p50_delay << ","
-	    << cs->reject_p99_delay << "," << p1_win << ","
+	    << max << "," << reject_min << ","
+	    << reject_mean << "," << reject_p50 << ","
+	    << reject_p99 << "," << p1_win << ","
 	    << mean_win << "," << p99_win << "," << p1_que << ","
 	    << mean_que << "," << p99_que << "," << mean_stime << ","
 	    << p99_stime << "," << ss->rx_pps << "," << ss->tx_pps << ","
@@ -936,8 +989,8 @@ void PrintStatResults(std::vector<work_unit> w, struct cstat *cs,
           << cs->offered_rps << "," << cs->rps << "," << cs->goodput << ","
           << ss->cpu_usage << "," << min << "," << mean << "," << p50 << ","
           << p90 << "," << p99 << "," << p999 << "," << p9999 << "," << max << ","
-	  << cs->reject_min_delay << "," << cs->reject_mean_delay << ","
-	  << cs->reject_p50_delay << "," << cs->reject_p99_delay << ","
+	  << reject_min << "," << reject_mean << ","
+	  << reject_p50 << "," << reject_p99 << ","
 	  << p1_win << "," << mean_win << "," << p99_win << "," << p1_que << ","
 	  << mean_que << "," << p99_que << "," << mean_stime << ","
 	  << p99_stime << "," << ss->rx_pps << "," << ss->tx_pps << ","
@@ -965,10 +1018,10 @@ void PrintStatResults(std::vector<work_unit> w, struct cstat *cs,
            << "\"p999\":" << p999 << ","
            << "\"p9999\":" << p9999 << ","
            << "\"max\":" << max << ","
-	   << "\"rej_min_del\":" << cs->reject_min_delay << ","
-	   << "\"rej_mean_del\":" << cs->reject_mean_delay << ","
-	   << "\"rej_p50_del\":" << cs->reject_p50_delay << ","
-	   << "\"rej_p99_del\":" << cs->reject_p99_delay << ","
+	   << "\"rej_min_del\":" << reject_min << ","
+	   << "\"rej_mean_del\":" << reject_mean << ","
+	   << "\"rej_p50_del\":" << reject_p50 << ","
+	   << "\"rej_p99_del\":" << reject_p99 << ","
            << "\"p1_win\":" << p1_win << ","
            << "\"mean_win\":" << mean_win << ","
            << "\"p99_win\":" << p99_win << ","
@@ -1009,7 +1062,9 @@ void SteadyStateExperiment(int threads, double offered_rps,
   double elapsed;
 
   memset(&csr, 0, sizeof(csr));
-  std::vector<work_unit> w = RunExperiment(threads, &csr, &ss, &elapsed, [=] {
+
+  std::vector<work_unit> w = RunExperiment(threads, &csr, &ss, &elapsed,
+					   [=] {
     std::mt19937 rg(rand());
     std::mt19937 dg(rand());
     std::exponential_distribution<double> rd(
@@ -1033,11 +1088,7 @@ void SteadyStateExperiment(int threads, double offered_rps,
              static_cast<double>(csr.resp_rx) / elapsed * 1000000,
              static_cast<double>(csr.req_tx) / elapsed * 1000000,
              static_cast<double>(csr.win_expired) / elapsed * 1000000,
-             static_cast<double>(csr.req_dropped) / elapsed * 1000000,
-	     csr.reject_min_delay,
-	     csr.reject_mean_delay,
-             csr.reject_p50_delay,
-             csr.reject_p99_delay};
+             static_cast<double>(csr.req_dropped) / elapsed * 1000000};
 
   // Print the results.
   PrintStatResults(w, &cs, &ss);

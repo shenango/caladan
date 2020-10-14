@@ -79,6 +79,8 @@ atomic_t srpc_win_used;
 /* the number of pending requests */
 atomic_t srpc_num_pending;
 
+double win_carry;
+
 /* drained session list */
 struct srpc_drained_ {
 	spinlock_t lock;
@@ -230,22 +232,35 @@ static int srpc_send_completion_vector(struct sbw_session *s,
 
 	bitmap_for_each_set(slots, SBW_MAX_WINDOW, i) {
 		struct sbw_ctx *c = s->slots[i];
+		size_t len;
+		char *buf;
+		uint8_t flags = 0;
+
+		if (!c->drop) {
+			len = c->cmn.resp_len;
+			buf = c->cmn.resp_buf;
+		} else {
+			len = c->cmn.req_len;
+			buf = c->cmn.req_buf;
+			flags |= BW_SFLAG_DROP;
+		}
 
 		shdr[nrhdr].magic = BW_RESP_MAGIC;
 		shdr[nrhdr].op = BW_OP_CALL;
-		shdr[nrhdr].len = c->cmn.resp_len;
+		shdr[nrhdr].len = len;
 		shdr[nrhdr].id = c->cmn.id;
 		shdr[nrhdr].win = (uint64_t)s->win;
 		shdr[nrhdr].ts_sent = c->ts_sent;
+		shdr[nrhdr].flags = flags;
 
 		v[nriov].iov_base = &shdr[nrhdr];
 		v[nriov].iov_len = sizeof(struct sbw_hdr);
 		nrhdr++;
 		nriov++;
 
-		if (c->cmn.resp_len > 0) {
-			v[nriov].iov_base = c->cmn.resp_buf;
-			v[nriov++].iov_len = c->cmn.resp_len;
+		if (len > 0) {
+			v[nriov].iov_base = buf;
+			v[nriov++].iov_len = len;
 		}
 	}
 
@@ -409,6 +424,7 @@ static int srpc_recv_one(struct sbw_session *s)
 	uint64_t old_demand;
 	int win_diff;
 	char buf_tmp[SRPC_BUF_SIZE];
+	struct sbw_ctx *c;
 
 again:
 	th = NULL;
@@ -441,9 +457,10 @@ again:
 			atomic64_inc(&srpc_stat_req_dropped_);
 			return 0;
 		}
+		c = s->slots[idx];
 
 		/* retrieve the payload */
-		ret = tcp_read_full(s->cmn.c, s->slots[idx]->cmn.req_buf, chdr.len);
+		ret = tcp_read_full(s->cmn.c, c->cmn.req_buf, chdr.len);
 		if (unlikely(ret <= 0)) {
 			srpc_put_slot(s, idx);
 			if (ret == 0)
@@ -451,15 +468,15 @@ again:
 			return ret;
 		}
 
-		s->slots[idx]->cmn.req_len = chdr.len;
-		s->slots[idx]->cmn.resp_len = 0;
-		s->slots[idx]->cmn.id = chdr.id;
-		s->slots[idx]->ts_sent = chdr.ts_sent;
+		c->cmn.req_len = chdr.len;
+		c->cmn.resp_len = 0;
+		c->cmn.id = chdr.id;
+		c->ts_sent = chdr.ts_sent;
 
 		spin_lock_np(&s->lock);
 		old_demand = s->demand;
 		s->demand = chdr.demand;
-		s->demand_sync = chdr.sync;
+		s->demand_sync = (chdr.flags & BW_CFLAG_DSYNC);
 		srpc_remove_from_drained_list(s);
 		s->num_pending++;
 		/* adjust window if demand changed */
@@ -474,7 +491,7 @@ again:
 		if (runtime_queue_us() >= SBW_DROP_THRESH) {
 			thread_t *th;
 
-			s->slots[idx]->drop = true;
+			c->drop = true;
 			bitmap_set(s->completed_slots, idx);
 			th = s->sender_th;
 			s->sender_th = NULL;
@@ -487,7 +504,7 @@ again:
 
 		spin_unlock_np(&s->lock);
 
-		ret = thread_spawn(srpc_worker, s->slots[idx]);
+		ret = thread_spawn(srpc_worker, c);
 		BUG_ON(ret);
 
 #if SBW_TRACK_FLOW
@@ -508,7 +525,7 @@ again:
 		spin_lock_np(&s->lock);
 		old_demand = s->demand;
 		s->demand = chdr.demand;
-		s->demand_sync = chdr.sync;
+		s->demand_sync = (chdr.flags & BW_CFLAG_DSYNC);
 
 		if (old_demand > 0 && s->demand == 0) {
 			srpc_remove_from_drained_list(s);
@@ -780,8 +797,14 @@ static void srpc_cc_worker(void *arg)
 			alpha = MAX(1.0 - alpha, 0.5);
 
 			new_win = (int)(new_win * alpha);
+			win_carry = 0.0;
 		} else {
-			new_win += MAX((int)(num_sess * SBW_AI), 1);
+			win_carry += num_sess * SBW_AI;
+			if (win_carry >= 1.0) {
+				int new_win_int = (int)win_carry;
+				new_win += new_win_int;
+				win_carry -= new_win_int;
+			}
 		}
 
 		new_win = MAX(new_win, max_cores);
@@ -852,6 +875,8 @@ static void srpc_listener(void *arg)
 	atomic64_write(&srpc_stat_winu_tx_, 0);
 	atomic64_write(&srpc_stat_req_rx_, 0);
 	atomic64_write(&srpc_stat_resp_tx_, 0);
+
+	win_carry = 0.0;
 
 	laddr.ip = 0;
 	laddr.port = SRPC_PORT;

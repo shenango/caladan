@@ -24,12 +24,17 @@ ssize_t RpcClient::Send(const void *buf, size_t len, int hash) {
   return crpc_ops->crpc_send_one(s_, buf, len, hash);
 }
 
-ssize_t RpcClient::Recv(void *buf, size_t len) {
-  return crpc_ops->crpc_recv_one(s_, buf, len);
+ssize_t RpcClient::Recv(void *buf, size_t len,
+			uint64_t *latency = nullptr) {
+  return crpc_ops->crpc_recv_one(s_, buf, len, latency);
 }
 
 uint32_t RpcClient::WinAvail() {
   return crpc_ops->crpc_win_avail(s_);
+}
+
+void RpcClient::StatClear() {
+  return crpc_ops->crpc_stat_clear(s_);
 }
 
 uint64_t RpcClient::StatWinuRx() {
@@ -54,22 +59,6 @@ uint64_t RpcClient::StatWinExpired() {
 
 uint64_t RpcClient::StatReqDropped() {
   return crpc_ops->crpc_stat_req_dropped(s_);
-}
-
-uint16_t RpcClient::StatMinRdel() {
-  return crpc_ops->crpc_stat_min_rdel(s_);
-}
-
-double RpcClient::StatMeanRdel() {
-  return crpc_ops->crpc_stat_mean_rdel(s_);
-}
-
-double RpcClient::StatP50Rdel() {
-  return crpc_ops->crpc_stat_p50_rdel(s_);
-}
-
-uint16_t RpcClient::StatP99Rdel() {
-  return crpc_ops->crpc_stat_p99_rdel(s_);
 }
 
 int RpcClient::Shutdown(int how) {

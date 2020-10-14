@@ -8,6 +8,10 @@
 #include <runtime/tcp.h>
 
 /*
+ * Stats data structures
+ */
+
+/*
  * Server API
  */
 
@@ -92,7 +96,7 @@ struct crpc_ops {
 	 * socket errors (<= 0).
 	 */
 	ssize_t (*crpc_recv_one)(struct crpc_session *s,
-				 void *buf, size_t len);
+				 void *buf, size_t len, uint64_t *latency);
 
 	/**
 	 * crpc_open - creates an RPC session
@@ -115,16 +119,13 @@ struct crpc_ops {
 	void (*crpc_close)(struct crpc_session *s);
 
 	uint32_t (*crpc_win_avail)(struct crpc_session *s);
+	void (*crpc_stat_clear)(struct crpc_session *s);
 	uint64_t (*crpc_stat_winu_rx)(struct crpc_session *s);
 	uint64_t (*crpc_stat_win_expired)(struct crpc_session *s);
 	uint64_t (*crpc_stat_winu_tx)(struct crpc_session *s);
 	uint64_t (*crpc_stat_resp_rx)(struct crpc_session *s);
 	uint64_t (*crpc_stat_req_tx)(struct crpc_session *s);
 	uint64_t (*crpc_stat_req_dropped)(struct crpc_session *s);
-	uint16_t (*crpc_stat_min_rdel)(struct crpc_session *s);
-	double (*crpc_stat_mean_rdel)(struct crpc_session *s);
-	uint16_t (*crpc_stat_p50_rdel)(struct crpc_session *s);
-	uint16_t (*crpc_stat_p99_rdel)(struct crpc_session *s);
 };
 
 /*

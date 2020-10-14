@@ -179,22 +179,35 @@ static int srpc_send_completion_vector(struct sdg_session *s,
 
 	bitmap_for_each_set(slots, SDG_MAX_WINDOW, i) {
 		struct sdg_ctx *c = s->slots[i];
+		size_t len;
+		char *buf;
+		uint8_t flags = 0;
+
+		if (!c->drop) {
+			len = c->cmn.resp_len;
+			buf = c->cmn.resp_buf;
+		} else {
+			len = c->cmn.req_len;
+			buf = c->cmn.req_buf;
+			flags |= DG_SFLAG_DROP;
+		}
 
 		shdr[nrhdr].magic = DG_RESP_MAGIC;
 		shdr[nrhdr].op = DG_OP_CALL;
-		shdr[nrhdr].len = c->cmn.resp_len;
+		shdr[nrhdr].len = len;
 		shdr[nrhdr].id = c->cmn.id;
 		shdr[nrhdr].prio = atomic_read(&dagor_prio_thresh);
 		shdr[nrhdr].ts_sent = c->ts_sent;
+		shdr[nrhdr].flags = flags;
 
 		v[nriov].iov_base = &shdr[nrhdr];
 		v[nriov].iov_len = sizeof(struct sdg_hdr);
 		nrhdr++;
 		nriov++;
 
-		if (c->cmn.resp_len > 0) {
-			v[nriov].iov_base = c->cmn.resp_buf;
-			v[nriov++].iov_len = c->cmn.resp_len;
+		if (len > 0) {
+			v[nriov].iov_base = buf;
+			v[nriov++].iov_len = len;
 		}
 	}
 
@@ -290,12 +303,15 @@ again:
 			return ret;
 		}
 
+		s->slots[idx]->cmn.req_len = chdr.len;
+		s->slots[idx]->cmn.resp_len = 0;
+		s->slots[idx]->cmn.id = chdr.id;
+		s->slots[idx]->ts_sent = chdr.ts_sent;
+
 		if (chdr.prio > atomic_read(&dagor_prio_thresh)) {
 			thread_t *th;
 
-			s->slots[idx]->cmn.resp_len = 0;
 			s->slots[idx]->drop = true;
-			s->slots[idx]->ts_sent = chdr.ts_sent;
 			spin_lock_np(&s->lock);
 			bitmap_set(s->completed_slots, idx);
 			th = s->sender_th;
@@ -306,12 +322,6 @@ again:
 			atomic64_inc(&srpc_stat_req_dropped_);
 			return 0;
 		}
-
-		s->slots[idx]->drop = false;
-		s->slots[idx]->cmn.req_len = chdr.len;
-		s->slots[idx]->cmn.resp_len = 0;
-		s->slots[idx]->cmn.id = chdr.id;
-		s->slots[idx]->ts_sent = chdr.ts_sent;
 
 		spin_lock_np(&s->lock);
 		s->num_pending++;
@@ -465,13 +475,13 @@ static void dagor_prio_update(void *arg)
 		now = microtime();
 		nreqs = atomic_read(&dagor_num_reqs);
 
+		us = runtime_queue_us();
+		dagor_delay = (int)(0.8 * dagor_delay + 0.2 * us);
+
 		if (nreqs == 0 ||
 		    (microtime() - last_prio_update < DAGOR_PRIO_UPDATE_INT &&
 		    nreqs < DAGOR_PRIO_UPDATE_REQS))
 			continue;
-
-		us = runtime_queue_us();
-		dagor_delay = (int)(0.8 * dagor_delay + 0.2 * us);
 
 		if (dagor_delay >= DAGOR_OVERLOAD_THRESH)
 			dagor_prio_ = DAGOR_ALPHA * dagor_prio_;
