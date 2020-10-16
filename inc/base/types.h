@@ -10,6 +10,7 @@
 #ifndef bool
 typedef int bool;
 #endif /* bool */
+#define _Bool int
 #define false 0
 #define true 1
 #endif /* __cplusplus */
