@@ -18,3 +18,5 @@ shenango = { path = "../../bindings/rust" }
 
 [profile.release]
 debug=false
+panic = "abort"
+

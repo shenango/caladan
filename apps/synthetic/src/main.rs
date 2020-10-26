@@ -69,6 +69,7 @@ enum Distribution {
     Exponential(f64),
     Bimodal1(f64),
     Bimodal2(f64),
+    Bimodal3(f64),
 }
 impl Distribution {
     fn name(&self) -> &'static str {
@@ -78,6 +79,7 @@ impl Distribution {
             Distribution::Exponential(_) => "exponential",
             Distribution::Bimodal1(_) => "bimodal1",
             Distribution::Bimodal2(_) => "bimodal2",
+            Distribution::Bimodal3(_) => "bimodal3",
         }
     }
     fn sample<R: Rng>(&self, rng: &mut R) -> u64 {
@@ -95,6 +97,14 @@ impl Distribution {
             Distribution::Bimodal2(m) => {
                 if rng.gen_weighted_bool(1000) {
                     (m * 500.5) as u64
+                } else {
+                    (m * 0.5) as u64
+                }
+            }
+
+            Distribution::Bimodal3(m) => {
+                if rng.gen_weighted_bool(100) {
+                    (m * 5.5) as u64
                 } else {
                     (m * 0.5) as u64
                 }
@@ -278,7 +288,7 @@ struct RequestSchedule {
     output: OutputMode,
     runtime: Duration,
     rps: usize,
-    discard_pct: usize,
+    discard_pct: f32,
 }
 
 struct TraceResult {
@@ -318,7 +328,7 @@ fn gen_classic_packet_schedule(
     distribution: Distribution,
     ramp_up_seconds: usize,
     nthreads: usize,
-    discard_pct: usize,
+    discard_pct: f32,
 ) -> Vec<RequestSchedule> {
     let mut sched: Vec<RequestSchedule> = Vec::new();
 
@@ -336,7 +346,7 @@ fn gen_classic_packet_schedule(
             output: OutputMode::Silent,
             runtime: Duration::from_millis(100),
             rps: rate,
-            discard_pct: 0,
+            discard_pct: 0.0,
         });
     }
 
@@ -378,7 +388,7 @@ fn gen_loadshift_experiment(
                 output: output,
                 runtime: Duration::from_micros(micros),
                 rps: packets_per_second as usize,
-                discard_pct: 0,
+                discard_pct: 0.0,
             }
         })
         .collect()
@@ -444,6 +454,7 @@ fn process_result_final(
     let last_send = last_send.unwrap();
     let first_send = first_send.unwrap();
     let first_tsc = first_tsc.unwrap();
+    let start_unix = wct_start + first_send;
 
     println!(
         "{}, {}, {}, {}, {}, {:.1}, {:.1}, {:.1}, {:.1}, {:.1}, {}, {}",
@@ -504,8 +515,8 @@ fn process_result(sched: &RequestSchedule, packets: &mut [Packet]) -> Option<Sch
     }
 
     // Discard the first X% of the packets.
-    let plen = packets.len();
-    let packets = &mut packets[plen * sched.discard_pct / 100..];
+    let pidx = packets.len() as f32 * sched.discard_pct / 100.0;
+    let packets = &mut packets[pidx as usize..];
 
     let mut never_sent = 0;
     let mut dropped = 0;
@@ -742,7 +753,7 @@ fn run_client(
         })
         .collect();
 
-    backend.sleep(Duration::from_secs(2));
+    backend.sleep(Duration::from_secs(10));
     wg.wait();
 
     if let Some(ref mut g) = *barrier_group {
@@ -1001,7 +1012,14 @@ fn main() {
                 .long("distribution")
                 .short("d")
                 .takes_value(true)
-                .possible_values(&["zero", "constant", "exponential", "bimodal1", "bimodal2"])
+                .possible_values(&[
+                    "zero",
+                    "constant",
+                    "exponential",
+                    "bimodal1",
+                    "bimodal2",
+                    "bimodal3",
+                ])
                 .default_value("zero")
                 .help("Distribution of request lengths to use"),
         )
@@ -1069,7 +1087,7 @@ fn main() {
 
     let addr: SocketAddrV4 = FromStr::from_str(matches.value_of("ADDR").unwrap()).unwrap();
     let nthreads = value_t_or_exit!(matches, "threads", usize);
-    let discard_pct = value_t_or_exit!(matches, "discard_pct", usize);
+    let discard_pct = value_t_or_exit!(matches, "discard_pct", f32);
 
     let runtime = Duration::from_secs(value_t!(matches, "runtime", u64).unwrap());
     let packets_per_second = (1.0e6 * value_t_or_exit!(matches, "mpps", f32)) as usize;
@@ -1095,6 +1113,7 @@ fn main() {
         "exponential" => Distribution::Exponential(mean),
         "bimodal1" => Distribution::Bimodal1(mean),
         "bimodal2" => Distribution::Bimodal2(mean),
+        "bimodal3" => Distribution::Bimodal3(mean),
         _ => unreachable!(),
     };
     let samples = value_t_or_exit!(matches, "samples", usize);

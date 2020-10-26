@@ -94,6 +94,7 @@ impl ReflexProtocol {
             "exponential" => Distribution::Exponential(sr),
             "bimodal1" => Distribution::Bimodal1(sr),
             "bimodal2" => Distribution::Bimodal2(sr),
+            "bimodal3" => Distribution::Bimodal3(sr),
             _ => unreachable!(),
         };
 
