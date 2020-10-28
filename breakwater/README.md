@@ -61,9 +61,9 @@ breakwater$ sudo ./scripts/setup_machine.sh
 breakwater$ make -C apps/netbench/
 ```
 
-6. Start IOKernel
+6. Start IOKernel (hardware timestamp feature is under testing)
 ```
-breakwater$ sudo ./iokerneld
+breakwater$ sudo ./iokerneld no_hw_qdel
 ```
 
 7. Start application. The following example will start a server with Breakwater and make a client to generate workload with exponential distribution (10us average and 100us of SLO) at a rate of 100k requests/s by 100 threads.
@@ -79,4 +79,4 @@ breakwater$ sudo ./apps/netbench/netbench breakwater ../client.config client 100
 ```
 
 ## Reproducing paper results
-Please refer to [breakwater-artifact](https://github.com/inhocho89/breakwater-artifact) repository.
+Please refer to [breakwater-artifact](https://github.com/inhocho89/breakwater-artifact) repository for experiment scripts to reproduce the paper results.
