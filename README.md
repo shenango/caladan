@@ -4,6 +4,10 @@ Caladan is a system that enables servers in datacenters to
 simultaneously provide low tail latency and high CPU efficiency, by
 rapidly reallocating cores across applications.
 
+### Contact
+
+For any questions about Caladan, please email <caladan@csail.mit.edu>.
+
 ## How to Run Caladan
 
 1) Clone the Caladan repository.
