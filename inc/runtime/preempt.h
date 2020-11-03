@@ -41,9 +41,17 @@ static inline void preempt_enable_nocheck(void)
  */
 static inline void preempt_enable(void)
 {
+#ifndef __GCC_ASM_FLAG_OUTPUTS__
 	preempt_enable_nocheck();
 	if (unlikely(preempt_cnt == 0))
 		preempt();
+#else
+	int zero;
+	barrier();
+	asm volatile("subl $1, %%fs:preempt_cnt@tpoff" : "=@ccz" (zero) : : "memory", "cc");
+	if (unlikely(zero))
+		preempt();
+#endif
 }
 
 /**

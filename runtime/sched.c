@@ -169,7 +169,7 @@ static bool work_available(struct kthread *k)
 #endif
 
 	return ACCESS_ONCE(k->rq_tail) != ACCESS_ONCE(k->rq_head) ||
-	        !list_empty(&k->rq_overflow) || softirq_work_available(k);
+	        !list_empty_volatile(&k->rq_overflow) || softirq_work_available(k);
 }
 
 static void update_oldest_tsc(struct kthread *k)
@@ -597,7 +597,7 @@ static void thread_finish_cede(void)
 	thread_t *th, *myth = thread_self();
 
 	assert(myth->state == THREAD_STATE_RUNNING);
-	myth->state = THREAD_STATE_SLEEPING;
+	myth->state = THREAD_STATE_RUNNABLE;
 	myth->last_cpu = k->curr_cpu;
 	__self = NULL;
 

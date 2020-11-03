@@ -82,6 +82,7 @@ static ssize_t stat_write_buf(char *buf, size_t len)
 	int i, j, ret;
 
 	memset(stats, 0, sizeof(stats));
+	memset(tc_stats, 0, sizeof(tc_stats));
 
 	/* gather stats from each kthread */
 	for (i = 0; i < nrks; i++) {

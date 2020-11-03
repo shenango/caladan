@@ -278,8 +278,8 @@ void timer_softirq(struct kthread *k, unsigned int budget)
 		spin_unlock_np(&k->timer_lock);
 
 		/* execute the timer handler */
+		e->armed = false;
 		e->fn(e->arg);
-
 		spin_lock_np(&k->timer_lock);
 		now_us = microtime();
 	}

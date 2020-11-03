@@ -224,7 +224,20 @@ static inline void list_add_before(struct list_node *next, struct list_node *n)
  */
 static inline bool list_empty(const struct list_head *h)
 {
+	(void)list_debug(h);
 	return h->n.next == &h->n;
+}
+
+
+/**
+ * list_empty_volatile - is a list empty? (forces compiler to check)
+ * @h: the list_head
+ *
+ * If the list is empty, returns true.
+*/
+static inline bool list_empty_volatile(const struct list_head *h)
+{
+	return ACCESS_ONCE(h->n.next) == &h->n;
 }
 
 /**

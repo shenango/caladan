@@ -224,6 +224,8 @@ void net_rx_softirq_direct(struct mbuf **ms, unsigned int nr)
 	int i, l4idx = 0;
 
 	for (i = 0; i < nr; i++) {
+		if (i + RX_PREFETCH_STRIDE < nr)
+			prefetch(ms[i + RX_PREFETCH_STRIDE]->data);
 		l4_reqs[l4idx] = net_rx_one(ms[i]);
 		if (l4_reqs[l4idx] != NULL)
 			l4idx++;
@@ -362,7 +364,7 @@ static void net_tx_raw(struct mbuf *m)
 
 	k = getk();
 	/* drain pending overflow packets first */
-	if (!mbufq_empty(&k->txpktq_overflow))
+	if (unlikely(!mbufq_empty(&k->txpktq_overflow)))
 		net_tx_drain_overflow();
 
 	STAT(TX_PACKETS)++;
@@ -406,19 +408,14 @@ static void net_push_iphdr(struct mbuf *m, uint8_t proto, uint32_t daddr)
 {
 	struct ip_hdr *iphdr;
 
-	/* TODO: Support "don't fragment" (DF) flag? */
-
 	/* populate IP header */
 	iphdr = mbuf_push_hdr(m, *iphdr);
 	iphdr->version = IPVERSION;
 	iphdr->header_len = 5;
 	iphdr->tos = IPTOS_DSCP_CS0 | IPTOS_ECN_NOTECT;
 	iphdr->len = hton16(mbuf_length(m));
-	/* This must be unique across datagrams within a flow, see RFC 6864 */
-	iphdr->id = hash_crc32c_two(IP_ID_SEED, rdtsc() ^ proto,
-				    (uint64_t)daddr |
-				    ((uint64_t)netcfg.addr << 32));
-	iphdr->off = 0;
+	iphdr->id = 0; /* see RFC 6864 */
+	iphdr->off = hton16(IP_DF);
 	iphdr->ttl = 64;
 	iphdr->proto = proto;
 	iphdr->chksum = 0;

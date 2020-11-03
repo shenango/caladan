@@ -128,7 +128,7 @@ static void flow_registration_worker(void *arg)
 			spin_unlock_np(&flow_worker_lock);
 			ret = net_ops.deregister_flow(f->e, f->hw_flow_handle);
 			WARN_ON(ret);
-			f->release(f->ref);
+			kref_put(f->ref, f->release);
 			continue;
 		}
 
