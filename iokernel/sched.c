@@ -110,9 +110,8 @@ static void sched_disable_kthread(struct thread *th)
 	struct proc *p = th->p;
 
 	th->active = false;
-	p->active_threads[th->at_idx] =
-		p->active_threads[--p->active_thread_count];
-        p->active_threads[th->at_idx]->at_idx = th->at_idx;
+	p->active_threads[th->at_idx] = p->active_threads[--p->active_thread_count];
+	p->active_threads[th->at_idx]->at_idx = th->at_idx;
 	list_add(&p->idle_threads, &th->idle_link);
 	sched_steer_flows(p);
 	if (lrpc_empty(&th->txpktq))
@@ -548,7 +547,8 @@ void sched_poll(void)
 		/* check if a core went idle */
 		if (!s->wait && !s->idle && ksched_poll_idle(core)) {
 			if (s->cur_th) {
-				if (sched_try_fast_rewake(s->cur_th) == 0)
+				if (!s->cur_th->p->kill &&
+				    sched_try_fast_rewake(s->cur_th) == 0)
 					continue;
 				sched_disable_kthread(s->cur_th);
 				proc_put(s->cur_th->p);
