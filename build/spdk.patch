@@ -1,82 +1,52 @@
 diff --git a/include/spdk/nvme.h b/include/spdk/nvme.h
-index 0252cfb5e..0c85f1342 100644
+index c741ef606..b1593a82c 100644
 --- a/include/spdk/nvme.h
 +++ b/include/spdk/nvme.h
-@@ -761,6 +761,13 @@ void spdk_nvme_ctrlr_register_aer_callback(struct spdk_nvme_ctrlr *ctrlr,
+@@ -1013,6 +1013,20 @@ void spdk_nvme_ctrlr_register_aer_callback(struct spdk_nvme_ctrlr *ctrlr,
   */
  struct spdk_nvme_qpair;
  
-+void nvme_get_qp_info(struct spdk_nvme_qpair *qpair,
-+		struct spdk_nvme_cpl **cpl_out,
-+		uint32_t **cq_head_out,
-+		uint32_t *num_entries_out);
 +
-+void nvme_set_shadow_ptr(struct spdk_nvme_qpair *qpair, uint32_t *ptr);
++/**
++ * Setup qpair for use with shenango
++ *
++ * @qpair - the qpair to setup
++ * @cq_head_out - used to return the memory address of the internal completion
++ * queue head variable
++ * @shadow_ptr - address of memory location that SPDK will update when advancing
++ * cq_head
++ */
++void nvme_setup_shenango(struct spdk_nvme_qpair *qpair, uint32_t **cq_head_out,
++	                     uint32_t *shadow_ptr);
++
 +
  /**
   * Signature for the callback function invoked when a timeout is detected on a
   * request.
-@@ -2132,6 +2139,8 @@ void spdk_nvme_qpair_remove_cmd_error_injection(struct spdk_nvme_ctrlr *ctrlr,
- 		struct spdk_nvme_qpair *qpair,
- 		uint8_t opc);
- 
-+extern void *(*spdk_nvme_allocator_hook)(size_t, size_t, uint64_t *);
-+
- #ifdef SPDK_CONFIG_RDMA
- struct ibv_context;
- struct ibv_pd;
 diff --git a/lib/nvme/nvme_pcie.c b/lib/nvme/nvme_pcie.c
-index 22699cfa1..b73c300ab 100644
+index 312c4a411..bed686934 100644
 --- a/lib/nvme/nvme_pcie.c
 +++ b/lib/nvme/nvme_pcie.c
-@@ -42,6 +42,8 @@
- #include "nvme_internal.h"
- #include "nvme_uevent.h"
- 
-+void *(*spdk_nvme_allocator_hook)(size_t, size_t, uint64_t *);
-+
- /*
-  * Number of completion queue entries to process before ringing the
-  *  completion queue doorbell.
-@@ -180,6 +182,9 @@ struct nvme_pcie_qpair {
- 
- 	bool is_enabled;
+@@ -190,6 +190,9 @@ struct nvme_pcie_qpair {
+ 		volatile uint32_t *cq_eventidx;
+ 	} shadow_doorbell;
  
 +	uint32_t cq_head_nowrap;
 +	volatile uint32_t *shadow_head;
 +
  	/*
- 	 * Base qpair structure.
- 	 * This is located after the hot data in this structure so that the important parts of
-@@ -946,6 +951,8 @@ nvme_pcie_qpair_reset(struct spdk_nvme_qpair *qpair)
- 	struct nvme_pcie_qpair *pqpair = nvme_pcie_qpair(qpair);
+ 	 * Fields below this point should not be touched on the normal I/O path.
+ 	 */
+@@ -962,6 +965,8 @@ nvme_pcie_qpair_reset(struct spdk_nvme_qpair *qpair)
  
- 	pqpair->sq_tail = pqpair->cq_head = 0;
+ 	/* all head/tail vals are set to 0 */
+ 	pqpair->last_sq_tail = pqpair->sq_tail = pqpair->sq_head = pqpair->cq_head = 0;
 +	pqpair->cq_head_nowrap = pqpair->num_entries;
 +	*pqpair->shadow_head = pqpair->num_entries;
  
  	/*
  	 * First time through the completion queue, HW will set phase
-@@ -1022,9 +1029,15 @@ nvme_pcie_qpair_construct(struct spdk_nvme_qpair *qpair)
- 		}
- 	}
- 
--	pqpair->cpl = spdk_zmalloc(pqpair->num_entries * sizeof(struct spdk_nvme_cpl),
--				   page_align, &pqpair->cpl_bus_addr,
--				   SPDK_ENV_SOCKET_ID_ANY, flags);
-+	if (spdk_nvme_allocator_hook) {
-+		pqpair->cpl = spdk_nvme_allocator_hook(pqpair->num_entries * sizeof(struct spdk_nvme_cpl),
-+			  page_align, &pqpair->cpl_bus_addr);
-+	} else {
-+		pqpair->cpl = spdk_zmalloc(pqpair->num_entries * sizeof(struct spdk_nvme_cpl),
-+			  page_align, &pqpair->cpl_bus_addr,
-+			  SPDK_ENV_SOCKET_ID_ANY, flags);
-+	}
-+
- 	if (pqpair->cpl == NULL) {
- 		SPDK_ERRLOG("alloc qpair_cpl failed\n");
- 		return -ENOMEM;
-@@ -1056,6 +1069,9 @@ nvme_pcie_qpair_construct(struct spdk_nvme_qpair *qpair)
+@@ -1113,6 +1118,9 @@ nvme_pcie_qpair_construct(struct spdk_nvme_qpair *qpair,
  		TAILQ_INSERT_HEAD(&pqpair->free_tr, tr, tq_list);
  	}
  
@@ -86,59 +56,39 @@ index 22699cfa1..b73c300ab 100644
  	nvme_pcie_qpair_reset(qpair);
  
  	return 0;
-@@ -1583,7 +1599,10 @@ nvme_pcie_ctrlr_create_io_qpair(struct spdk_nvme_ctrlr *ctrlr, uint16_t qid,
- 
- 	assert(ctrlr != NULL);
- 
--	pqpair = spdk_zmalloc(sizeof(*pqpair), 64, NULL,
-+	if (spdk_nvme_allocator_hook)
-+		pqpair = spdk_nvme_allocator_hook(sizeof(*pqpair), 64, NULL);
-+	else
-+		pqpair = spdk_zmalloc(sizeof(*pqpair), 64, NULL,
- 			      SPDK_ENV_SOCKET_ID_ANY, SPDK_MALLOC_SHARE);
- 	if (pqpair == NULL) {
- 		return NULL;
-@@ -2100,6 +2119,8 @@ nvme_pcie_qpair_process_completions(struct spdk_nvme_qpair *qpair, uint32_t max_
- 			pqpair->cq_head = 0;
- 			pqpair->phase = !pqpair->phase;
+@@ -2286,6 +2294,11 @@ nvme_pcie_qpair_process_completions(struct spdk_nvme_qpair *qpair, uint32_t max_
  		}
-+		pqpair->cq_head_nowrap++;
-+		*pqpair->shadow_head = pqpair->cq_head_nowrap;
+ 	}
  
- 		tr = &pqpair->tr[cpl->cid];
- 		pqpair->sq_head = cpl->sqhd;
-@@ -2143,3 +2164,26 @@ nvme_pcie_qpair_process_completions(struct spdk_nvme_qpair *qpair, uint32_t max_
- 
++	/* update CQ head visible to runtime and iokernel */
++	pqpair->cq_head_nowrap += num_completions;
++	*pqpair->shadow_head = pqpair->cq_head_nowrap;
++
++
+ 	if (num_completions > 0) {
+ 		nvme_pcie_qpair_ring_cq_doorbell(qpair);
+ 	}
+@@ -2314,6 +2327,15 @@ nvme_pcie_qpair_process_completions(struct spdk_nvme_qpair *qpair, uint32_t max_
  	return num_completions;
  }
-+
-+void
-+nvme_get_qp_info(struct spdk_nvme_qpair *qpair,
-+	struct spdk_nvme_cpl **cpl_out,
-+	uint32_t **cq_head_out,
-+	uint32_t *num_entries_out)
+ 
++void nvme_setup_shenango(struct spdk_nvme_qpair *qpair, uint32_t **cq_head_out,
++	                     uint32_t *shadow_ptr)
 +{
-+	struct nvme_pcie_qpair	*pqpair = nvme_pcie_qpair(qpair);
-+
-+	*cpl_out = pqpair->cpl;
++	struct nvme_pcie_qpair *pqpair = nvme_pcie_qpair(qpair);
 +	*cq_head_out = &pqpair->cq_head_nowrap;
-+	*num_entries_out = pqpair->num_entries;
-+}
-+
-+void
-+nvme_set_shadow_ptr(struct spdk_nvme_qpair *qpair, uint32_t *ptr)
-+{
-+	struct nvme_pcie_qpair	*pqpair = nvme_pcie_qpair(qpair);
-+
-+	pqpair->shadow_head = ptr;
++	pqpair->shadow_head = shadow_ptr;
 +	*pqpair->shadow_head = pqpair->cq_head_nowrap;
 +}
 +
+ const struct spdk_nvme_transport_ops pcie_ops = {
+ 	.name = "PCIE",
+ 	.type = SPDK_NVME_TRANSPORT_PCIE,
 diff --git a/scripts/setup.sh b/scripts/setup.sh
-index cc3497d9b..8fc5fbbd1 100755
+index baafe15e1..fea070a87 100755
 --- a/scripts/setup.sh
 +++ b/scripts/setup.sh
-@@ -583,7 +583,7 @@ if [ `uname` = Linux ]; then
+@@ -716,7 +716,7 @@ if [ $(uname) = Linux ]; then
  	: ${NRHUGE=$(( (HUGEMEM + HUGEPGSZ_MB - 1) / HUGEPGSZ_MB ))}
  
  	if [ "$mode" == "config" ]; then

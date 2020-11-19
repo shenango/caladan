@@ -17,6 +17,7 @@ uint64_t num_blocks;
 
 // Hack to prevent SPDK from pulling in extra headers here
 #define SPDK_STDINC_H
+struct iovec;
 #include <spdk/nvme.h>
 #include <spdk/env.h>
 
@@ -109,16 +110,6 @@ static void attach_cb(void *cb_ctx, const struct spdk_nvme_transport_id *trid,
 			      ctrlr_data->mn, device_latency_us);
 }
 
-static void *spdk_custom_allocator(size_t size, size_t align,
-				   uint64_t *physaddr_out)
-{
-	void *out = iok_shm_alloc(size, align, NULL);
-
-	if (out && physaddr_out)
-		mem_lookup_page_phys_addr(out, PGSIZE_2MB, physaddr_out);
-
-	return out;
-}
 
 /**
  * storage_init - initializes storage
@@ -139,8 +130,6 @@ int storage_init(void)
 	if (shm_id < 0)
 		shm_id = -shm_id;
 	opts.shm_id = shm_id;
-
-	spdk_nvme_allocator_hook = spdk_custom_allocator;
 
 	if (spdk_env_init(&opts) < 0) {
 		log_err("Unable to initialize SPDK env");
@@ -185,25 +174,24 @@ int storage_init(void)
 int storage_init_thread(void)
 {
 	struct kthread *k = myk();
-	struct hardware_queue_spec *hs =
-		&iok.threads[k->kthread_idx].storage_hwq;
+	struct hardware_queue_spec *hs = &iok.threads[k->kthread_idx].storage_hwq;
 	struct storage_q *q = &k->storage_q;
+
+	int ret;
+	uint32_t max_xfer_size, entries, depth, *consumer_idx;
+	shmptr_t cq_shm;
+	struct spdk_nvme_cpl *cpl;
+	struct spdk_nvme_io_qpair_opts opts;
+	void *qp_handle;
 
 	if (!cfg_storage_enabled)
 		return 0;
 
-	uint32_t max_xfer_size, entries, depth, nr_descriptors;
-	uint32_t *consumer_idx;
-	struct spdk_nvme_cpl *descriptor_table;
-	void *qp_handle;
-	struct spdk_nvme_io_qpair_opts opts;
-
-	spdk_nvme_ctrlr_get_default_io_qpair_opts(controller, &opts,
-						  sizeof(opts));
+	spdk_nvme_ctrlr_get_default_io_qpair_opts(controller, &opts, sizeof(opts));
 	max_xfer_size = spdk_nvme_ns_get_max_io_xfer_size(spdk_namespace);
 	entries = (4096 - 1) / max_xfer_size + 2;
 	depth = 64;
-	if ((depth * entries) > opts.io_queue_size) {
+	if (depth * entries > opts.io_queue_size) {
 		log_info("controller IO queue size %u less than required",
 			 opts.io_queue_size);
 		log_info(
@@ -214,6 +202,21 @@ int storage_init_thread(void)
 	if (depth * entries > opts.io_queue_requests)
 		opts.io_queue_requests = depth * entries;
 
+
+	/* Allocate CQ of size io_queue_size * sizeof(struct spdk_nvme_cpl) */
+	opts.cq.buffer_size = opts.io_queue_size * sizeof(*cpl);
+	cpl = iok_shm_alloc(opts.cq.buffer_size, PGSIZE_4KB, &cq_shm);
+	if (!cpl) {
+		log_err("could not allocate storage CQ buf in shared mem");
+		return -ENOMEM;
+	}
+	opts.cq.vaddr = cpl;
+	ret = mem_lookup_page_phys_addr(cpl, PGSIZE_2MB, &opts.cq.paddr);
+	if (ret) {
+		log_err("storage_init_thread: could not lookup paddr %d", ret);
+		return ret;
+	}
+
 	qp_handle =
 		spdk_nvme_ctrlr_alloc_io_qpair(controller, &opts, sizeof(opts));
 	if (qp_handle == NULL) {
@@ -221,27 +224,23 @@ int storage_init_thread(void)
 		return -1;
 	}
 
-	nvme_get_qp_info(qp_handle, &descriptor_table, &consumer_idx,
-			 &nr_descriptors);
-	nvme_set_shadow_ptr(qp_handle, &k->q_ptrs->storage_tail);
+	nvme_setup_shenango(qp_handle, &consumer_idx,  &k->q_ptrs->storage_tail);
 
 	/* intialize struct storage_q */
 	spin_lock_init(&q->lock);
 	q->outstanding_reqs = 0;
 	q->spdk_qp_handle = qp_handle;
-	q->hq.descriptor_table = descriptor_table;
+	q->hq.descriptor_table = cpl;
 	q->hq.consumer_idx = consumer_idx;
 	q->hq.shadow_tail = &k->q_ptrs->storage_tail;
-	q->hq.descriptor_log_size = __builtin_ctz(sizeof(struct spdk_nvme_cpl));
-	BUILD_ASSERT(is_power_of_two(sizeof(struct spdk_nvme_cpl)));
-	q->hq.nr_descriptors = nr_descriptors;
+	q->hq.descriptor_log_size = __builtin_ctz(sizeof(*cpl));
+	BUILD_ASSERT(is_power_of_two(sizeof(*cpl)));
+	q->hq.nr_descriptors = opts.io_queue_size;
 	q->hq.parity_byte_offset = offsetof(struct spdk_nvme_cpl, status);
 	q->hq.parity_bit_mask = 0x1;
 
 	/* inform iokernel of queue info */
-	hs->descriptor_table =
-		ptr_to_shmptr(&netcfg.tx_region, q->hq.descriptor_table,
-			      sizeof(struct spdk_nvme_cpl) * nr_descriptors);
+	hs->descriptor_table = cq_shm;
 	hs->consumer_idx = ptr_to_shmptr(
 		&netcfg.tx_region, &k->q_ptrs->storage_tail, sizeof(uint32_t));
 	hs->descriptor_log_size = q->hq.descriptor_log_size;

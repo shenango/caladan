@@ -104,10 +104,10 @@ static size_t estimate_shm_space(void)
 #endif
 
 #ifdef DIRECT_STORAGE
-	// SPDK Memory - TODO: size this correctly
+	// SPDK completion queue memory
 	if (cfg_storage_enabled) {
-		ret += 5 * PGSIZE_2MB;
-		ret += 2 * maxks * PGSIZE_2MB;
+		/* sizeof(spdk_nvme_cpl) * default queue len * threads */
+		ret += 16 * 4096 * maxks;
 	}
 #endif
 	return ret;
