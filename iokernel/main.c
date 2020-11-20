@@ -9,6 +9,8 @@
 #include <base/log.h>
 #include <base/stddef.h>
 
+#include <unistd.h>
+
 #include "defs.h"
 #include "sched.h"
 
@@ -139,6 +141,11 @@ static void print_usage(void)
 int main(int argc, char *argv[])
 {
 	int i, ret;
+
+	if (getuid() != 0) {
+		fprintf(stderr, "Error: please run as root\n");
+		return -EPERM;
+	}
 
 	if (argc >= 2) {
 		if (!strcmp(argv[1], "simple")) {
