@@ -1,8 +1,8 @@
 # build configuration options (set to y for "yes", n for "no")
 
-# Enable Mellanox ConnectX-5 NIC Support
+# Enable Mellanox ConnectX-4,5 NIC Support
 CONFIG_MLX5=n
-# Enable Mellanox ConnectX-4 NIC Support
+# Enable Mellanox ConnectX-3 NIC Support
 CONFIG_MLX4=n
 # Enable SPDK NVMe support
 CONFIG_SPDK=n
