@@ -219,7 +219,10 @@ int udp_listen(struct netaddr laddr, udpconn_t **c_out)
 	udp_init_conn(c);
 	trans_init_3tuple(&c->e, IPPROTO_UDP, &udp_conn_ops, laddr);
 
-	ret = trans_table_add(&c->e);
+	if (laddr.port == 0)
+		ret = trans_table_add_with_ephemeral_port(&c->e);
+	else
+		ret = trans_table_add(&c->e);
 	if (ret) {
 		sfree(c);
 		return ret;
