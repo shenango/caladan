@@ -30,7 +30,7 @@ client, or agent machines.
 0. Install dependencies
 ```
 $ sudo apt-get update
-$ sudo apt-get install -y libnuma-dev libaio1 libaio-dev uuid-dev libcunit1 libcunit1-doc libcunit1-dev libmnl-dev cmake python3 python3-pip
+$ sudo apt-get install -y libnuma-dev libaio1 libaio-dev uuid-dev libcunit1 libcunit1-doc libcunit1-dev libmnl-dev libnl-3-dev libnl-route-3-dev libibverbs-dev cmake python3 python3-pip
 $ sudo python3 -m pip install paramiko
 ```
 
@@ -61,9 +61,9 @@ breakwater$ sudo ./scripts/setup_machine.sh
 breakwater$ make -C apps/netbench/
 ```
 
-6. Start IOKernel (hardware timestamp feature is under testing)
+6. Start IOKernel
 ```
-breakwater$ sudo ./iokerneld no_hw_qdel
+breakwater$ sudo ./iokerneld
 ```
 
 7. Start application. The following example will start a server with Breakwater and make a client to generate workload with exponential distribution (10us average and 100us of SLO) at a rate of 100k requests/s by 100 threads.
@@ -80,3 +80,6 @@ breakwater$ sudo ./apps/netbench/netbench breakwater ../client.config client 100
 
 ## Reproducing paper results
 Please refer to [breakwater-artifact](https://github.com/inhocho89/breakwater-artifact) repository for experiment scripts to reproduce the paper results.
+
+## Contact
+If you have any questions, feel free to contact Inho Cho <inhocho@csail.mit.edu>.
