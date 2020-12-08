@@ -112,12 +112,13 @@ int trans_table_add_with_ephemeral_port(struct trans_entry *e)
 	assert(e->match == TRANS_MATCH_3TUPLE ||
 	       e->match == TRANS_MATCH_5TUPLE);
 	e->laddr.port = 0;
-	if (e->match == TRANS_MATCH_3TUPLE)
-	    offset = trans_hash_3tuple(e->proto, e->laddr) + 
-            load_acquire(&ephemeral_offset);
-	else
-	    offset = trans_hash_5tuple(e->proto, e->laddr, e->raddr) + 
-            load_acquire(&ephemeral_offset);
+	if (e->match == TRANS_MATCH_3TUPLE) {
+		offset = trans_hash_3tuple(e->proto, e->laddr) +
+			 load_acquire(&ephemeral_offset);
+	} else {
+		offset = trans_hash_5tuple(e->proto, e->laddr, e->raddr) +
+			 load_acquire(&ephemeral_offset);
+	}
 
 	while (next_ephemeral < num_ephemeral) {
 		uint32_t port = MIN_EPHEMERAL +
