@@ -82,7 +82,7 @@ int preempt_init(void)
 {
 	struct sigaction act;
 
-	act.sa_flags = SA_SIGINFO | SA_ONSTACK | SA_NODEFER | SA_RESTART;
+	act.sa_flags = SA_SIGINFO | SA_NODEFER | SA_RESTART;
 
 	if (sigemptyset(&act.sa_mask) != 0) {
 		log_err("couldn't empty the signal handler mask");
