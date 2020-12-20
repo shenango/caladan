@@ -641,6 +641,27 @@ static inline bool softirq_work_soon(struct kthread *k, uint64_t now)
 		timer_available_soon(k, now);
 }
 
+
+/*
+ * Runtime configuration infrastructure
+ */
+
+typedef int (*cfg_fn_t)(const char *name, const char *val);
+struct cfg_handler {
+	const char			*name;
+	cfg_fn_t			fn;
+	bool				required;
+	struct list_node		link;
+};
+
+#define REGISTER_CFG(c)					\
+ __attribute__((constructor))					\
+void register_cfg_init_##c (void)				\
+{								\
+	extern void cfg_register(struct cfg_handler *h);	\
+	cfg_register(&c);					\
+}
+
 /*
  * Init
  */

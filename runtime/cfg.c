@@ -322,13 +322,15 @@ static int parse_enable_gc(const char *name, const char *val)
  * Parsing Infrastructure
  */
 
-typedef int (*cfg_fn_t)(const char *name, const char *val);
 
-struct cfg_handler {
-	const char	*name;
-	cfg_fn_t	fn;
-	bool		required;
-};
+static LIST_HEAD(dyn_cfg_handlers);
+static unsigned int nr_dyn_cfg_handlers;
+
+void cfg_register(struct cfg_handler *h)
+{
+	list_add_tail(&dyn_cfg_handlers, &h->link);
+	nr_dyn_cfg_handlers++;
+}
 
 static const struct cfg_handler cfg_handlers[] = {
 	{ "host_addr", parse_host_ip, true },
@@ -362,12 +364,15 @@ int cfg_load(const char *path)
 {
 	FILE *f;
 	char buf[BUFSIZ];
-	DEFINE_BITMAP(parsed, ARRAY_SIZE(cfg_handlers));
+	size_t handler_cnt = ARRAY_SIZE(cfg_handlers) + nr_dyn_cfg_handlers;
+	DEFINE_BITMAP(parsed, handler_cnt);
 	char *name, *val;
 	int i, ret = 0, line = 0;
 	size_t len;
+	struct list_node *cur;
+	const struct cfg_handler *h;
 
-	bitmap_init(parsed, ARRAY_SIZE(cfg_handlers), 0);
+	bitmap_init(parsed, handler_cnt, 0);
 
 	log_info("loading configuration from '%s'", path);
 
@@ -390,8 +395,14 @@ int cfg_load(const char *path)
 		if (val[len - 1] == '\n')
 			val[len - 1] = '\0';
 
-		for (i = 0; i < ARRAY_SIZE(cfg_handlers); i++) {
-			const struct cfg_handler *h = &cfg_handlers[i];
+		cur = dyn_cfg_handlers.n.next;
+		for (i = 0; i < handler_cnt; i++) {
+			if (i < ARRAY_SIZE(cfg_handlers)) {
+				h = &cfg_handlers[i];
+			} else {
+				h = list_entry(cur, struct cfg_handler, link);
+				cur = cur->next;
+			}
 			if (!strncmp(name, h->name, BUFSIZ)) {
 				ret = h->fn(name, val);
 				if (ret) {
@@ -407,8 +418,14 @@ int cfg_load(const char *path)
 		line++;
 	}
 
-	for (i = 0; i < ARRAY_SIZE(cfg_handlers); i++) {
-		const struct cfg_handler *h = &cfg_handlers[i];
+	cur = dyn_cfg_handlers.n.next;
+	for (i = 0; i < handler_cnt; i++) {
+		if (i < ARRAY_SIZE(cfg_handlers)) {
+			h = &cfg_handlers[i];
+		} else {
+			h = list_entry(cur, struct cfg_handler, link);
+			cur = cur->next;
+		}
 		if (h->required && !bitmap_test(parsed, i)) {
 			log_err("missing required config option '%s'", h->name);
 			ret = -EINVAL;
