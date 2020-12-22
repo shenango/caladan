@@ -32,6 +32,47 @@ struct ibv_pd *pd;
 struct ibv_mr *mr_tx;
 struct ibv_mr *mr_rx;
 
+/* borrowed from DPDK */
+int
+ibv_device_to_pci_addr(const struct ibv_device *device,
+			    struct pci_addr *pci_addr)
+{
+	FILE *file;
+	char line[32];
+	char path[strlen(device->ibdev_path) + strlen("/device/uevent") + 1];
+	snprintf(path, sizeof(path), "%s/device/uevent", device->ibdev_path);
+
+	file = fopen(path, "rb");
+	if (!file)
+		return -errno;
+
+	while (fgets(line, sizeof(line), file) == line) {
+		size_t len = strlen(line);
+		int ret;
+
+		/* Truncate long lines. */
+		if (len == (sizeof(line) - 1))
+			while (line[(len - 1)] != '\n') {
+				ret = fgetc(file);
+				if (ret == EOF)
+					break;
+				line[(len - 1)] = ret;
+			}
+		/* Extract information. */
+		if (sscanf(line,
+			   "PCI_SLOT_NAME="
+			   "%04hx:%02hhx:%02hhx.%hhd\n",
+			   &pci_addr->domain,
+			   &pci_addr->bus,
+			   &pci_addr->slot,
+			   &pci_addr->func) == 4) {
+			break;
+		}
+	}
+	fclose(file);
+	return 0;
+}
+
 static void mlx5_init_tx_segment(struct mlx5_txq *v, unsigned int idx)
 {
 	int size;
@@ -327,11 +368,13 @@ int mlx5_init(struct hardware_q **rxq_out, struct direct_txq **txq_out,
 	int i, ret;
 
 	struct ibv_device **dev_list;
-	struct ibv_device *ib_dev;
 	struct mlx5dv_context_attr attr = {0};
+	struct pci_addr pci_addr;
 
 	if (nr_rxq > NCPU)
 		return -EINVAL;
+
+	BUG_ON(setenv("MLX5_SINGLE_THREADED", "1", 1));
 
 	dev_list = ibv_get_device_list(NULL);
 	if (!dev_list) {
@@ -339,23 +382,33 @@ int mlx5_init(struct hardware_q **rxq_out, struct direct_txq **txq_out,
 		return -1;
 	}
 
-	i = 0;
-	while ((ib_dev = dev_list[i])) {
-		if (strncmp(ibv_get_device_name(ib_dev), "mlx5", 4) == 0)
+	for (i = 0; dev_list[i]; i++) {
+		if (strncmp(ibv_get_device_name(dev_list[i]), "mlx5", 4))
+			continue;
+
+		if (!cfg_pci_addr_specified)
 			break;
-		i++;
+
+		if (ibv_device_to_pci_addr(dev_list[i], &pci_addr)) {
+			log_warn("failed to read pci addr for %s, skipping",
+				     ibv_get_device_name(dev_list[i]));
+			continue;
+		}
+
+		if (memcmp(&pci_addr, &nic_pci_addr, sizeof(pci_addr)) == 0)
+			break;
 	}
 
-	if (!ib_dev) {
+	if (!dev_list[i]) {
 		log_err("mlx5_init: IB device not found");
 		return -1;
 	}
 
 	attr.flags = MLX5DV_CONTEXT_FLAGS_DEVX;
-	context = mlx5dv_open_device(ib_dev, &attr);
+	context = mlx5dv_open_device(dev_list[i], &attr);
 	if (!context) {
 		log_err("mlx5_init: Couldn't get context for %s (errno %d)",
-			ibv_get_device_name(ib_dev), errno);
+			ibv_get_device_name(dev_list[i]), errno);
 		return -1;
 	}
 
