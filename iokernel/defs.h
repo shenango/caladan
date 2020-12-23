@@ -9,6 +9,7 @@
 #include <base/gen.h>
 #include <base/lrpc.h>
 #include <base/mem.h>
+#include <base/pci.h>
 #undef LIST_HEAD /* hack to deal with DPDK being annoying */
 #include <base/list.h>
 #include <iokernel/control.h>
@@ -338,6 +339,8 @@ extern int dp_clients_init(void);
 extern int dpdk_late_init(void);
 extern int hw_timestamp_init(void);
 
+extern char *nic_pci_addr_str;
+extern struct pci_addr nic_pci_addr;
 extern bool allowed_cores_supplied;
 extern DEFINE_BITMAP(input_allowed_cores, NCPU);
 

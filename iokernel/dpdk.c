@@ -52,6 +52,9 @@
 #define MLX5_RX_RING_SIZE 2048
 #define MLX5_TX_RING_SIZE 2048
 
+char *nic_pci_addr_str;
+struct pci_addr nic_pci_addr;
+
 static const struct rte_eth_conf port_conf_default = {
 	.rxmode = {
 		.max_rx_pkt_len = ETH_MAX_LEN,
@@ -194,7 +197,7 @@ void dpdk_print_eth_stats(void)
  */
 int dpdk_init(void)
 {
-	char *argv[5];
+	char *argv[nic_pci_addr_str ? 6 : 5];
 	char buf[10];
 
 	/* init args */
@@ -204,7 +207,12 @@ int dpdk_init(void)
 	sprintf(buf, "%d", sched_dp_core);
 	argv[2] = buf;
 	argv[3] = "--socket-mem=128";
-	argv[4] = "--vdev=net_tap0";
+	if (nic_pci_addr_str) {
+		argv[4] = "-w";
+		argv[5] = nic_pci_addr_str;
+	} else {
+		argv[4] = "--vdev=net_tap0";
+	}
 
 	/* initialize the Environment Abstraction Layer (EAL) */
 	int ret = rte_eal_init(ARRAY_SIZE(argv), argv);

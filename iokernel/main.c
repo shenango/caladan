@@ -178,6 +178,17 @@ int main(int argc, char *argv[])
 			}
 			cfg.ias_bw_limit = atof(argv[++i]);
 			log_info("setting bwlimit to %.5f", cfg.ias_bw_limit);
+		} else if (!strcmp(argv[i], "nicpci")) {
+			if (i == argc - 1) {
+				fprintf(stderr, "missing nicpci argument\n");
+				return -EINVAL;
+			}
+			nic_pci_addr_str = argv[++i];
+			ret = pci_str_to_addr(nic_pci_addr_str, &nic_pci_addr);
+			if (ret) {
+				log_err("invalid pci address: %s", nic_pci_addr_str);
+				return -EINVAL;
+			}
 		} else if (string_to_bitmap(argv[i], input_allowed_cores, NCPU)) {
 			fprintf(stderr, "invalid cpu list: %s\n", argv[i]);
 			fprintf(stderr, "example list: 0-24,26-48:2,49-255\n");
