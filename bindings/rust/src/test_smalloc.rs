@@ -24,7 +24,7 @@ fn malloc_bench(samples: u32, ptrs: &mut [*mut c_void]) {
 fn smalloc_bench(samples: u32, ptrs: &mut [*mut c_void]) {
     for _ in 0..samples {
         for i in 0..ptrs.len() {
-            ptrs[i] = unsafe { shenango::ffi::smalloc(SIZE) };
+            ptrs[i] = unsafe { shenango::ffi::smalloc(SIZE as _) };
             assert!(!ptrs[i].is_null());
         }
 
