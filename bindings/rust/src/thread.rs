@@ -146,7 +146,7 @@ where
         ffi::thread_create_with_buf(
             Some(trampoline::<F>),
             &mut buf as *mut *mut F as *mut *mut c_void,
-            mem::size_of::<F>(),
+            mem::size_of::<F>() as _,
         )
     };
     assert!(!th.is_null());
@@ -155,7 +155,7 @@ where
         ffi::memcpy(
             buf as *mut c_void,
             &mut f as *mut F as *mut c_void,
-            mem::size_of::<F>(),
+            mem::size_of::<F>() as _,
         );
         mem::forget(f);
         ffi::thread_ready(th)
@@ -174,7 +174,7 @@ where
         ffi::thread_create_with_buf(
             Some(base_trampoline::<T, F>),
             &mut buf as *mut *mut StackBase<T, F> as *mut *mut c_void,
-            mem::size_of::<StackBase<T, F>>(),
+            mem::size_of::<StackBase<T, F>>() as _,
         )
     };
     assert!(!th.is_null());
@@ -194,7 +194,7 @@ where
         ffi::memcpy(
             buf as *mut c_void,
             &mut base as *mut StackBase<T, F> as *mut c_void,
-            mem::size_of::<StackBase<T, F>>(),
+            mem::size_of::<StackBase<T, F>>() as _,
         );
     }
     mem::forget(base);

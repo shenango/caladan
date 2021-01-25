@@ -17,6 +17,9 @@ use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
+// https://github.com/rust-lang/rust-bindgen/issues/1651
+#[allow(deref_nullptr)]
+#[allow(unaligned_references)]
 pub mod ffi {
     include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 }
