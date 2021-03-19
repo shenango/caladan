@@ -88,7 +88,7 @@ __jmp_thread:
  * __jmp_thread_direct - directly switches from one thread to the next
  * @oldtf: the trap frame to save (%rdi)
  * @newtf: the trap frame to restore (%rsi)
- * @stack_busy: a pointer to the busy stack flag owned by the old thread (%rdx)
+ * @thread_running: a pointer to whether the thread is still running (%rdx)
  *
  * This low-level variant isn't intended to be called directly.
  * Re-enables preemption, parking the kthread if necessary.

@@ -121,7 +121,7 @@ thread_t *softirq_run_thread(struct kthread *k, unsigned int budget)
 		return NULL;
 
 	softirq_gather_work(w, k, budget);
-	th->state = THREAD_STATE_RUNNABLE;
+	th->thread_ready = true;
 	th->ready_tsc = rdtsc();
 	return th;
 }

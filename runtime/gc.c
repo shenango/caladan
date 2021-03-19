@@ -87,7 +87,6 @@ void gc_start_world(void)
 		if (!th)
 			break;
 
-		th->state = THREAD_STATE_SLEEPING;
 		thread_ready(th);
 	}
 

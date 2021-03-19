@@ -88,12 +88,6 @@ struct thread_tf {
  * Thread support
  */
 
-enum {
-	THREAD_STATE_RUNNING = 0,
-	THREAD_STATE_RUNNABLE,
-	THREAD_STATE_SLEEPING,
-};
-
 struct stack;
 
 struct thread {
@@ -101,8 +95,8 @@ struct thread {
 	struct list_node	link;
 	struct stack		*stack;
 	unsigned int		main_thread:1;
-	unsigned int		state;
-	unsigned int		stack_busy;
+	unsigned int		thread_ready;
+	unsigned int		thread_running;
 	unsigned int		last_cpu;
 	uint64_t		run_start_tsc;
 	uint64_t		ready_tsc;
@@ -119,7 +113,7 @@ typedef void (*runtime_fn_t)(void);
 extern void __jmp_thread(struct thread_tf *tf) __noreturn;
 extern void __jmp_thread_direct(struct thread_tf *oldtf,
 				struct thread_tf *newtf,
-				unsigned int *stack_busy);
+				unsigned int *thread_running);
 extern void __jmp_runtime(struct thread_tf *tf, runtime_fn_t fn,
 			  void *stack);
 extern void __jmp_runtime_nosave(runtime_fn_t fn, void *stack) __noreturn;
@@ -705,8 +699,9 @@ extern int directpath_init_late(void);
 /* configuration loading */
 extern int cfg_load(const char *path);
 
-/* runtime entry helpers */
+/* internal runtime scheduling functions */
 extern void sched_start(void) __noreturn;
 extern int thread_spawn_main(thread_fn_t fn, void *arg);
 extern void thread_cede(void);
+extern void thread_ready_locked(thread_t *th);
 extern void join_kthread(struct kthread *k);
