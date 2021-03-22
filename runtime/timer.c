@@ -250,22 +250,17 @@ void timer_sleep(uint64_t duration_us)
 	__timer_sleep(microtime() + duration_us);
 }
 
-/**
- * timer_softirq - handles expired timers
- * @k: the kthread to check
- * @budget: the maximum number of timers to handle
- */
-void timer_softirq(struct kthread *k, unsigned int budget)
+static void timer_softirq_one(struct kthread *k)
 {
 	struct timer_entry *e;
 	uint64_t now_us;
 	int i;
 
-	spin_lock_np(&k->timer_lock);
+	spin_lock(&k->timer_lock);
 	assert_timer_heap_is_valid(k);
 
 	now_us = microtime();
-	while (budget-- && k->timern > 0 &&
+	while (!preempt_needed() && k->timern > 0 &&
 	       k->timers[0].deadline_us <= now_us) {
 		i = --k->timern;
 		e = k->timers[0].e;
@@ -275,16 +270,28 @@ void timer_softirq(struct kthread *k, unsigned int budget)
 			sift_down(k->timers, 0, i);
 		}
 		update_q_ptrs(k);
-		spin_unlock_np(&k->timer_lock);
+		spin_unlock(&k->timer_lock);
 
 		/* execute the timer handler */
 		e->armed = false;
 		e->fn(e->arg);
-		spin_lock_np(&k->timer_lock);
+		spin_lock(&k->timer_lock);
 		now_us = microtime();
 	}
 
-	spin_unlock_np(&k->timer_lock);
+	spin_unlock(&k->timer_lock);
+}
+
+static void timer_softirq(void *arg)
+{
+	struct kthread *k = arg;
+
+	while (true) {
+		preempt_disable();
+		timer_softirq_one(k);
+		k->timer_busy = false;
+		thread_park_and_preempt_enable();
+	}
 }
 
 /**
@@ -296,6 +303,7 @@ int timer_init_thread(void)
 {
 	struct kthread *k = myk();
 	struct timer_spec *ts = &iok.threads[k->kthread_idx].timer_heap;
+	thread_t *th;
 
 	k->timers = aligned_alloc(CACHE_LINE_SIZE,
 			align_up(sizeof(struct timer_idx) * RUNTIME_MAX_TIMERS,
@@ -303,6 +311,11 @@ int timer_init_thread(void)
 	if (!k->timers)
 		return -ENOMEM;
 
+	th = thread_create(timer_softirq, k);
+	if (!th)
+		return -ENOMEM;
+
+	k->timer_softirq = th;
 	k->q_ptrs->next_timer_tsc = 0;
 	ts->next_tsc = ptr_to_shmptr(&netcfg.tx_region,
 			    &k->q_ptrs->next_timer_tsc, sizeof(uint64_t));

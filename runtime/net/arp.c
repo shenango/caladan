@@ -133,7 +133,7 @@ static void arp_send(uint16_t op, struct eth_addr dhost, uint32_t daddr)
 	arp_hdr_ethip->target_mac = dhost;
 	arp_hdr_ethip->target_ip = hton32(daddr);
 
-	net_tx_eth_or_free(m, ETHTYPE_ARP, dhost);
+	net_tx_eth(m, ETHTYPE_ARP, dhost);
 }
 
 static void arp_age_entry(uint64_t now_us, struct arp_entry *e)
@@ -225,7 +225,7 @@ static void arp_update(uint32_t daddr, struct eth_addr dhost)
 	/* drain mbufs waiting for ARP response */
 	while (!mbufq_empty(&q)) {
 		struct mbuf *m = mbufq_pop_head(&q);
-		net_tx_eth_or_free(m, ETHTYPE_IP, dhost);
+		net_tx_eth(m, ETHTYPE_IP, dhost);
 	}
 }
 

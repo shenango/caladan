@@ -165,12 +165,14 @@ static void drain_overflow(struct kthread *l)
 static bool work_available(struct kthread *k)
 {
 #ifdef GC
-	if (get_gc_gen() != ACCESS_ONCE(k->local_gc_gen) && ACCESS_ONCE(k->parked))
+	if (get_gc_gen() != ACCESS_ONCE(k->local_gc_gen) &&
+	    ACCESS_ONCE(k->parked)) {
 		return true;
+	}
 #endif
 
 	return ACCESS_ONCE(k->rq_tail) != ACCESS_ONCE(k->rq_head) ||
-	        !list_empty_volatile(&k->rq_overflow) || softirq_work_available(k);
+	       softirq_pending(k);
 }
 
 static void update_oldest_tsc(struct kthread *k)
@@ -220,8 +222,8 @@ static bool steal_work(struct kthread *l, struct kthread *r)
 		store_release(&r->rq_tail, rq_tail);
 
 		/*
-		 * Drain the remote overflow queue, so newly readied tasks don't cut
-		 * in front tasks in the oveflow queue
+		 * Drain the remote overflow queue, so newly readied tasks
+		 * don't cut in front tasks in the oveflow queue
 		 */
 		while (true) {
 			th = list_pop(&r->rq_overflow, thread_t, link);
@@ -248,43 +250,35 @@ static bool steal_work(struct kthread *l, struct kthread *r)
 	if (th) {
 		ACCESS_ONCE(r->q_ptrs->rq_tail)++;
 		update_oldest_tsc(r);
-		goto done;
-	}
-
-	/* check for softirqs */
-	th = softirq_run_thread(r, RUNTIME_SOFTIRQ_REMOTE_BUDGET);
-	if (th) {
-		STAT(SOFTIRQS_STOLEN)++;
-		goto done;
-	}
-
-done:
-	spin_unlock(&r->lock);
-
-	if (th) {
+		spin_unlock(&r->lock);
 		l->rq[l->rq_head++ % RUNTIME_RQ_SIZE] = th;
 		ACCESS_ONCE(l->q_ptrs->oldest_tsc) = th->ready_tsc;
 		ACCESS_ONCE(l->q_ptrs->rq_head)++;
 		STAT(THREADS_STOLEN)++;
+		return true;
 	}
 
-	return th != NULL;
+	/* check for softirqs */
+	if (softirq_sched(r)) {
+		STAT(SOFTIRQS_STOLEN)++;
+		spin_unlock(&r->lock);
+		return true;
+	}
+
+	spin_unlock(&r->lock);
+	return false;
 }
 
-static __noinline struct thread *do_watchdog(struct kthread *l)
+static __noinline bool do_watchdog(struct kthread *l)
 {
-	thread_t *th;
+	bool work;
 
 	assert_spin_lock_held(&l->lock);
 
-	/* then check the network queues */
-	th = softirq_run_thread(l, RUNTIME_SOFTIRQ_LOCAL_BUDGET);
-	if (th) {
+	work = softirq_sched(l);
+	if (work)
 		STAT(SOFTIRQS_LOCAL)++;
-		return th;
-	}
-
-	return NULL;
+	return work;
 }
 
 /* the main scheduler routine, decides what to run next */
@@ -332,8 +326,7 @@ static __noreturn __noinline void schedule(void)
 	    unlikely(start_tsc - last_watchdog_tsc >=
 	             cycles_per_us * RUNTIME_WATCHDOG_US)) {
 		last_watchdog_tsc = start_tsc;
-		th = do_watchdog(l);
-		if (th)
+		if (do_watchdog(l))
 			goto done;
 	}
 
@@ -350,8 +343,7 @@ static __noreturn __noinline void schedule(void)
 
 again:
 	/* then check for local softirqs */
-	th = softirq_run_thread(l, RUNTIME_SOFTIRQ_LOCAL_BUDGET);
-	if (th) {
+	if (softirq_sched(l)) {
 		STAT(SOFTIRQS_LOCAL)++;
 		goto done;
 	}
@@ -371,8 +363,7 @@ again:
 	}
 
 	/* recheck for local softirqs one last time */
-	th = softirq_run_thread(l, RUNTIME_SOFTIRQ_LOCAL_BUDGET);
-	if (th) {
+	if (softirq_sched(l)) {
 		STAT(SOFTIRQS_LOCAL)++;
 		goto done;
 	}
@@ -385,9 +376,9 @@ again:
 	/* keep trying to find work until the polling timeout expires */
 	if (!preempt_cede_needed() &&
 	    (++iters < RUNTIME_SCHED_POLL_ITERS ||
-	     rdtsc() - start_tsc < cycles_per_us * RUNTIME_SCHED_MIN_POLL_US ||
-	     softirq_work_soon(l, start_tsc)))
+	     rdtsc() - start_tsc < cycles_per_us * RUNTIME_SCHED_MIN_POLL_US)) {
 		goto again;
+	}
 
 	l->parked = true;
 	spin_unlock(&l->lock);
@@ -405,11 +396,9 @@ again:
 
 done:
 	/* pop off a thread and run it */
-	if (!th) {
-		assert(l->rq_head != l->rq_tail);
-		th = l->rq[l->rq_tail++ % RUNTIME_RQ_SIZE];
-		ACCESS_ONCE(l->q_ptrs->rq_tail)++;
-	}
+	assert(l->rq_head != l->rq_tail);
+	th = l->rq[l->rq_tail++ % RUNTIME_RQ_SIZE];
+	ACCESS_ONCE(l->q_ptrs->rq_tail)++;
 
 	/* move overflow tasks into the runqueue */
 	if (unlikely(!list_empty(&l->rq_overflow)))
@@ -474,6 +463,11 @@ static __always_inline void enter_schedule(thread_t *curth)
 	/* pop the next runnable thread from the queue */
 	th = k->rq[k->rq_tail++ % RUNTIME_RQ_SIZE];
 	ACCESS_ONCE(k->q_ptrs->rq_tail)++;
+
+	/* move overflow tasks into the runqueue */
+	if (unlikely(!list_empty(&k->rq_overflow)))
+		drain_overflow(k);
+
 	update_oldest_tsc(k);
 	spin_unlock(&k->lock);
 
@@ -491,6 +485,7 @@ static __always_inline void enter_schedule(thread_t *curth)
 
 	/* check if we're switching into the same thread as before */
 	if (unlikely(th == curth)) {
+		th->thread_ready = false;
 		preempt_enable();
 		return;
 	}
@@ -541,9 +536,10 @@ void thread_yield(void)
 	thread_t *curth = thread_self();
 
 	/* check for softirqs */
-	softirq_run(RUNTIME_SOFTIRQ_LOCAL_BUDGET);
+	softirq_run();
 
 	preempt_disable();
+	curth->thread_ready = false;
 	thread_ready(curth);
 	enter_schedule(curth);
 }
@@ -563,7 +559,7 @@ static void thread_ready_prepare(struct kthread *k, thread_t *th)
 }
 
 /**
- * thread_ready_locked - makes a uthread runnable (at head, kthread lock held)
+ * thread_ready_locked - makes a uthread runnable (at tail, kthread lock held)
  * @th: the thread to mark runnable
  *
  * This function can only be called when @th is parked.
@@ -593,19 +589,23 @@ void thread_ready_locked(thread_t *th)
 }
 
 /**
- * thread_ready_head - makes a uthread runnable (at the head of the queue)
+ * thread_ready_head_locked - makes a uthread runnable (at head, kthread lock held)
  * @th: the thread to mark runnable
  *
  * This function can only be called when @th is parked.
+ * This function must be called with preemption disabled and the kthread lock
+ * held.
  */
-void thread_ready_head(thread_t *th)
+void thread_ready_head_locked(thread_t *th)
 {
-	struct kthread *k;
+	struct kthread *k = myk();
 	thread_t *oldestth;
 
-	k = getk();
+	assert_preempt_disabled();
+	assert_spin_lock_held(&k->lock);
+
 	thread_ready_prepare(k, th);
-	spin_lock(&k->lock);
+
 	if (k->rq_head != k->rq_tail)
 		th->ready_tsc = k->rq[k->rq_tail % RUNTIME_RQ_SIZE]->ready_tsc;
 	oldestth = k->rq[--k->rq_tail % RUNTIME_RQ_SIZE];
@@ -615,10 +615,8 @@ void thread_ready_head(thread_t *th)
 		k->rq_head--;
 		STAT(RQ_OVERFLOW)++;
 	}
-	spin_unlock(&k->lock);
 	ACCESS_ONCE(k->q_ptrs->oldest_tsc) = th->ready_tsc;
 	ACCESS_ONCE(k->q_ptrs->rq_head)++;
-	putk();
 }
 
 /**
@@ -650,6 +648,35 @@ void thread_ready(thread_t *th)
 	store_release(&k->rq_head, k->rq_head + 1);
 	if (k->rq_head - load_acquire(&k->rq_tail) == 1)
 		ACCESS_ONCE(k->q_ptrs->oldest_tsc) = th->ready_tsc;
+	ACCESS_ONCE(k->q_ptrs->rq_head)++;
+	putk();
+}
+
+/**
+ * thread_ready_head - makes a uthread runnable (at the head of the queue)
+ * @th: the thread to mark runnable
+ *
+ * This function can only be called when @th is parked.
+ */
+void thread_ready_head(thread_t *th)
+{
+	struct kthread *k;
+	thread_t *oldestth;
+
+	k = getk();
+	thread_ready_prepare(k, th);
+	spin_lock(&k->lock);
+	if (k->rq_head != k->rq_tail)
+		th->ready_tsc = k->rq[k->rq_tail % RUNTIME_RQ_SIZE]->ready_tsc;
+	oldestth = k->rq[--k->rq_tail % RUNTIME_RQ_SIZE];
+	k->rq[k->rq_tail % RUNTIME_RQ_SIZE] = th;
+	if (unlikely(k->rq_head - k->rq_tail > RUNTIME_RQ_SIZE)) {
+		list_add(&k->rq_overflow, &oldestth->link);
+		k->rq_head--;
+		STAT(RQ_OVERFLOW)++;
+	}
+	spin_unlock(&k->lock);
+	ACCESS_ONCE(k->q_ptrs->oldest_tsc) = th->ready_tsc;
 	ACCESS_ONCE(k->q_ptrs->rq_head)++;
 	putk();
 }
@@ -732,13 +759,13 @@ static __always_inline thread_t *__thread_create(void)
 		preempt_enable();
 		return NULL;
 	}
+	th->last_cpu = myk()->curr_cpu;
 	preempt_enable();
 
 	th->stack = s;
 	th->main_thread = false;
 	th->thread_ready = false;
 	th->thread_running = false;
-	th->last_cpu = myk()->curr_cpu;
 	th->run_start_tsc = UINT64_MAX;
 
 	return th;
@@ -828,7 +855,6 @@ int thread_spawn_main(thread_fn_t fn, void *arg)
 	if (!th)
 		return -ENOMEM;
 	th->main_thread = true;
-	th->last_cpu = sched_getcpu();
 	thread_ready(th);
 	return 0;
 }

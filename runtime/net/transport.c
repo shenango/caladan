@@ -206,33 +206,27 @@ static struct trans_entry *trans_lookup(struct mbuf *m)
 }
 
 /**
- * net_rx_trans - receive L4 packets
- * @ms: an array of mbufs to process
- * @nr: the size of the @ms array
+ * net_rx_trans - receive an L4 packet
+ * m: the mbuf to receive
  */
-void net_rx_trans(struct mbuf **ms, const unsigned int nr)
+void net_rx_trans(struct mbuf *m)
 {
-	int i;
 	const struct ip_hdr *iphdr;
+	struct trans_entry *e;
 
-	/* deliver each packet to a L4 protocol handler */
-	for (i = 0; i < nr; i++) {
-		struct mbuf *m = ms[i];
-		struct trans_entry *e;
-
-		rcu_read_lock();
-		e = trans_lookup(m);
-		if (unlikely(!e)) {
-			rcu_read_unlock();
-			iphdr = mbuf_network_hdr(m, *iphdr);
-			if (iphdr->proto == IPPROTO_TCP)
-				tcp_rx_closed(m);
-			mbuf_free(m);
-			continue;
-		}
-		e->ops->recv(e, m);
+	rcu_read_lock();
+	e = trans_lookup(m);
+	if (unlikely(!e)) {
 		rcu_read_unlock();
+		iphdr = mbuf_network_hdr(m, *iphdr);
+		if (iphdr->proto == IPPROTO_TCP)
+			tcp_rx_closed(m);
+		mbuf_free(m);
+		return;
 	}
+
+	e->ops->recv(e, m);
+	rcu_read_unlock();
 }
 
 /**

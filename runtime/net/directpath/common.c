@@ -75,7 +75,27 @@ static int rx_memory_init(void)
 		return -ENOMEM;
 
 	return 0;
+}
 
+static void directpath_softirq_one(struct kthread *k)
+{
+	struct mbuf *ms[RUNTIME_RX_BATCH_SIZE];
+	int cnt;
+
+	cnt = net_ops.rx_batch(k->directpath_rxq, ms, RUNTIME_RX_BATCH_SIZE);
+	net_rx_batch(ms, cnt);
+}
+
+static void directpath_softirq(void *arg)
+{
+	struct kthread *k = arg;
+
+	while (true) {
+		directpath_softirq_one(k);
+		preempt_disable();
+		k->directpath_busy = false;
+		thread_park_and_preempt_enable();
+	}
 }
 
 int directpath_init(void)
@@ -100,13 +120,19 @@ int directpath_init(void)
 
 int directpath_init_thread(void)
 {
-	if (!cfg_directpath_enabled)
-		return 0;
-
 	struct kthread *k = myk();
 	struct hardware_queue_spec *hs;
 	struct hardware_q *rxq = rxq_out[k->kthread_idx];
+	thread_t *th;
 
+	if (!cfg_directpath_enabled)
+		return 0;
+
+	th = thread_create(directpath_softirq, k);
+	if (!th)
+		return -ENOMEM;
+
+	k->directpath_softirq = th;
 	rxq->shadow_tail = &k->q_ptrs->directpath_rx_tail;
 	hs = &iok.threads[k->kthread_idx].direct_rxq;
 

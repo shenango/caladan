@@ -14,6 +14,7 @@
 
 extern struct mempool net_tx_buf_mp;
 
+
 /*
  * Network Error Reporting Functions
  */
@@ -29,8 +30,9 @@ extern void net_error(struct mbuf *m, int err);
 extern void net_rx_arp(struct mbuf *m);
 extern void net_rx_icmp(struct mbuf *m, const struct ip_hdr *iphdr,
 			uint16_t len);
-extern void net_rx_trans(struct mbuf **ms, const unsigned int nr);
+extern void net_rx_trans(struct mbuf *m);
 extern void tcp_rx_closed(struct mbuf *m);
+void net_rx_batch(struct mbuf **ms, unsigned int nr);
 
 
 /*
@@ -41,32 +43,14 @@ extern int arp_lookup(uint32_t daddr, struct eth_addr *dhost_out,
 		      struct mbuf *m) __must_use_return;
 extern struct mbuf *net_tx_alloc_mbuf(void);
 extern void net_tx_release_mbuf(struct mbuf *m);
-extern int net_tx_eth(struct mbuf *m, uint16_t proto,
-		      struct eth_addr dhost) __must_use_return;
+extern void net_tx_eth(struct mbuf *m, uint16_t proto,
+		       struct eth_addr dhost);
 extern int net_tx_ip(struct mbuf *m, uint8_t proto,
 		     uint32_t daddr) __must_use_return;
 extern int net_tx_ip_burst(struct mbuf **ms, int n, uint8_t proto,
 		     uint32_t daddr) __must_use_return;
 extern int net_tx_icmp(struct mbuf *m, uint8_t type, uint8_t code,
 		uint32_t daddr, uint16_t id, uint16_t seq) __must_use_return;
-
-/**
- * net_tx_eth - transmits an ethernet packet, or frees it on failure
- * @m: the mbuf to transmit
- * @type: the ethernet type (in native byte order)
- * @dhost: the destination MAC address
- *
- * The payload must start with the network (L3) header. The ethernet (L2)
- * header will be prepended by this function.
- *
- * @m must have been allocated with net_tx_alloc_mbuf().
- */
-static inline void net_tx_eth_or_free(struct mbuf *m, uint16_t type,
-				      struct eth_addr dhost)
-{
-	if (unlikely(net_tx_eth(m, type, dhost) != 0))
-		mbuf_free(m);
-}
 
 /**
  * net_tx_ip - transmits an IP packet, or frees it on failure
@@ -167,21 +151,21 @@ extern int trans_table_add(struct trans_entry *e);
 extern int trans_table_add_with_ephemeral_port(struct trans_entry *e);
 extern void trans_table_remove(struct trans_entry *e);
 
+
 /*
  * Flow registration support
  */
 
-
 struct flow_registration {
 	unsigned int		kthread_affinity;
 
-	struct trans_entry		*e;
+	struct trans_entry	*e;
 	struct kref		*ref;
 	void (*release)(struct kref *ref);
 
-	void		*hw_flow_handle;
-	struct list_node		flow_reg_link;
-	struct list_node		flow_dereg_link;
+	void			*hw_flow_handle;
+	struct list_node	flow_reg_link;
+	struct list_node	flow_dereg_link;
 };
 
 #ifdef DIRECTPATH

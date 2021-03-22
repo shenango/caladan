@@ -60,8 +60,8 @@ static const struct init_entry thread_init_handlers[] = {
 	THREAD_INITIALIZER(kthread),
 	THREAD_INITIALIZER(ioqueues),
 	THREAD_INITIALIZER(stack),
-	THREAD_INITIALIZER(timer),
 	THREAD_INITIALIZER(sched),
+	THREAD_INITIALIZER(timer),
 	THREAD_INITIALIZER(smalloc),
 
 	/* network stack */

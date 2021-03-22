@@ -88,20 +88,26 @@ static int mlx5_gather_completions(struct mbuf **mbufs, struct mlx5_txq *v, unsi
  */
 int mlx5_transmit_one(struct mbuf *m)
 {
-	int i, compl = 0;
-	struct mlx5_txq *v = container_of(myk()->directpath_txq, struct mlx5_txq, txq);
-	uint32_t idx = v->sq_head & (v->tx_qp_dv.sq.wqe_cnt - 1);
+	struct kthread *k;
+	struct mlx5_txq *v;
 	struct mbuf *mbs[SQ_CLEAN_MAX];
 	struct mlx5_wqe_ctrl_seg *ctrl;
 	struct mlx5_wqe_eth_seg *eseg;
 	struct mlx5_wqe_data_seg *dpseg;
 	void *segment;
+	uint32_t idx;
+	int i, compl = 0;
+
+	k = getk();
+	v = container_of(k->directpath_txq, struct mlx5_txq, txq);
+	idx = v->sq_head & (v->tx_qp_dv.sq.wqe_cnt - 1);
 
 	if (nr_inflight_tx(v) >= SQ_CLEAN_THRESH) {
 		compl = mlx5_gather_completions(mbs, v, SQ_CLEAN_MAX);
 		for (i = 0; i < compl; i++)
 			mbuf_free(mbs[i]);
 		if (unlikely(nr_inflight_tx(v) >= v->tx_qp_dv.sq.wqe_cnt)) {
+			putk();
 			log_warn_ratelimited("txq full");
 			return -1;
 		}
@@ -131,12 +137,13 @@ int mlx5_transmit_one(struct mbuf *m)
 	mmio_wc_start();
 	mmio_write64_be(v->tx_qp_dv.bf.reg, *(__be64 *)ctrl);
 	mmio_flush_writes();
+	putk();
 
 	return 0;
 
 }
 
-static inline void mbuf_fill_cqe(struct mbuf *m, struct mlx5_cqe64 *cqe)
+static void mbuf_fill_cqe(struct mbuf *m, struct mlx5_cqe64 *cqe)
 {
 	uint32_t len;
 
@@ -144,11 +151,9 @@ static inline void mbuf_fill_cqe(struct mbuf *m, struct mlx5_cqe64 *cqe)
 
 	mbuf_init(m, (unsigned char *)m + RX_BUF_RESERVED, len, 0);
 	m->len = len;
-
 	m->csum_type = mlx5_csum_ok(cqe);
 	m->csum = 0;
 	m->rss_hash = mlx5_get_rss_result(cqe);
-
 	m->release = directpath_rx_completion;
 }
 
