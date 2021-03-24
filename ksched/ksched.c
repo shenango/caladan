@@ -39,36 +39,6 @@
 #define CORE_PERF_GLOBAL_CTRL_ENABLE_PMC_0 (0x1)
 #define CORE_PERF_GLOBAL_CTRL_ENABLE_PMC_1 (0x2)
 
-#ifdef ZAIN_VECTOR
-#ifndef SUPPRESS_CUSTOMIZED_IPI_HANDLER
-#define OS_SUPPORT_CUSTOMIZED_IPI_HANDER
-#endif
-#endif
-
-#define MSR_APIC_BASE (0x1B)
-#define MSR_X2APIC_ICR (0x830)
-#define X2APIC_ENABLED(apic_status) (apic_status >> 10)
-#define ICR_LOGICAL_MODE (1 << 11)
-#define ICR_DEST_FIELD(x) (((unsigned long long)x) << 32)
-#define MSR_X2APIC_LDR (0x80D)
-#define X2APIC_LDR_MAX_LOGICAL_IDS (16)
-
-#ifdef OS_SUPPORT_CUSTOMIZED_IPI_HANDER
-
-/* so far only use the cores from socket 0 */
-#define FOR_ALL_CORES(i) for (i = 0; i < 48; i += 2)
-
-struct ldr_info {
-	unsigned int ldr;
-	unsigned short id;
-};
-
-static unsigned int ldrs[NR_CPUS];
-static struct ldr_info ipi_ldrs[NR_CPUS];
-int ipi_ldrs_num = 0;
-
-#endif
-
 /* the character device that provides the ksched IOCTL interface */
 static struct cdev ksched_cdev;
 
@@ -315,7 +285,7 @@ static void ksched_deliver_signal(struct ksched_percpu *p, unsigned int signum)
 		send_sig(signum, p->running_task, 0);
 }
 
-static void ipi_handler(void)
+static void ksched_ipi(void *unused)
 {
 	struct ksched_percpu *p;
 	struct ksched_shm_cpu *s;
@@ -342,84 +312,6 @@ static void ipi_handler(void)
 
 	put_cpu();
 }
-
-#ifndef OS_SUPPORT_CUSTOMIZED_IPI_HANDER
-static void ksched_ipi(void *unused)
-{
-	ipi_handler();
-}
-#else
-static inline int get_cluster_id(unsigned int ldr)
-{
-	return ldr >> X2APIC_LDR_MAX_LOGICAL_IDS;
-
-}
-
-static int compare(const void *lhs, const void *rhs) {
-        const struct ldr_info lhs_info = *(const struct ldr_info *)(lhs);
-        const struct ldr_info rhs_info = *(const struct ldr_info *)(rhs);
-
-	if (lhs_info.ldr < rhs_info.ldr) return -1;
-	if (lhs_info.ldr > rhs_info.ldr) return 1;
-	return 0;
-}
-
-static inline void write_icr_reg(unsigned int clustered_ldr)
-{
-	unsigned long long icr;
-	if (!clustered_ldr)
-		return;
-	icr = ZAIN_VECTOR | ICR_LOGICAL_MODE |
-		ICR_DEST_FIELD(clustered_ldr);
-	wrmsrl(MSR_X2APIC_ICR, icr);
-}
-
-static void send_ipi(cpumask_var_t mask)
-{		
-	unsigned int clustered_ldr = 0;
-	unsigned int cur_ldr;
-	int i;
-
-	if (cpumask_empty(mask))
-		return;
-
-	clustered_ldr = 0;
-	for (i = 0; i < ipi_ldrs_num; i++) {
-		if (!cpumask_test_cpu(ipi_ldrs[i].id, mask))
-			continue;
-		cur_ldr = ipi_ldrs[i].ldr;
-		if (!clustered_ldr ||
-		    get_cluster_id(cur_ldr) ==
-		    get_cluster_id(clustered_ldr)) {
-			clustered_ldr |= cur_ldr;
-		} else {
-			write_icr_reg(clustered_ldr);
-			clustered_ldr = cur_ldr;
-		}
-	}
-	write_icr_reg(clustered_ldr);
-}
-
-static void local_read_ldr(void *unused)
-{
-	int cpu;
-	cpu = get_cpu();
-	rdmsrl(MSR_X2APIC_LDR, ldrs[cpu]);
-	put_cpu();
-}
-
-static void prepare_ldrs(void)
-{
-	int i;
-	on_each_cpu(local_read_ldr, NULL, true);
-	FOR_ALL_CORES(i) {
-		ipi_ldrs[ipi_ldrs_num].id = i;
-		ipi_ldrs[ipi_ldrs_num].ldr = ldrs[i];
-		ipi_ldrs_num++;
-	}
-	sort(ipi_ldrs, ipi_ldrs_num, sizeof(struct ldr_info), &compare, NULL);
-}
-#endif
 
 static int get_user_cpu_mask(const unsigned long __user *user_mask_ptr,
 			     unsigned len, struct cpumask *new_mask)
@@ -452,11 +344,7 @@ static long ksched_intr(struct ksched_intr_req __user *ureq)
 		return -EFAULT;
 	}
 
-#ifdef OS_SUPPORT_CUSTOMIZED_IPI_HANDER
-        send_ipi(mask);
-#else
 	smp_call_function_many(mask, ksched_ipi, NULL, false);
-#endif
 	free_cpumask_var(mask);
 	return 0;
 }
@@ -562,15 +450,6 @@ static int __init ksched_init(void)
 	dev_t devno_ksched = MKDEV(KSCHED_MAJOR, KSCHED_MINOR);
 	int ret;
 
-#ifdef OS_SUPPORT_CUSTOMIZED_IPI_HANDER
-	int apic_status;
-	rdmsrl(MSR_APIC_BASE, apic_status);
-	if (!X2APIC_ENABLED(apic_status)) {
-		printk(KERN_ERR "ksched: X2APIC is not enabled!");
-		return -ENOTSUPP;
-	}
-#endif
-
 	if (!cpu_has(&boot_cpu_data, X86_FEATURE_MWAIT)) {
 		printk(KERN_ERR "ksched: mwait support is required");
 		return -ENOTSUPP;
@@ -598,12 +477,6 @@ static int __init ksched_init(void)
 
 	smp_call_function(ksched_init_pmc, NULL, 1);
 	printk(KERN_INFO "ksched: API V2 enabled");
-
-#ifdef OS_SUPPORT_CUSTOMIZED_IPI_HANDER
-	set_customized_ipi_handler(ipi_handler);
-	prepare_ldrs();	
-#endif
-
 	return 0;
 
 fail_hijack:
