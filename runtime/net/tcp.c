@@ -1161,7 +1161,6 @@ int tcp_shutdown(tcpconn_t *c, int how)
  */
 void tcp_abort(tcpconn_t *c)
 {
-	int i;
 	uint32_t snd_nxt;
 	struct netaddr l, r;
 
@@ -1180,15 +1179,7 @@ void tcp_abort(tcpconn_t *c)
 
 	snd_nxt = c->pcb.snd_nxt;
 	spin_unlock_np(&c->lock);
-
-	for (i = 0; i < 10; i++) {
-		if (tcp_tx_raw_rst(l, r, snd_nxt) == 0)
-			return;
-		timer_sleep(10);
-	}
-
-	log_warn("tcp: failed to transmit TCP_RST");
-
+	tcp_tx_raw_rst(l, r, snd_nxt);
 }
 
 /**
