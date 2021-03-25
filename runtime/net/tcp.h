@@ -18,6 +18,7 @@
 /* adjustable constants */
 #define TCP_MSS	(ETH_MTU - sizeof(struct ip_hdr) - sizeof(struct tcp_hdr))
 #define TCP_WIN	((65535 / TCP_MSS) * TCP_MSS)
+#define TCP_WIN_ADV_THRESH (TCP_WIN / 4)
 #define TCP_ACK_TIMEOUT (10 * ONE_MS)
 #define TCP_CONNECT_TIMEOUT (5 * ONE_SECOND) /* FIXME */
 #define TCP_OOQ_ACK_TIMEOUT (300 * ONE_MS)
@@ -96,15 +97,15 @@ struct tcpconn {
 	uint32_t		fast_retransmit_last_ack;
 
 	/* timeouts */
-	uint64_t next_timeout;
-	bool			ack_delayed;
-	bool			rcv_wnd_full;
+	uint64_t 		next_timeout;
 	uint64_t		ack_ts;
 	union {
 		uint64_t		time_wait_ts;
 		uint64_t		attach_ts;
 	};
+	bool			ack_delayed;
 	int			rep_acks;
+	int			acks_delayed_cnt;
 };
 
 extern tcpconn_t *tcp_conn_alloc(void);

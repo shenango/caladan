@@ -15,7 +15,10 @@
 #include "tcp.h"
 #include "defs.h"
 
-static void __tcp_rx_conn(tcpconn_t *c, struct mbuf *m, uint32_t ack, uint32_t snd_nxt, uint16_t win);
+#define TCP_SLOWPATH_FLAGS (TCP_FIN|TCP_RST|TCP_URG)
+
+static void __tcp_rx_conn(tcpconn_t *c, struct mbuf *m, uint32_t ack,
+			  uint32_t snd_nxt, uint16_t win);
 
 /* four cases for the acceptability test for an incoming segment */
 static bool is_acceptable(tcpconn_t *c, uint32_t len, uint32_t seq)
@@ -59,6 +62,7 @@ static void send_rst(tcpconn_t *c, bool acked, uint32_t seq, uint32_t ack,
 
 static void tcp_rx_append_text(tcpconn_t *c, struct mbuf *m)
 {
+	uint64_t nxt_wnd;
 	uint32_t len;
 
 	assert_spin_lock_held(&c->lock);
@@ -83,10 +87,9 @@ static void tcp_rx_append_text(tcpconn_t *c, struct mbuf *m)
 
 	/* enqueue the text */
 	assert(c->pcb.rcv_wnd >= m->seg_end - m->seg_seq);
-	uint64_t nxt_wnd =  (uint64_t)m->seg_end | ((uint64_t)(c->pcb.rcv_wnd - (m->seg_end - m->seg_seq)) << 32);
+	nxt_wnd = (uint64_t)m->seg_end;
+	nxt_wnd |= ((uint64_t)(c->pcb.rcv_wnd - (m->seg_end - m->seg_seq)) << 32);
 	store_release(&c->pcb.rcv_nxt_wnd, nxt_wnd);
-	if (unlikely(c->pcb.rcv_wnd <= 2))
-		c->rcv_wnd_full = true;
 	list_add_tail(&c->rxq, &m->link);
 }
 
@@ -104,8 +107,10 @@ static bool tcp_rx_text(tcpconn_t *c, struct mbuf *m, bool *wake)
 	if (wraps_lte(m->seg_seq, c->pcb.rcv_nxt)) {
 		/* we got the next in-order segment */
 		STAT(RX_TCP_IN_ORDER)++;
-		if ((m->flags & (TCP_PUSH | TCP_FIN)) > 0)
+		if ((m->flags & (TCP_PUSH | TCP_FIN)) != 0 ||
+		    !list_empty(&c->rxq)) {
 			*wake = true;
+		}
 		tcp_rx_append_text(c, m);
 	} else {
 		/* we got an out-of-order segment */
@@ -150,8 +155,7 @@ drain:
 		/* we got the next in-order segment */
 		list_del(&pos->link);
 		c->rxq_ooo_len--;
-		if ((pos->flags & (TCP_PUSH | TCP_FIN)) > 0)
-			*wake = true;
+		*wake = true;
 		tcp_rx_append_text(c, pos);
 	}
 
@@ -166,17 +170,16 @@ void tcp_rx_conn(struct trans_entry *e, struct mbuf *m)
 {
 	tcpconn_t *c = container_of(e, tcpconn_t, e);
 	struct list_head q;
-	thread_t *rx_th;
+	thread_t *rx_th = NULL;
 	const struct ip_hdr *iphdr;
 	const struct tcp_hdr *tcphdr;
 	uint64_t nxt_wnd;
 	uint32_t seq, ack, len, snd_nxt, hdr_len;
 	uint16_t win;
+	bool do_ack, slow_path;
 
 	list_head_init(&q);
 	snd_nxt = load_acquire(&c->pcb.snd_nxt);
-
-	uint64_t now = microtime();
 
 	/* find header offsets */
 	iphdr = mbuf_network_hdr(m, *iphdr);
@@ -208,22 +211,23 @@ void tcp_rx_conn(struct trans_entry *e, struct mbuf *m)
 
 	mbuf_pull(m, hdr_len - sizeof(struct tcp_hdr)); /* strip off options */
 
-	/* Use slow path if this is not an ACK|PUSH */
-	bool slow_path = (tcphdr->flags != (TCP_ACK | TCP_PUSH)) ||
-	                 (len == 0) || wraps_gt(ack, snd_nxt);
+	/* Use slow path if not regular flags and the next segment */
+	slow_path = (tcphdr->flags & TCP_SLOWPATH_FLAGS) != 0 ||
+	            (len == 0) || wraps_gt(ack, snd_nxt);
 
 	spin_lock_np(&c->lock);
 
+	/* Is the connection in the established state? */
 	slow_path |= (c->pcb.state != TCP_STATE_ESTABLISHED);
 
-	/* might we need to unblock waiting senders? */
+	/* Might we need to unblock waiting senders? */
 	slow_path |= is_snd_full(c);
 
 	/* Is the packet on the next in-order boundary? */
 	slow_path |= (seq != c->pcb.rcv_nxt) || !list_empty(&c->rxq_ooo);
 
-	/* Does it fit perfectly in the receive window?  */
-	slow_path |= wraps_lt(c->pcb.rcv_wnd, len);
+	/* Does it fit perfectly in the receive window? */
+	slow_path |= c->pcb.rcv_wnd < len;
 
 	if (unlikely(slow_path))
 		return __tcp_rx_conn(c, m, ack, snd_nxt, win);
@@ -238,7 +242,7 @@ void tcp_rx_conn(struct trans_entry *e, struct mbuf *m)
 	if (wraps_lt(c->pcb.snd_wl1, seq) ||
 	    (c->pcb.snd_wl1 == seq &&
 	     wraps_lte(c->pcb.snd_wl2, ack))) {
-		c->pcb.snd_wnd = win > 1 ? win - 2 : 0; // reserve 1 byte for FIN and one byte for the sequence number on an RST packet
+		c->pcb.snd_wnd = win;
 		c->pcb.snd_wl1 = seq;
 		c->pcb.snd_wl2 = ack;
 		c->rep_acks = 0;
@@ -248,28 +252,34 @@ void tcp_rx_conn(struct trans_entry *e, struct mbuf *m)
 	nxt_wnd |= ((uint64_t)(c->pcb.rcv_wnd - len) << 32);
 	store_release(&c->pcb.rcv_nxt_wnd, nxt_wnd);
 
-	c->rcv_wnd_full = c->pcb.rcv_wnd <= 2;
+	/* should we wake a thread */
+	if (!list_empty(&c->rxq) || (tcphdr->flags & TCP_PUSH) > 0)
+		rx_th = waitq_signal(&c->rx_wq, &c->lock);
+
+	/* handle delayed acks */
+	if (++c->acks_delayed_cnt >= 2) {
+		c->ack_delayed = false;
+		do_ack = true;
+	} else if (!c->ack_delayed) {
+		c->ack_ts = microtime();
+		c->ack_delayed = true;
+		c->next_timeout = MIN(c->next_timeout, c->ack_ts + TCP_ACK_TIMEOUT);
+	}
 
 	list_add_tail(&c->rxq, &m->link);
-	rx_th = waitq_signal(&c->rx_wq, &c->lock);
-
-	if (!c->ack_delayed)
-		c->ack_ts = now;
-
-	c->ack_delayed = true;
-
-	c->next_timeout = MIN(c->next_timeout, c->ack_ts + TCP_ACK_TIMEOUT);
-
 	tcp_debug_ingress_pkt(c, m);
 	spin_unlock_np(&c->lock);
 
 	/* deferred work (delayed until after the lock was dropped) */
 	waitq_signal_finish(rx_th);
 	mbuf_list_free(&q);
+	if (do_ack)
+		tcp_tx_ack(c);
 }
 
 /* slow path for handling ingress packets for TCP connections */
-static __noinline void __tcp_rx_conn(tcpconn_t *c, struct mbuf *m, uint32_t ack, uint32_t snd_nxt, uint16_t win)
+static __noinline void __tcp_rx_conn(tcpconn_t *c, struct mbuf *m, uint32_t ack,
+				     uint32_t snd_nxt, uint16_t win)
 {
 	struct list_head q, waiters;
 	thread_t *rx_th = NULL;
@@ -320,7 +330,7 @@ static __noinline void __tcp_rx_conn(tcpconn_t *c, struct mbuf *m, uint32_t ack,
 			}
 			if (wraps_gt(c->pcb.snd_una, c->pcb.iss)) {
 				do_ack = true;
-				c->pcb.snd_wnd = win > 1 ? win - 2 : 0; // reserve 1 byte for FIN and one byte for the sequence number on an RST packet
+				c->pcb.snd_wnd = win;
 				c->pcb.snd_wl1 = seq;
 				c->pcb.snd_wl2 = ack;
 				tcp_conn_set_state(c, TCP_STATE_ESTABLISHED);
@@ -374,7 +384,7 @@ static __noinline void __tcp_rx_conn(tcpconn_t *c, struct mbuf *m, uint32_t ack,
 			do_drop = true;
 			goto done;
 		}
-		c->pcb.snd_wnd = win > 1 ? win - 2 : 0; // reserve 1 byte for FIN and one byte for the sequence number on an RST packet
+		c->pcb.snd_wnd = win;
 		c->pcb.snd_wl1 = seq;
 		c->pcb.snd_wl2 = ack;
 		tcp_conn_set_state(c, TCP_STATE_ESTABLISHED);
@@ -416,7 +426,7 @@ static __noinline void __tcp_rx_conn(tcpconn_t *c, struct mbuf *m, uint32_t ack,
 	    (c->pcb.snd_wl1 == seq &&
 	     wraps_lte(c->pcb.snd_wl2, ack))) {
 		uint32_t old_wnd = c->pcb.snd_wnd;
-		c->pcb.snd_wnd = win > 1 ? win - 2 : 0; // reserve 1 byte for FIN and one byte for the sequence number on an RST packet
+		c->pcb.snd_wnd = win;
 		c->pcb.snd_wl1 = seq;
 		c->pcb.snd_wl2 = ack;
 		if (c->pcb.snd_wnd != old_wnd)
@@ -462,7 +472,9 @@ static __noinline void __tcp_rx_conn(tcpconn_t *c, struct mbuf *m, uint32_t ack,
 			assert(do_drop == false);
 			rx_th = waitq_signal(&c->rx_wq, &c->lock);
 		}
-		if (!c->ack_delayed) {
+		if (++c->acks_delayed_cnt >= 2) {
+			do_ack = true;
+		} else if (!c->ack_delayed) {
 			c->ack_delayed = true;
 			c->ack_ts = microtime();
 		}
@@ -487,6 +499,8 @@ static __noinline void __tcp_rx_conn(tcpconn_t *c, struct mbuf *m, uint32_t ack,
 done:
 	tcp_timer_update(c);
 	tcp_debug_ingress_pkt(c, m);
+	if (do_ack)
+		c->ack_delayed = false;
 	spin_unlock_np(&c->lock);
 
 	/* deferred work (delayed until after the lock was dropped) */

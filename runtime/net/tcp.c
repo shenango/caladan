@@ -237,10 +237,10 @@ tcpconn_t *tcp_conn_alloc(void)
 	/* timeouts */
 	c->next_timeout = -1L;
 	c->ack_delayed = false;
-	c->rcv_wnd_full = false;
 	c->ack_ts = 0;
 	c->time_wait_ts = 0;
 	c->rep_acks = 0;
+	c->acks_delayed_cnt = 0;
 
 	/* initialize egress half of PCB */
 	c->pcb.state = TCP_STATE_CLOSED;
@@ -672,6 +672,7 @@ static ssize_t tcp_read_wait(tcpconn_t *c, size_t len,
 {
 	struct mbuf *m;
 	size_t readlen = 0;
+	bool do_ack = false;
 
 	*mout = NULL;
 	spin_lock_np(&c->lock);
@@ -711,12 +712,12 @@ static ssize_t tcp_read_wait(tcpconn_t *c, size_t len,
 	}
 
 	c->pcb.rcv_wnd += readlen;
-	if (unlikely(c->rcv_wnd_full && c->pcb.rcv_wnd >= TCP_WIN / 4)) {
-		tcp_tx_ack(c);
-		c->rcv_wnd_full = false;
-	}
+	if (c->pcb.rcv_wnd >= c->tx_last_win + TCP_WIN_ADV_THRESH)
+		do_ack = true;
 	spin_unlock_np(&c->lock);
 
+	if (do_ack)
+		tcp_tx_ack(c);
 	return readlen;
 }
 
@@ -879,7 +880,7 @@ static int tcp_write_wait(tcpconn_t *c, size_t *winlen)
 	/* block until there is an actionable event */
 	while (!c->tx_closed &&
 	       (c->pcb.state < TCP_STATE_ESTABLISHED || c->tx_exclusive ||
-		wraps_lte(c->pcb.snd_una + c->pcb.snd_wnd, c->pcb.snd_nxt))) {
+		wraps_lte(c->pcb.snd_una + c->pcb.snd_wnd + 1, c->pcb.snd_nxt))) {
 		waitq_wait(&c->tx_wq, &c->lock);
 	}
 
@@ -892,8 +893,8 @@ static int tcp_write_wait(tcpconn_t *c, size_t *winlen)
 	/* drop the lock to allow concurrent RX processing */
 	c->tx_exclusive = true;
 
-	/* snd_wnd reflects 2 reserved bytes */
-	*winlen = c->pcb.snd_una + c->pcb.snd_wnd - c->pcb.snd_nxt;
+	/* an extra byte allows for window probing */
+	*winlen = c->pcb.snd_una + c->pcb.snd_wnd - c->pcb.snd_nxt + 1;
 	spin_unlock_np(&c->lock);
 
 	return 0;
@@ -956,7 +957,7 @@ ssize_t tcp_write(tcpconn_t *c, const void *buf, size_t len)
 	/* block until there is an actionable event */
 	while (!c->tx_closed &&
 	       (c->pcb.state < TCP_STATE_ESTABLISHED || c->tx_exclusive ||
-		wraps_lte(c->pcb.snd_una + c->pcb.snd_wnd, c->pcb.snd_nxt))) {
+		wraps_lte(c->pcb.snd_una + c->pcb.snd_wnd + 1, c->pcb.snd_nxt))) {
 		waitq_wait(&c->tx_wq, &c->lock);
 	}
 
@@ -966,8 +967,8 @@ ssize_t tcp_write(tcpconn_t *c, const void *buf, size_t len)
 		return c->err ? -c->err : -EPIPE;
 	}
 
-	/* snd_wnd reflects 2 reserved bytes */
-	winlen = c->pcb.snd_una + c->pcb.snd_wnd - c->pcb.snd_nxt;
+	/* an extra byte allows for window probing */
+	winlen = c->pcb.snd_una + c->pcb.snd_wnd - c->pcb.snd_nxt + 1;
 
 	/* actually send the data */
 	ret = tcp_tx_send(c, buf, MIN(len, winlen), true);
@@ -1038,7 +1039,6 @@ static void tcp_retransmit(void *arg)
 
 	tcp_conn_put(c);
 }
-
 
 /**
  * tcp_conn_fail - closes a TCP both sides of a connection with an error
