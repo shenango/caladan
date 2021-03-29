@@ -18,7 +18,8 @@ static void tcp_tx_release_mbuf(struct mbuf *m)
 		net_tx_release_mbuf(m);
 }
 
-static inline uint16_t tcp_hdr_chksum(uint32_t local_ip, uint32_t remote_ip, uint16_t len)
+static uint16_t tcp_hdr_chksum(uint32_t local_ip, uint32_t remote_ip,
+			       uint16_t len)
 {
 
 #ifdef DIRECTPATH
@@ -26,17 +27,17 @@ static inline uint16_t tcp_hdr_chksum(uint32_t local_ip, uint32_t remote_ip, uin
 		return 0;
 #endif
 
-	return ipv4_phdr_cksum(IPPROTO_TCP, local_ip, remote_ip,
-				      sizeof(struct tcp_hdr) + len);
+	return ipv4_phdr_cksum(IPPROTO_TCP, local_ip, remote_ip, len);
 }
 
-static struct tcp_hdr *
-tcp_push_tcphdr(struct mbuf *m, tcpconn_t *c, uint8_t flags, uint16_t l4len)
+static __always_inline struct tcp_hdr *
+tcp_push_tcphdr(struct mbuf *m, tcpconn_t *c, uint8_t flags,
+		uint8_t off, uint16_t l4len)
 {
 	struct tcp_hdr *tcphdr;
 	uint64_t rcv_nxt_wnd = load_acquire(&c->pcb.rcv_nxt_wnd);
 	tcp_seq ack = c->tx_last_ack = (uint32_t)rcv_nxt_wnd;
-	uint16_t win = c->tx_last_win = rcv_nxt_wnd >> 32;
+	uint32_t win = c->tx_last_win = rcv_nxt_wnd >> 32;
 
 	/* write the tcp header */
 	tcphdr = mbuf_push_hdr(m, *tcphdr);
@@ -44,11 +45,12 @@ tcp_push_tcphdr(struct mbuf *m, tcpconn_t *c, uint8_t flags, uint16_t l4len)
 	tcphdr->sport = hton16(c->e.laddr.port);
 	tcphdr->dport = hton16(c->e.raddr.port);
 	tcphdr->ack = hton32(ack);
-	tcphdr->off = 5;
+	tcphdr->off = off;
 	tcphdr->flags = flags;
-	tcphdr->win = hton16(win);
+	tcphdr->win = hton16(win >> c->pcb.rcv_wscale);
 	tcphdr->seq = hton32(m->seg_seq);
-	tcphdr->sum = tcp_hdr_chksum(c->e.laddr.ip, c->e.raddr.ip, l4len);
+	tcphdr->sum = tcp_hdr_chksum(c->e.laddr.ip, c->e.raddr.ip,
+				     off * sizeof(uint32_t) + l4len);
 	return tcphdr;
 }
 
@@ -147,7 +149,7 @@ int tcp_tx_ack(tcpconn_t *c)
 
 	m->txflags = OLFLAG_TCP_CHKSUM;
 	m->seg_seq = load_acquire(&c->pcb.snd_nxt);
-	tcp_push_tcphdr(m, c, TCP_ACK, 0);
+	tcp_push_tcphdr(m, c, TCP_ACK, 5, 0);
 
 	/* transmit packet */
 	tcp_debug_egress_pkt(c, m);
@@ -157,20 +159,44 @@ int tcp_tx_ack(tcpconn_t *c)
 	return ret;
 }
 
+static int tcp_push_options(struct mbuf *m, const struct tcp_options *opts)
+{
+	uint32_t *ptr;
+	int len = 0;
+
+	/* WARNING: the order matters, as some devices are broken */
+
+	if (opts->opt_en & TCP_OPTION_WSCALE) {
+		ptr = (uint32_t *)mbuf_push(m, sizeof(uint32_t));
+		*ptr = hton32((TCP_OPT_NOP << 24) | (TCP_OPT_WSCALE << 16) |
+			      (TCP_OLEN_WSCALE << 8) | opts->wscale);
+		len++;
+	}
+	if (opts->opt_en & TCP_OPTION_MSS) {
+		ptr = (uint32_t *)mbuf_push(m, sizeof(uint32_t));
+		*ptr = hton32((TCP_OPT_MSS << 24) | (TCP_OLEN_MSS << 16) |
+			      opts->mss);
+		len++;
+	}
+
+	return len;
+}
+
 /**
  * tcp_tx_ctl - sends a control message without data
  * @c: the TCP connection
  * @flags: the control flags (e.g. TCP_SYN, TCP_FIN, etc.)
+ * @opts: TCP options to include
  *
  * WARNING: The caller must have write exclusive access to the socket or hold
  * @c->lock while write exclusion isn't taken.
  *
  * Returns 0 if successful, -ENOMEM if out memory.
  */
-int tcp_tx_ctl(tcpconn_t *c, uint8_t flags)
+int tcp_tx_ctl(tcpconn_t *c, uint8_t flags, const struct tcp_options *opts)
 {
 	struct mbuf *m;
-	int ret;
+	int ret = 0;
 
 	BUG_ON(!c->tx_exclusive && !spin_lock_held(&c->lock));
 
@@ -182,7 +208,10 @@ int tcp_tx_ctl(tcpconn_t *c, uint8_t flags)
 	m->seg_seq = c->pcb.snd_nxt;
 	m->seg_end = c->pcb.snd_nxt + 1;
 	m->flags = flags;
-	tcp_push_tcphdr(m, c, flags, 0);
+
+	if (opts)
+		ret = tcp_push_options(m, opts);
+	tcp_push_tcphdr(m, c, flags, 5 + ret, 0);
 	store_release(&c->pcb.snd_nxt, c->pcb.snd_nxt + 1);
 	list_add_tail(&c->txq, &m->link);
 	m->timestamp = microtime();
@@ -220,6 +249,7 @@ ssize_t tcp_tx_send(tcpconn_t *c, const void *buf, size_t len, bool push)
 	const char *end = pos + len;
 	ssize_t ret = 0;
 	size_t seglen;
+	uint32_t mss = c->pcb.snd_mss;
 
 	assert(c->pcb.state >= TCP_STATE_ESTABLISHED);
 	assert((c->tx_exclusive == true) || spin_lock_held(&c->lock));
@@ -233,7 +263,7 @@ ssize_t tcp_tx_send(tcpconn_t *c, const void *buf, size_t len, bool push)
 		if (c->tx_pending) {
 			m = c->tx_pending;
 			c->tx_pending = NULL;
-			seglen = MIN(end - pos, TCP_MSS - mbuf_length(m));
+			seglen = MIN(end - pos, mss - mbuf_length(m));
 			m->seg_end += seglen;
 		} else {
 			m = net_tx_alloc_mbuf();
@@ -241,7 +271,7 @@ ssize_t tcp_tx_send(tcpconn_t *c, const void *buf, size_t len, bool push)
 				ret = -ENOBUFS;
 				break;
 			}
-			seglen = MIN(end - pos, TCP_MSS);
+			seglen = MIN(end - pos, mss);
 			m->seg_seq = c->pcb.snd_nxt;
 			m->seg_end = c->pcb.snd_nxt + seglen;
 			m->flags = TCP_ACK;
@@ -255,7 +285,7 @@ ssize_t tcp_tx_send(tcpconn_t *c, const void *buf, size_t len, bool push)
 
 		/* if not pushing, keep the last buffer for later */
 		if (!push && pos == end && mbuf_length(m) -
-		    sizeof(struct tcp_hdr) < TCP_MSS) {
+		    sizeof(struct tcp_hdr) < mss) {
 			c->tx_pending = m;
 			break;
 		}
@@ -263,7 +293,7 @@ ssize_t tcp_tx_send(tcpconn_t *c, const void *buf, size_t len, bool push)
 		/* initialize TCP header */
 		if (push && pos == end)
 			m->flags |= TCP_PUSH;
-		tcp_push_tcphdr(m, c, m->flags, m->seg_end - m->seg_seq);
+		tcp_push_tcphdr(m, c, m->flags, 5, m->seg_end - m->seg_seq);
 
 		/* transmit the packet */
 		list_add_tail(&c->txq, &m->link);
@@ -327,7 +357,7 @@ static int tcp_tx_retransmit_one(tcpconn_t *c, struct mbuf *m)
 	}
 
 	/* push the TCP header back on (now with fresher ack) */
-	tcp_push_tcphdr(m, c, m->flags, l4len);
+	tcp_push_tcphdr(m, c, m->flags, 5, l4len);
 
 	/* transmit the packet */
 	tcp_debug_egress_pkt(c, m);

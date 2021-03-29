@@ -18,7 +18,8 @@
 #define TCP_SLOWPATH_FLAGS (TCP_FIN|TCP_RST|TCP_URG)
 
 static void __tcp_rx_conn(tcpconn_t *c, struct mbuf *m, uint32_t ack,
-			  uint32_t snd_nxt, uint16_t win);
+			  uint32_t snd_nxt, uint32_t win,
+			  const unsigned char *optp, int optlen);
 
 /* four cases for the acceptability test for an incoming segment */
 static bool is_acceptable(tcpconn_t *c, uint32_t len, uint32_t seq)
@@ -173,10 +174,11 @@ void tcp_rx_conn(struct trans_entry *e, struct mbuf *m)
 	thread_t *rx_th = NULL;
 	const struct ip_hdr *iphdr;
 	const struct tcp_hdr *tcphdr;
+	const unsigned char *optp;
+	int optlen;
 	uint64_t nxt_wnd;
-	uint32_t seq, ack, len, snd_nxt, hdr_len;
-	uint16_t win;
-	bool do_ack, slow_path;
+	uint32_t seq, ack, len, snd_nxt, hdr_len, win;
+	bool do_ack = false, slow_path;
 
 	list_head_init(&q);
 	snd_nxt = load_acquire(&c->pcb.snd_nxt);
@@ -193,14 +195,14 @@ void tcp_rx_conn(struct trans_entry *e, struct mbuf *m)
 	/* parse header */
 	seq = ntoh32(tcphdr->seq);
 	ack = ntoh32(tcphdr->ack);
-	win = ntoh16(tcphdr->win);
-	hdr_len = tcphdr->off * 4;
+	win = (uint32_t)ntoh16(tcphdr->win) << c->pcb.snd_wscale;
+	hdr_len = tcphdr->off * sizeof(uint32_t);
 	if (unlikely(hdr_len < sizeof(struct tcp_hdr))) {
 		mbuf_free(m);
 		return;
 	}
 	len = ntoh16(iphdr->len) - sizeof(*iphdr) - hdr_len;
-	if (unlikely(len > mbuf_length(m))) {
+	if (unlikely(len > mbuf_length(m) || len > c->pcb.rcv_mss)) {
 		mbuf_free(m);
 		return;
 	}
@@ -209,7 +211,9 @@ void tcp_rx_conn(struct trans_entry *e, struct mbuf *m)
 	m->seg_end = seq + len;
 	m->flags = tcphdr->flags;
 
-	mbuf_pull(m, hdr_len - sizeof(struct tcp_hdr)); /* strip off options */
+	/* pull off options */
+	optlen = hdr_len - sizeof(struct tcp_hdr);
+	optp = mbuf_pull(m, optlen);
 
 	/* Use slow path if not regular flags and the next segment */
 	slow_path = (tcphdr->flags & TCP_SLOWPATH_FLAGS) != 0 ||
@@ -230,7 +234,7 @@ void tcp_rx_conn(struct trans_entry *e, struct mbuf *m)
 	slow_path |= c->pcb.rcv_wnd < len;
 
 	if (unlikely(slow_path))
-		return __tcp_rx_conn(c, m, ack, snd_nxt, win);
+		return __tcp_rx_conn(c, m, ack, snd_nxt, win, optp, optlen);
 
 	STAT(RX_TCP_IN_ORDER)++;
 
@@ -260,6 +264,7 @@ void tcp_rx_conn(struct trans_entry *e, struct mbuf *m)
 	if (++c->acks_delayed_cnt >= 2) {
 		c->ack_delayed = false;
 		do_ack = true;
+		c->acks_delayed_cnt = 0;
 	} else if (!c->ack_delayed) {
 		c->ack_ts = microtime();
 		c->ack_delayed = true;
@@ -277,9 +282,62 @@ void tcp_rx_conn(struct trans_entry *e, struct mbuf *m)
 		tcp_tx_ack(c);
 }
 
+static int tcp_parse_options(tcpconn_t *c, const unsigned char *ptr, int len)
+{
+	int opt_en = 0;
+	uint16_t mss = 0;
+	uint8_t wscale = 0;
+
+	while (len > 0) {
+		int opcode = *ptr++;
+		int opsize;
+
+		switch(opcode) {
+		case TCP_OPT_EOL:
+			goto done;
+		case TCP_OPT_NOP:
+			len--;
+			continue;
+		case TCP_OPT_MSS:
+			opsize = *ptr++;
+			if (opsize == TCP_OLEN_MSS) {
+				mss = ntoh16(*(uint16_t *)ptr);
+				opt_en |= TCP_OPTION_MSS;
+			}
+			break;
+		case TCP_OPT_WSCALE:
+			opsize = *ptr++;
+			if (opsize == TCP_OLEN_WSCALE) {
+				wscale = *(uint8_t *)ptr;
+				if (wscale > 14)
+					wscale = 14;
+				opt_en |= TCP_OPTION_WSCALE;
+			}
+			break;
+		default:
+			opsize = *ptr++;
+		}
+		ptr += opsize-2;
+		len -= opsize;
+	}
+
+done:
+	c->pcb.snd_mss = MAX(mss, TCP_MIN_MSS);
+	c->pcb.snd_wscale = wscale;
+	if (!(opt_en & TCP_OPTION_WSCALE)) {
+		c->pcb.rcv_wnd = c->winmax = UINT16_MAX;
+		c->pcb.rcv_wscale = 0;
+	}
+	if (!(opt_en & TCP_OPTION_MSS)) {
+		c->pcb.snd_mss = TCP_DEFAULT_MSS;
+	}
+	return opt_en;
+}
+
 /* slow path for handling ingress packets for TCP connections */
-static __noinline void __tcp_rx_conn(tcpconn_t *c, struct mbuf *m, uint32_t ack,
-				     uint32_t snd_nxt, uint16_t win)
+static __noinline void
+__tcp_rx_conn(tcpconn_t *c, struct mbuf *m, uint32_t ack, uint32_t snd_nxt,
+	      uint32_t win, const unsigned char *optp, int optlen)
 {
 	struct list_head q, waiters;
 	thread_t *rx_th = NULL;
@@ -322,8 +380,15 @@ static __noinline void __tcp_rx_conn(tcpconn_t *c, struct mbuf *m, uint32_t ack,
 			goto done;
 		}
 		if ((m->flags & TCP_SYN) > 0) {
+			struct tcp_options opts;
 			c->pcb.rcv_nxt = seq + 1;
 			c->pcb.irs = seq;
+
+			/* set up options */
+			opts.opt_en = tcp_parse_options(c, optp, optlen);
+			opts.mss = c->pcb.rcv_mss;
+			opts.wscale = c->pcb.rcv_wscale;
+
 			if ((m->flags & TCP_ACK) > 0) {
 				c->pcb.snd_una = ack;
 				tcp_conn_ack(c, &q);
@@ -335,7 +400,7 @@ static __noinline void __tcp_rx_conn(tcpconn_t *c, struct mbuf *m, uint32_t ack,
 				c->pcb.snd_wl2 = ack;
 				tcp_conn_set_state(c, TCP_STATE_ESTABLISHED);
 			} else {
-				ret = tcp_tx_ctl(c, TCP_SYN | TCP_ACK);
+				ret = tcp_tx_ctl(c, TCP_SYN | TCP_ACK, &opts);
 				if (unlikely(ret)) {
 					goto done; /* feign packet loss */
 				}
@@ -499,8 +564,10 @@ static __noinline void __tcp_rx_conn(tcpconn_t *c, struct mbuf *m, uint32_t ack,
 done:
 	tcp_timer_update(c);
 	tcp_debug_ingress_pkt(c, m);
-	if (do_ack)
+	if (do_ack) {
 		c->ack_delayed = false;
+		c->acks_delayed_cnt = 0;
+	}
 	spin_unlock_np(&c->lock);
 
 	/* deferred work (delayed until after the lock was dropped) */
@@ -521,8 +588,11 @@ tcpconn_t *tcp_rx_listener(struct netaddr laddr, struct mbuf *m)
 	struct netaddr raddr;
 	const struct ip_hdr *iphdr;
 	const struct tcp_hdr *tcphdr;
+	const unsigned char *optp;
 	tcpconn_t *c;
-	int ret;
+	struct tcp_options opts;
+	uint32_t hdr_len;
+	int optlen, ret;
 
 	/* find header offsets */
 	iphdr = mbuf_network_hdr(m, *iphdr);
@@ -545,7 +615,14 @@ tcpconn_t *tcp_rx_listener(struct netaddr laddr, struct mbuf *m)
 		return NULL;
 
 	/* TODO: the spec requires us to enqueue but not post any data */
-	if (ntoh16(iphdr->len) - sizeof(*iphdr) != tcphdr->off * 4)
+	hdr_len = tcphdr->off * sizeof(uint32_t);
+	if (ntoh16(iphdr->len) - sizeof(*iphdr) != hdr_len)
+		return NULL;
+
+	/* parse options */
+	optlen = hdr_len - sizeof(struct tcp_hdr);
+	optp = mbuf_pull_or_null(m, optlen);
+	if (!optp)
 		return NULL;
 
 	/* we have a valid SYN packet, initialize a new connection */
@@ -554,6 +631,11 @@ tcpconn_t *tcp_rx_listener(struct netaddr laddr, struct mbuf *m)
 		return NULL;
 	c->pcb.irs = ntoh32(tcphdr->seq);
 	c->pcb.rcv_nxt = c->pcb.irs + 1;
+
+	/* set up options */
+	opts.opt_en = tcp_parse_options(c, optp, optlen);
+	opts.mss = c->pcb.rcv_mss;
+	opts.wscale = c->pcb.rcv_wscale;
 
 	/*
 	 * attach the connection to the transport layer. From this point onward
@@ -568,7 +650,7 @@ tcpconn_t *tcp_rx_listener(struct netaddr laddr, struct mbuf *m)
 
 	/* finally, send a SYN/ACK to the remote host */
 	spin_lock_np(&c->lock);
-	ret = tcp_tx_ctl(c, TCP_SYN | TCP_ACK);
+	ret = tcp_tx_ctl(c, TCP_SYN | TCP_ACK, &opts);
 	if (unlikely(ret)) {
 		spin_unlock_np(&c->lock);
 		tcp_conn_destroy(c);

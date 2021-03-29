@@ -44,3 +44,14 @@ struct tcp_hdr {
 	uint16_t	sum;		/* checksum */
 	uint16_t	urp;		/* urgent pointer */
 };
+
+/*
+ * TCP options.
+ */
+#define TCP_OPT_EOL	0 /* end of options */
+#define TCP_OPT_NOP	1 /* used for padding */
+#define TCP_OPT_MSS	2 /* maximum segment size negotiation */
+#define TCP_OPT_WSCALE	3 /* window scaling factor */
+
+#define TCP_OLEN_MSS	4
+#define TCP_OLEN_WSCALE	3

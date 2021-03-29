@@ -197,6 +197,18 @@ static const struct trans_ops tcp_conn_ops = {
  * Connection initialization
  */
 
+static uint32_t tcp_scale_window(uint32_t maxwin)
+{
+	uint32_t wscale = 0;
+
+	while (maxwin > UINT16_MAX && wscale < 14) {
+		maxwin >>= 1;
+		wscale++;
+	}
+
+	return wscale;
+}
+
 /**
  * tcp_conn_alloc - allocates a TCP connection struct
  *
@@ -242,12 +254,17 @@ tcpconn_t *tcp_conn_alloc(void)
 	c->rep_acks = 0;
 	c->acks_delayed_cnt = 0;
 
-	/* initialize egress half of PCB */
+	/* initialize egress PCB */
 	c->pcb.state = TCP_STATE_CLOSED;
 	c->pcb.iss = rand_crc32c(0x12345678); /* TODO: not enough */
 	c->pcb.snd_nxt = c->pcb.iss;
 	c->pcb.snd_una = c->pcb.iss;
+
+	/* initialize ingress PCB */
+	c->winmax = TCP_WIN;
+	c->pcb.rcv_wscale = tcp_scale_window(TCP_WIN);
 	c->pcb.rcv_wnd = TCP_WIN;
+	c->pcb.rcv_mss = TCP_DEFAULT_MSS;
 
 	return c;
 }
@@ -544,6 +561,7 @@ void tcp_qclose(tcpqueue_t *q)
  */
 int tcp_dial(struct netaddr laddr, struct netaddr raddr, tcpconn_t **c_out)
 {
+	struct tcp_options opts;
 	tcpconn_t *c;
 	int ret;
 
@@ -562,9 +580,13 @@ int tcp_dial(struct netaddr laddr, struct netaddr raddr, tcpconn_t **c_out)
 		return ret;
 	}
 
+	opts.opt_en = (TCP_OPTION_MSS | TCP_OPTION_WSCALE);
+	opts.mss = c->pcb.rcv_mss;
+	opts.wscale = c->pcb.rcv_wscale;
+
 	/* send a SYN to the remote host */
 	spin_lock_np(&c->lock);
-	ret = tcp_tx_ctl(c, TCP_SYN);
+	ret = tcp_tx_ctl(c, TCP_SYN, &opts);
 	if (unlikely(ret)) {
 		spin_unlock_np(&c->lock);
 		tcp_conn_destroy(c);
@@ -712,7 +734,7 @@ static ssize_t tcp_read_wait(tcpconn_t *c, size_t len,
 	}
 
 	c->pcb.rcv_wnd += readlen;
-	if (c->pcb.rcv_wnd >= c->tx_last_win + TCP_WIN_ADV_THRESH)
+	if (c->pcb.rcv_wnd >= c->tx_last_win + c->winmax / 4)
 		do_ack = true;
 	spin_unlock_np(&c->lock);
 
@@ -895,6 +917,8 @@ static int tcp_write_wait(tcpconn_t *c, size_t *winlen)
 
 	/* an extra byte allows for window probing */
 	*winlen = c->pcb.snd_una + c->pcb.snd_wnd - c->pcb.snd_nxt + 1;
+	c->acks_delayed_cnt = 0;
+	c->ack_delayed = false;
 	spin_unlock_np(&c->lock);
 
 	return 0;
@@ -1092,7 +1116,7 @@ static int tcp_conn_shutdown_tx(tcpconn_t *c)
 	assert(c->pcb.state >= TCP_STATE_ESTABLISHED);
 	while (c->tx_exclusive)
 		waitq_wait(&c->tx_wq, &c->lock);
-	ret = tcp_tx_ctl(c, TCP_FIN | TCP_ACK);
+	ret = tcp_tx_ctl(c, TCP_FIN | TCP_ACK, NULL);
 	if (unlikely(ret))
 		return ret;
 	if (c->pcb.state == TCP_STATE_ESTABLISHED)
