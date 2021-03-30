@@ -32,8 +32,7 @@
 /* the egress buffer pool must be large enough to fill all the TXQs entirely */
 static unsigned int calculate_egress_pool_size(void)
 {
-	unsigned int buflen = align_up(net_get_mtu() + MBUF_HEAD_LEN + MBUF_DEFAULT_HEADROOM,
-				       CACHE_LINE_SIZE * 2);
+	unsigned int buflen = MBUF_DEFAULT_LEN;
 	return align_up(PACKET_QUEUE_MCOUNT *
 			buflen * MAX(1, guaranteedks) * 8UL,
 			PGSIZE_2MB);
@@ -106,7 +105,7 @@ static size_t estimate_shm_space(void)
 #ifdef DIRECTPATH
 	// mlx5 directpath
 	if (cfg_directpath_enabled)
-		ret += PGSIZE_2MB;
+		ret += PGSIZE_2MB * 4;
 #endif
 
 #ifdef DIRECT_STORAGE

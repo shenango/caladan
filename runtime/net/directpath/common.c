@@ -42,8 +42,9 @@ REGISTER_CFG(directpath_pci_handler);
 
 size_t directpath_rx_buf_pool_sz(unsigned int nrqs)
 {
-	return align_up(MAX(8, guaranteedks) * (16 * RQ_NUM_DESC) * 16UL * MBUF_DEFAULT_LEN,
-			PGSIZE_2MB);
+	size_t buflen = MBUF_DEFAULT_LEN;
+	buflen *= MAX(8, guaranteedks) * (16 * RQ_NUM_DESC) * 2UL;
+	return align_up(buflen, PGSIZE_2MB);
 }
 
 void directpath_rx_completion(struct mbuf *m)

@@ -9,7 +9,7 @@
 #include "../defs.h"
 
 
-#define RQ_NUM_DESC			128
+#define RQ_NUM_DESC			1024
 #define SQ_NUM_DESC			128
 
 #define SQ_CLEAN_THRESH			RUNTIME_RX_BATCH_SIZE

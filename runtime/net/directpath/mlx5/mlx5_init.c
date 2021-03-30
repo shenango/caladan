@@ -231,7 +231,7 @@ static int mlx5_create_rxq(int index, struct mlx5_rxq *v)
 	struct mlx5dv_rwq *wq = &v->rx_wq_dv;
 	for (i = 0; i < wq->wqe_cnt; i++) {
 		struct mlx5_wqe_data_seg *seg = wq->buf + i * wq->stride;
-		seg->byte_count =  htobe32(mbuf_get_mtu() + RX_BUF_TAIL);
+		seg->byte_count =  htobe32(net_get_mtu() + RX_BUF_TAIL);
 		seg->lkey = htobe32(mr_rx->lkey);
 
 		/* fill queue with buffers */
