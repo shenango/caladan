@@ -558,6 +558,16 @@ static inline size_t directpath_rx_buf_pool_sz(unsigned int nrqs)
 
 #endif
 
+extern unsigned int eth_mtu;
+
+/**
+ * net_get_mtu - gets the ethernet MTU (maximum transmission unit)
+ */
+static inline unsigned int net_get_mtu(void)
+{
+	return eth_mtu;
+}
+
 
 /*
  * Runtime configuration infrastructure

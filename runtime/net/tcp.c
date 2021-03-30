@@ -264,7 +264,7 @@ tcpconn_t *tcp_conn_alloc(void)
 	c->winmax = TCP_WIN;
 	c->pcb.rcv_wscale = tcp_scale_window(TCP_WIN);
 	c->pcb.rcv_wnd = TCP_WIN;
-	c->pcb.rcv_mss = TCP_DEFAULT_MSS;
+	c->pcb.rcv_mss = tcp_calculate_mss(net_get_mtu());
 
 	return c;
 }

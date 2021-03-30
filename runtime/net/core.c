@@ -21,13 +21,12 @@
 /* important global state */
 struct net_cfg netcfg __aligned(CACHE_LINE_SIZE);
 struct net_driver_ops net_ops;
+unsigned int eth_mtu = ETH_DEFAULT_MTU;
 
 /* TX buffer allocation */
 struct mempool net_tx_buf_mp;
 static struct tcache *net_tx_buf_tcache;
 static DEFINE_PERTHREAD(struct tcache_perthread, net_tx_buf_pt);
-
-#define MBUF_RESERVED (align_up(sizeof(struct mbuf), CACHE_LINE_SIZE))
 
 
 /*
@@ -83,16 +82,16 @@ static struct mbuf *net_rx_alloc_mbuf(struct rx_net_hdr *hdr)
 	void *buf;
 
 	/* allocate the buffer to store the payload */
-	m = smalloc(hdr->len + MBUF_RESERVED);
+	m = smalloc(hdr->len + MBUF_HEAD_LEN);
 	if (unlikely(!m))
 		goto out;
 
-	buf = (unsigned char *)m + MBUF_RESERVED;
+	buf = (unsigned char *)m + MBUF_HEAD_LEN;
 
 	/* copy the payload and release the buffer back to the iokernel */
 	memcpy(buf, hdr->payload, hdr->len);
 
-	mbuf_init(m, buf, MBUF_DEFAULT_LEN - MBUF_RESERVED, 0);
+	mbuf_init(m, buf, hdr->len, 0);
 	m->len = hdr->len;
 	m->csum_type = hdr->csum_type;
 	m->csum = hdr->csum;
@@ -312,10 +311,9 @@ struct mbuf *net_tx_alloc_mbuf(void)
 
 	preempt_enable();
 
-	buf = (unsigned char *)m + MBUF_RESERVED;
+	buf = (unsigned char *)m + MBUF_HEAD_LEN;
 
-	mbuf_init(m, buf, MBUF_DEFAULT_LEN - MBUF_RESERVED,
-		  MBUF_DEFAULT_HEADROOM);
+	mbuf_init(m, buf, net_get_mtu(), MBUF_DEFAULT_HEADROOM);
 	m->csum_type = CHECKSUM_TYPE_NEEDED;
 	m->txflags = 0;
 	m->release_data = 0;
@@ -592,6 +590,7 @@ static void net_dump_config(void)
 	log_info("  mac:\t%02X:%02X:%02X:%02X:%02X:%02X",
 		 netcfg.mac.addr[0], netcfg.mac.addr[1], netcfg.mac.addr[2],
 		 netcfg.mac.addr[3], netcfg.mac.addr[4], netcfg.mac.addr[5]);
+	log_info("  mtu:\t%d", net_get_mtu());
 }
 
 static int steer_flows_iokernel(unsigned int *new_fg_assignment)
@@ -628,8 +627,9 @@ int net_init(void)
 {
 	int ret;
 
-	ret = mempool_create(&net_tx_buf_mp, iok.tx_buf, iok.tx_len,
-			     PGSIZE_2MB, MBUF_DEFAULT_LEN);
+	ret = mempool_create(&net_tx_buf_mp, iok.tx_buf, iok.tx_len, PGSIZE_2MB,
+			     align_up(net_get_mtu() + MBUF_HEAD_LEN + MBUF_DEFAULT_HEADROOM,
+				      CACHE_LINE_SIZE * 2));
 	if (ret)
 		return ret;
 

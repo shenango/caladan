@@ -39,6 +39,9 @@ void net_rx_batch(struct mbuf **ms, unsigned int nr);
  * TX Networking Functions
  */
 
+/* the size of the region before a buffer to store struct mbuf */
+#define MBUF_HEAD_LEN (align_up(sizeof(struct mbuf), CACHE_LINE_SIZE))
+
 extern int arp_lookup(uint32_t daddr, struct eth_addr *dhost_out,
 		      struct mbuf *m) __must_use_return;
 extern struct mbuf *net_tx_alloc_mbuf(void);

@@ -329,7 +329,7 @@ done:
 		c->pcb.rcv_wscale = 0;
 	}
 	if (!(opt_en & TCP_OPTION_MSS)) {
-		c->pcb.snd_mss = TCP_DEFAULT_MSS;
+		c->pcb.snd_mss = tcp_calculate_mss(ETH_DEFAULT_MTU);
 	}
 	return opt_en;
 }

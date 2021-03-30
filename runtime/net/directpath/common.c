@@ -64,8 +64,8 @@ static int rx_memory_init(void)
 	if (rx_buf == MAP_FAILED)
 		return -ENOMEM;
 
-	ret = mempool_create(&directpath_buf_mp, rx_buf, rx_len,
-			     PGSIZE_2MB, MBUF_DEFAULT_LEN);
+	ret = mempool_create(&directpath_buf_mp, rx_buf, rx_len, PGSIZE_2MB,
+			     directpath_get_buf_size());
 	if (ret)
 		return ret;
 

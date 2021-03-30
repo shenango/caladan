@@ -15,8 +15,17 @@
 #define SQ_CLEAN_THRESH			RUNTIME_RX_BATCH_SIZE
 #define SQ_CLEAN_MAX			SQ_CLEAN_THRESH
 
-#define RX_BUF_RESERVED \
+/* space for the mbuf struct */
+#define RX_BUF_HEAD \
  (align_up(sizeof(struct mbuf), 2 * CACHE_LINE_SIZE))
+/* some NICs expect enough padding for CRC etc., even if they strip it */
+#define RX_BUF_TAIL			64
+
+static inline unsigned int directpath_get_buf_size(void)
+{
+	return align_up(net_get_mtu() + RX_BUF_HEAD + RX_BUF_TAIL,
+			2 * CACHE_LINE_SIZE);
+}
 
 extern struct pci_addr nic_pci_addr;
 extern bool cfg_pci_addr_specified;

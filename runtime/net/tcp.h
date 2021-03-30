@@ -16,8 +16,6 @@
 #include "waitq.h"
 
 /* adjustable constants */
-#define TCP_DEFAULT_MSS		(ETH_MTU - sizeof(struct ip_hdr) \
-				 - sizeof(struct tcp_hdr))
 #define TCP_MIN_MSS		88
 #define TCP_WIN			0x1FFFF
 #define TCP_ACK_TIMEOUT		(10 * ONE_MS)
@@ -28,6 +26,15 @@
 #define TCP_FAST_RETRANSMIT_THRESH 3
 #define TCP_OOO_MAX_SIZE	2048
 #define TCP_RETRANSMIT_BATCH	16
+
+/**
+ * tcp_calculate_mss - given an ethernet MTU, returns the TCP MSS
+ * @mtu: the ethernet mtu
+ */
+static inline unsigned int tcp_calculate_mss(unsigned int mtu)
+{
+	return mtu - sizeof(struct ip_hdr) - sizeof(struct tcp_hdr);
+}
 
 /* connecion states (RFC 793 Section 3.2) */
 enum {
