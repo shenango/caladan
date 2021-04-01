@@ -267,6 +267,7 @@ static inline bool hardware_q_pending(struct hardware_q *q)
 #ifdef DIRECT_STORAGE
 
 extern bool cfg_storage_enabled;
+extern unsigned long storage_device_latency_us;
 
 struct storage_q {
 
@@ -285,11 +286,22 @@ static inline bool storage_available_completions(struct storage_q *q)
 	return cfg_storage_enabled && hardware_q_pending(&q->hq);
 }
 
+static inline bool storage_pending_completions(struct storage_q *q)
+{
+	return cfg_storage_enabled && q->outstanding_reqs > 0 &&
+	       storage_device_latency_us <= 10;
+}
+
 #else
 
 struct storage_q {};
 
 static inline bool storage_available_completions(struct storage_q *q)
+{
+	return false;
+}
+
+static inline bool storage_pending_completions(struct storage_q *q)
 {
 	return false;
 }

@@ -327,12 +327,12 @@ static int parse_enable_directpath(const char *name, const char *val)
 static int parse_enable_gc(const char *name, const char *val)
 {
 #ifdef GC
-        cfg_gc_enabled = true;
-        return 0;
+	panic("GC support is currently broken");
+	cfg_gc_enabled = true;
+	return 0;
 #else
-        log_err("cfg: cannot enable GC, "
-                "please recompile with GC support");
-        return -EINVAL;
+	log_err("cfg: cannot enable GC, please recompile with GC support");
+	return -EINVAL;
 #endif
 }
 

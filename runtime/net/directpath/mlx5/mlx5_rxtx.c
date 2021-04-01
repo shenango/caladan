@@ -18,7 +18,7 @@
  * WARNING: nrdesc must not exceed the number of free slots in the RXq
  * returns 0 on success, errno on error
  */
-static inline int mlx5_refill_rxqueue(struct mlx5_rxq *vq, int nrdesc)
+static int mlx5_refill_rxqueue(struct mlx5_rxq *vq, int nrdesc)
 {
 	unsigned int i;
 	uint32_t index;
@@ -29,10 +29,14 @@ static inline int mlx5_refill_rxqueue(struct mlx5_rxq *vq, int nrdesc)
 
 	assert(wraps_lte(nrdesc + vq->wq_head, vq->consumer_idx + wq->wqe_cnt));
 
+	preempt_disable();
+
 	for (i = 0; i < nrdesc; i++) {
 		buf = tcache_alloc(&perthread_get(directpath_buf_pt));
-		if (unlikely(!buf))
+		if (unlikely(!buf)) {
+			preempt_enable();
 			return -ENOMEM;
+		}
 
 		index = vq->wq_head++ & (wq->wqe_cnt - 1);
 		seg = wq->buf + (index << vq->rx_wq_log_stride);
@@ -42,6 +46,8 @@ static inline int mlx5_refill_rxqueue(struct mlx5_rxq *vq, int nrdesc)
 
 	udma_to_device_barrier();
 	wq->dbrec[0] = htobe32(vq->wq_head & 0xffff);
+
+	preempt_enable();
 
 	return 0;
 

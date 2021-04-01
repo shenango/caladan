@@ -376,7 +376,8 @@ again:
 	/* keep trying to find work until the polling timeout expires */
 	if (!preempt_cede_needed() &&
 	    (++iters < RUNTIME_SCHED_POLL_ITERS ||
-	     rdtsc() - start_tsc < cycles_per_us * RUNTIME_SCHED_MIN_POLL_US)) {
+	     rdtsc() - start_tsc < cycles_per_us * RUNTIME_SCHED_MIN_POLL_US ||
+	     storage_pending_completions(&l->storage_q))) {
 		goto again;
 	}
 
@@ -686,6 +687,7 @@ static void thread_finish_cede(void)
 	struct kthread *k = myk();
 	thread_t *th, *myth = thread_self();
 
+	myth->thread_running = false;
 	myth->last_cpu = k->curr_cpu;
 	__self = NULL;
 

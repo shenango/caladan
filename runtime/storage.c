@@ -23,6 +23,7 @@ struct iovec;
 
 #include "defs.h"
 
+unsigned long storage_device_latency_us = 100;
 bool cfg_storage_enabled;
 
 static struct spdk_nvme_ctrlr *controller;
@@ -34,6 +35,16 @@ static struct spdk_nvme_ns *spdk_namespace;
 struct mempool storage_buf_mp;
 static struct tcache *storage_buf_tcache;
 static DEFINE_PERTHREAD(struct tcache_perthread, storage_buf_pt);
+
+struct nvme_device {
+	const char *name;
+	unsigned long latency_us;
+} known_devices[1] = {
+	{
+		.name = "INTEL SSDPED1D280GA",
+		.latency_us = 10,
+	}
+};
 
 static void seq_complete(void *arg, const struct spdk_nvme_cpl *completion)
 {
@@ -60,7 +71,8 @@ static void attach_cb(void *cb_ctx, const struct spdk_nvme_transport_id *trid,
 		      struct spdk_nvme_ctrlr *ctrlr,
 		      const struct spdk_nvme_ctrlr_opts *opts)
 {
-	int num_ns;
+	int i, num_ns;
+	const struct spdk_nvme_ctrlr_data *ctrlr_data;
 
 	num_ns = spdk_nvme_ctrlr_get_num_ns(ctrlr);
 	if (num_ns > 1) {
@@ -72,9 +84,21 @@ static void attach_cb(void *cb_ctx, const struct spdk_nvme_transport_id *trid,
 		exit(1);
 	}
 	controller = ctrlr;
+	ctrlr_data = spdk_nvme_ctrlr_get_data(ctrlr);
 	spdk_namespace = spdk_nvme_ctrlr_get_ns(ctrlr, 1);
 	block_size = spdk_nvme_ns_get_sector_size(spdk_namespace);
 	num_blocks = spdk_nvme_ns_get_num_sectors(spdk_namespace);
+
+	for (i = 0; i < ARRAY_SIZE(known_devices); i++) {
+		if (!strncmp((char *)ctrlr_data->mn, known_devices[i].name,
+			           strlen(known_devices[i].name))) {
+			log_info("storage: recognized device %s", known_devices[i].name);
+			storage_device_latency_us = known_devices[i].latency_us;
+			break;
+		}
+	}
+
+
 }
 
 /**
@@ -208,7 +232,7 @@ static int storage_softirq_one(struct storage_q *q)
 
 	assert_spin_lock_held(&q->lock);
 
-	ret = spdk_nvme_qpair_process_completions(q->spdk_qp_handle, 4);
+	ret = spdk_nvme_qpair_process_completions(q->spdk_qp_handle, RUNTIME_RX_BATCH_SIZE);
 	q->outstanding_reqs -= ret;
 	return ret;
 }
@@ -258,6 +282,7 @@ int storage_init_thread(void)
 	if (!th)
 		return -ENOMEM;
 
+	k->storage_softirq = th;
 	spdk_nvme_ctrlr_get_default_io_qpair_opts(controller, &opts, sizeof(opts));
 	max_xfer_size = spdk_nvme_ns_get_max_io_xfer_size(spdk_namespace);
 	entries = (4096 - 1) / max_xfer_size + 2;
