@@ -133,9 +133,9 @@ void dataplane_loop(void)
 static void print_usage(void)
 {
 	printf("usage: POLICY [noht/core_list/nobw/mutualpair]\n");
-	printf("\tsimple: the standard, basic scheduler policy\n");
-	printf("\tias: a policy aware of CPU interference\n");
-	printf("\tnuma: a policy aware of NUMA architectures\n");
+	printf("\tsimple: a simplified scheduler policy intended for testing\n");
+	printf("\tias: the Caladan scheduler policy (manages CPU interference)\n");
+	printf("\tnuma: an incomplete and experimental policy for NUMA architectures\n");
 }
 
 int main(int argc, char *argv[])
