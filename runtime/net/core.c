@@ -308,11 +308,9 @@ struct mbuf *net_tx_alloc_mbuf(void)
 		log_warn_ratelimited("net: out of tx buffers");
 		return NULL;
 	}
-
 	preempt_enable();
 
 	buf = (unsigned char *)m + MBUF_HEAD_LEN;
-
 	mbuf_init(m, buf, net_get_mtu(), MBUF_DEFAULT_HEADROOM);
 	m->csum_type = CHECKSUM_TYPE_NEEDED;
 	m->txflags = 0;
@@ -587,10 +585,10 @@ static void net_dump_config(void)
 	log_info("  addr:\t%s", ip_addr_to_str(netcfg.addr, buf));
 	log_info("  netmask:\t%s", ip_addr_to_str(netcfg.netmask, buf));
 	log_info("  gateway:\t%s", ip_addr_to_str(netcfg.gateway, buf));
-	log_info("  mac:\t%02X:%02X:%02X:%02X:%02X:%02X",
+	log_info("  mac:\t\t%02X:%02X:%02X:%02X:%02X:%02X",
 		 netcfg.mac.addr[0], netcfg.mac.addr[1], netcfg.mac.addr[2],
 		 netcfg.mac.addr[3], netcfg.mac.addr[4], netcfg.mac.addr[5]);
-	log_info("  mtu:\t%d", net_get_mtu());
+	log_info("  mtu:\t\t%d", net_get_mtu());
 }
 
 static int steer_flows_iokernel(unsigned int *new_fg_assignment)
