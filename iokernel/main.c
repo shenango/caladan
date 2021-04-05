@@ -159,7 +159,7 @@ int main(int argc, char *argv[])
 			return -EINVAL;
 		}
 	} else {
-		sched_ops = &simple_ops;
+		sched_ops = &ias_ops;
 	}
 
 	for (i = 2; i < argc; i++) {
