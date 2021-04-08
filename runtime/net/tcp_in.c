@@ -95,7 +95,7 @@ static void tcp_rx_append_text(tcpconn_t *c, struct mbuf *m)
 }
 
 /* process RX text segments, returning true if @m is used for text */
-static bool tcp_rx_text(tcpconn_t *c, struct mbuf *m, bool *wake)
+static bool tcp_rx_text(tcpconn_t *c, struct mbuf *m, bool *wake, bool *fin)
 {
 	struct mbuf *pos;
 
@@ -111,6 +111,7 @@ static bool tcp_rx_text(tcpconn_t *c, struct mbuf *m, bool *wake)
 		if ((m->flags & (TCP_PUSH | TCP_FIN)) != 0 ||
 		    !list_empty(&c->rxq)) {
 			*wake = true;
+			*fin |= (m->flags & TCP_FIN) > 0;
 		}
 		tcp_rx_append_text(c, m);
 	} else {
@@ -157,6 +158,7 @@ drain:
 		list_del(&pos->link);
 		c->rxq_ooo_len--;
 		*wake = true;
+		*fin |= (pos->flags & TCP_FIN) > 0;
 		tcp_rx_append_text(c, pos);
 	}
 
@@ -343,7 +345,7 @@ __tcp_rx_conn(tcpconn_t *c, struct mbuf *m, uint32_t ack, uint32_t snd_nxt,
 	thread_t *rx_th = NULL;
 	struct mbuf *retransmit = NULL;
 	uint32_t seq, len;
-	bool do_ack = false, do_drop = true;
+	bool do_ack = false, do_drop = true, fin = false;
 	int ret;
 
 	list_head_init(&q);
@@ -526,10 +528,10 @@ __tcp_rx_conn(tcpconn_t *c, struct mbuf *m, uint32_t ack, uint32_t snd_nxt,
 
 #ifdef TCP_RX_STATS
 		uint64_t before_tsc = rdtsc();
-		do_drop = !tcp_rx_text(c, m, &wake);
+		do_drop = !tcp_rx_text(c, m, &wake, &fin);
 		STAT(RX_TCP_TEXT_CYCLES) += rdtsc() - before_tsc;
 #else
-		do_drop = !tcp_rx_text(c, m, &wake);
+		do_drop = !tcp_rx_text(c, m, &wake, &fin);
 #endif
 
 		if (wake) {
@@ -547,10 +549,10 @@ __tcp_rx_conn(tcpconn_t *c, struct mbuf *m, uint32_t ack, uint32_t snd_nxt,
 	}
 
 	/* step 8 - FIN */
-	if (likely((m->flags & TCP_FIN) == 0))
+	if (likely(!fin))
 		goto done;
-	if (c->pcb.state == TCP_STATE_SYN_RECEIVED ||
-	    c->pcb.state == TCP_STATE_ESTABLISHED) {
+	assert(c->pcb.state != TCP_STATE_SYN_RECEIVED);
+	if (c->pcb.state == TCP_STATE_ESTABLISHED) {
 		tcp_conn_set_state(c, TCP_STATE_CLOSE_WAIT);
 	} else if (c->pcb.state == TCP_STATE_FIN_WAIT1) {
 		assert(c->pcb.snd_una != snd_nxt);
