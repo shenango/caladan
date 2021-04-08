@@ -54,8 +54,10 @@ static int ias_attach(struct proc *p, struct sched_spec *sched_cfg)
 	/* validate parameters */
 	if (ias_procs_nr >= IAS_NPROC)
 		return -ENOENT;
-	if (!cfg.noht && sched_cfg->guaranteed_cores % 2 != 0)
+	if (!cfg.noht && sched_cfg->guaranteed_cores % 2 != 0) {
+		log_err("ias: tried to attach proc with odd number of guaranteed cores");
 		return -EINVAL;
+	}
 
 	/* allocate and initialize process state */
 	sd = malloc(sizeof(*sd));
@@ -115,6 +117,7 @@ static int ias_attach(struct proc *p, struct sched_spec *sched_cfg)
 	return 0;
 
 fail_reserve:
+	log_err("ias: not enough cores available for reservation");
 	list_del_from(&all_procs, &sd->all_link);
 	bitmap_xor(ias_reserved_cores, ias_reserved_cores,
 		   sd->reserved_cores, NCPU);

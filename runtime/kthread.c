@@ -28,9 +28,8 @@ unsigned int maxks;
 unsigned int nrks;
 /* the number of busy spinning kthreads (threads that don't park) */
 unsigned int spinks;
-/* the number of guaranteed kthreads (we can always have this many if we want,
- * must be >= 1) */
-unsigned int guaranteedks = 1;
+/* the number of guaranteed kthreads (we can always have this many if we want) */
+unsigned int guaranteedks = 0;
 /* the number of active kthreads */
 atomic_t runningks;
 /* an array of attached kthreads (@nrks in total) */
