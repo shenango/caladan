@@ -316,11 +316,14 @@ ssize_t tcp_tx_send(tcpconn_t *c, const void *buf, size_t len, bool push)
 static int tcp_tx_retransmit_one(tcpconn_t *c, struct mbuf *m)
 {
 	int ret;
+	uint8_t opts_len;
 	uint16_t l4len;
 
 	l4len = m->seg_end - m->seg_seq;
 	if (m->flags & (TCP_SYN | TCP_FIN))
 		l4len--;
+
+	opts_len = ((struct tcp_hdr *)mbuf_transport_offset(m))->off - 5;
 
 	/*
 	 * Check if still transmitting. Because of a limitation in some DPDK NIC
@@ -332,9 +335,9 @@ static int tcp_tx_retransmit_one(tcpconn_t *c, struct mbuf *m)
 		struct mbuf *newm = net_tx_alloc_mbuf();
 		if (unlikely(!newm))
 			return -ENOMEM;
-		memcpy(mbuf_put(newm, l4len),
+		memcpy(mbuf_put(newm, sizeof(uint32_t) * opts_len + l4len),
 		       mbuf_transport_offset(m) + sizeof(struct tcp_hdr),
-		       l4len);
+		       sizeof(uint32_t) * opts_len + l4len);
 		newm->flags = m->flags;
 		newm->seg_seq = m->seg_seq;
 		newm->seg_end = m->seg_end;
@@ -357,7 +360,7 @@ static int tcp_tx_retransmit_one(tcpconn_t *c, struct mbuf *m)
 	}
 
 	/* push the TCP header back on (now with fresher ack) */
-	tcp_push_tcphdr(m, c, m->flags, 5, l4len);
+	tcp_push_tcphdr(m, c, m->flags, 5 + opts_len, l4len);
 
 	/* transmit the packet */
 	tcp_debug_egress_pkt(c, m);

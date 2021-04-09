@@ -688,6 +688,7 @@ static void thread_finish_cede(void)
 	thread_t *th, *myth = thread_self();
 
 	myth->thread_running = false;
+	myth->thread_ready = true;
 	myth->last_cpu = k->curr_cpu;
 	__self = NULL;
 
