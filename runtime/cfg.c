@@ -149,8 +149,6 @@ static int parse_runtime_guaranteed_kthreads(const char *name, const char *val)
 		log_err("invalid number of guaranteed kthreads requested, '%ld'", tmp);
 		log_err("must be < %d (number of CPUs)", cpu_count);
 		return -EINVAL;
-	} else if (tmp < 1) {
-		log_warn("< 1 guaranteed kthreads is not recommended for networked apps");
 	}
 
 	guaranteedks = tmp;
