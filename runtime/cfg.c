@@ -461,6 +461,22 @@ int cfg_load(const char *path)
 		goto out;
 	}
 
+	/* log some relevant config parameters */
+	log_info("cfg: provisioned %d cores "
+		 "(%d guaranteed, %d burstable, %d spinning)",
+		 maxks, guaranteedks, maxks - guaranteedks, spinks);
+	log_info("cfg: task is %s",
+		 cfg_prio_is_lc ? "latency critical (LC)" : "best effort (BE)");
+	log_info("cfg: THRESH_QD: %ld, THRESH_HT: %ld",
+		 cfg_qdelay_us, cfg_ht_punish_us);
+	log_info("cfg: storage %s, directpath %s",
+#ifdef DIRECT_STORAGE
+		 cfg_storage_enabled ? "enabled" : "disabled",
+#else
+		"disabled",
+#endif
+		 cfg_directpath_enabled ? "enabled" : "disabled");
+
 out:
 	fclose(f);
 	return ret;
