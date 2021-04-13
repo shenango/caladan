@@ -13,6 +13,7 @@ void ThreadTrampoline(void *arg) {
 void ThreadTrampolineWithJoin(void *arg) {
   thread_internal::join_data *d = static_cast<thread_internal::join_data*>(arg);
   d->func_();
+  d->func_.~function<void()>();
   spin_lock_np(&d->lock_);
   if (d->done_) {
     spin_unlock_np(&d->lock_);
