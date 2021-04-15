@@ -27,6 +27,7 @@
 struct iokernel_cfg {
 	bool	noht; /* disable hyperthreads */
 	bool	nobw; /* disable bandwidth controller */
+	bool	noidlefastwake; /* disable fast wakeups for idle processes */
 	bool	ias_prefer_selfpair; /* prefer self-pairings */
 	float	ias_bw_limit; /* IAS bw limit, (MB/s) */
 	bool	no_hw_qdel; /* Disable use of hardware timestamps for qdelay */

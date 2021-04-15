@@ -189,6 +189,8 @@ int main(int argc, char *argv[])
 				log_err("invalid pci address: %s", nic_pci_addr_str);
 				return -EINVAL;
 			}
+		} else if (!strcmp(argv[i], "noidlefastwake")) {
+			cfg.noidlefastwake = true;
 		} else if (string_to_bitmap(argv[i], input_allowed_cores, NCPU)) {
 			fprintf(stderr, "invalid cpu list: %s\n", argv[i]);
 			fprintf(stderr, "example list: 0-24,26-48:2,49-255\n");

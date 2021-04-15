@@ -422,6 +422,10 @@ static void sched_measure_delay(struct proc *p)
 		parked_thread_busy |= delay > 0 && !p->threads[i].active;
 	}
 
+	/* don't report parked busy if no threads are active */
+	if (sched_threads_active(p) == 0)
+		parked_thread_busy = false;
+
 	/* convert the highest delay experienced by the runtime to us */
 	hdelay /= cycles_per_us;
 
@@ -440,6 +444,9 @@ static void sched_detect_io_for_idle_runtime(struct proc *p)
 {
 	struct thread *th;
 	int i;
+
+	if (cfg.noidlefastwake)
+		return;
 
 	for (i = 0; i < p->thread_count; i++) {
 		th = &p->threads[i];
