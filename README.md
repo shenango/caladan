@@ -61,8 +61,8 @@ sudo ./iokerneld
 
 ## Supported Platforms
 
-This code has been tested most thoroughly on Ubuntu 18.04, with kernel
-5.2.0.
+This code has been tested most thoroughly on Ubuntu 18.04 with kernel
+5.2.0 and Ubuntu 20.04 with kernel 5.4.0.
 
 ### NICs
 This code has been tested with Intel 82599ES 10 Gbits/s NICs,
@@ -71,6 +71,14 @@ If you use Mellanox NICs, you should install the Mellanox OFED as described in [
 documentation](https://doc.dpdk.org/guides/nics/mlx4.html). If you use
 Intel NICs, you should insert the IGB UIO module and bind your NIC
 interface to it (e.g., using the script `./dpdk/usertools/dpdk-setup.sh`).
+
+To enable Jumbo Frames for higher throughput, first enable them in Linux on the
+relevant interface like so:
+```
+ip link set eth0 mtu 9000
+```
+Then use the (`host_mtu`) option in the config file of each runtime to set the
+MTU to the value you'd like, up to the size of the MTU set for the interface.
 
 #### Directpath
 Directpath allows runtime cores to directly send packets to/receive packets from the NIC, enabling
