@@ -551,7 +551,7 @@ struct sched_ops ias_ops = {
  */
 int ias_init(void)
 {
-	bitmap_init(ias_reserved_cores, true, NCPU);
+	bitmap_init(ias_reserved_cores, NCPU, true);
 	bitmap_xor(ias_reserved_cores, ias_reserved_cores, sched_allowed_cores,
 		   NCPU);
 
