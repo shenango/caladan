@@ -408,6 +408,7 @@ struct kthread {
 	bool			directpath_busy;
 	bool			timer_busy;
 	bool			storage_busy;
+	unsigned int		pad2[3];
 
 	/* 9th cache-line, storage nvme queues */
 	struct storage_q	storage_q;
@@ -415,7 +416,7 @@ struct kthread {
 	/* 10th cache-line, direct path queues */
 	struct hardware_q	*directpath_rxq;
 	struct direct_txq	*directpath_txq;
-	unsigned long		pad4[6];
+	unsigned long		pad3[6];
 
 	/* 11th cache-line, statistics counters */
 	uint64_t		stats[STAT_NR];
