@@ -16,55 +16,51 @@ namespace thread_internal {
 
 struct join_data {
   join_data(std::function<void()>&& func)
-  : done_(false), waiter_(nullptr), func_(std::move(func)) {
+      : done_(false), waiter_(nullptr), func_(std::move(func)) {
     spin_lock_init(&lock_);
   }
   join_data(const std::function<void()>& func)
-  : done_(false), waiter_(nullptr), func_(func) {
+      : done_(false), waiter_(nullptr), func_(func) {
     spin_lock_init(&lock_);
   }
   DISALLOW_COPY_AND_ASSIGN(join_data);
 
-  spinlock_t		lock_;
-  bool			done_;
-  thread_t		*waiter_;
-  std::function<void()>	func_;
+  spinlock_t lock_;
+  bool done_;
+  thread_t* waiter_;
+  std::function<void()> func_;
 };
 
-extern void ThreadTrampoline(void *arg);
-extern void ThreadTrampolineWithJoin(void *arg);
+extern void ThreadTrampoline(void* arg);
+extern void ThreadTrampolineWithJoin(void* arg);
 
-} // namespace thread_internal
+}  // namespace thread_internal
 
 // Spawns a new thread by copying.
 inline void Spawn(const std::function<void()>& func) {
-  void *buf;
-  thread_t *th = thread_create_with_buf(thread_internal::ThreadTrampoline, &buf,
-					sizeof(std::function<void()>));
+  void* buf;
+  thread_t* th = thread_create_with_buf(thread_internal::ThreadTrampoline, &buf,
+                                        sizeof(std::function<void()>));
   if (unlikely(!th)) BUG();
-  new(buf) std::function<void()>(func);
+  new (buf) std::function<void()>(func);
   thread_ready(th);
 }
 
 // Spawns a new thread by moving.
 inline void Spawn(std::function<void()>&& func) {
-  void *buf;
-  thread_t *th = thread_create_with_buf(thread_internal::ThreadTrampoline, &buf,
-					sizeof(std::function<void()>));
+  void* buf;
+  thread_t* th = thread_create_with_buf(thread_internal::ThreadTrampoline, &buf,
+                                        sizeof(std::function<void()>));
   if (unlikely(!th)) BUG();
-  new(buf) std::function<void()>(std::move(func));
+  new (buf) std::function<void()>(std::move(func));
   thread_ready(th);
 }
 
 // Called from a running thread to exit.
-inline void Exit(void) {
-  thread_exit();
-}
+inline void Exit(void) { thread_exit(); }
 
 // Called from a running thread to yield.
-inline void Yield(void) {
-  thread_yield();
-}
+inline void Yield(void) { thread_yield(); }
 
 // A C++11 style thread class
 class Thread {
@@ -75,7 +71,7 @@ class Thread {
   ~Thread();
 
   // Move support.
-  Thread(Thread&& t) : join_data_(t.join_data_) {t.join_data_ = nullptr;}
+  Thread(Thread&& t) : join_data_(t.join_data_) { t.join_data_ = nullptr; }
   Thread& operator=(Thread&& t) {
     join_data_ = t.join_data_;
     t.join_data_ = nullptr;
@@ -95,7 +91,7 @@ class Thread {
   void Detach();
 
  private:
-  thread_internal::join_data *join_data_;
+  thread_internal::join_data* join_data_;
 };
 
-} // namespace rt
+}  // namespace rt

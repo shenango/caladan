@@ -3,7 +3,7 @@ ROOT_PATH=../..
 include $(ROOT_PATH)/build/shared.mk
 
 # librt++.a - the c++ runtime library
-rt_src = runtime.cc thread.cc
+rt_src = runtime.cc thread.cc net.cc
 rt_obj = $(rt_src:.cc=.o)
 
 test_src = test.cc

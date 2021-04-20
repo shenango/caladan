@@ -1,6 +1,6 @@
 extern "C" {
-#include <base/stddef.h>
 #include <base/log.h>
+#include <base/stddef.h>
 }
 
 #include <string>
@@ -22,12 +22,12 @@ void MainHandler() {
   int i = kTestValue;
   int j = kTestValue;
 
-  rt::Spawn([=]{
+  rt::Spawn([=] {
     log_info("hello from ThreadSpawn()! '%s'", str.c_str());
     foo(i);
   });
 
-  rt::Spawn([&]{
+  rt::Spawn([&] {
     log_info("hello from ThreadSpawn()! '%s'", str.c_str());
     foo(i);
     j *= 2;
@@ -38,14 +38,14 @@ void MainHandler() {
 
   rt::Sleep(1 * rt::kMilliseconds);
 
-  auto th = rt::Thread([&]{
+  auto th = rt::Thread([&] {
     log_info("hello from rt::Thread! '%s'", str.c_str());
     foo(i);
   });
   th.Join();
 }
 
-} // anonymous namespace
+}  // anonymous namespace
 
 int main(int argc, char *argv[]) {
   int ret;

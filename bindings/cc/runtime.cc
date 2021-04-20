@@ -1,4 +1,5 @@
 #include "runtime.h"
+
 #include "thread.h"
 
 namespace rt {
@@ -9,4 +10,4 @@ int RuntimeInit(std::string cfg_path, std::function<void()> main_func) {
                       reinterpret_cast<void*>(&main_func));
 }
 
-} // namespace rt
+}  // namespace rt

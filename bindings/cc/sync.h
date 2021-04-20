@@ -3,8 +3,8 @@
 #pragma once
 
 extern "C" {
-#include <base/stddef.h>
 #include <base/lock.h>
+#include <base/stddef.h>
 #include <runtime/sync.h>
 }
 
@@ -59,15 +59,14 @@ class Mutex {
 };
 
 // RAII lock support (works with both Spin and Mutex).
-template<typename L> class ScopedLock {
+template <typename L>
+class ScopedLock {
  public:
-  explicit ScopedLock(L *lock) : lock_(lock) {
-    lock_->Lock();
-  }
+  explicit ScopedLock(L* lock) : lock_(lock) { lock_->Lock(); }
   ~ScopedLock() { lock_->Unlock(); }
 
  private:
-  L *const lock_;
+  L* const lock_;
 
   ScopedLock(const ScopedLock&) = delete;
   ScopedLock& operator=(const ScopedLock&) = delete;
@@ -81,7 +80,7 @@ class CondVar {
 
   // Block until the condition variable is signaled. Recheck the condition
   // after wakeup, as no guarantees are made about preventing spurious wakeups.
-  void Wait(Mutex *mu) { condvar_wait(&cv_, &mu->mu_); }
+  void Wait(Mutex* mu) { condvar_wait(&cv_, &mu->mu_); }
 
   // Wake up one waiter.
   void Signal() { condvar_signal(&cv_); }
@@ -126,4 +125,4 @@ class WaitGroup {
   WaitGroup& operator=(const WaitGroup&) = delete;
 };
 
-} // namespace rt
+}  // namespace rt
