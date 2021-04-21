@@ -24,6 +24,12 @@ bool PullIOV(struct iovec **iovp, int *iovcntp, size_t n) {
   return false;
 }
 
+size_t SumIOV(const iovec *iov, int iovcnt) {
+  size_t len = 0;
+  for (int i = 0; i < iovcnt; ++i) len += iov[i].iov_len;
+  return len;
+}
+
 }  // namespace
 
 namespace rt {
@@ -35,12 +41,10 @@ ssize_t TcpConn::WritevFullRaw(const iovec *iov, int iovcnt) {
   assert(n > 0);
 
   // sum total length and check if everything was transfered
-  size_t len = 0;
-  for (int i = 0; i < iovcnt; ++i) len += iov[i].iov_len;
-  if (static_cast<size_t>(n) == len) return len;
+  if (static_cast<size_t>(n) == SumIOV(iov, iovcnt)) return n;
 
   // partial transfer occurred, send the rest
-  len = n;
+  size_t len = n;
   std::unique_ptr<iovec[]> v = std::unique_ptr<iovec[]>{new iovec[iovcnt]};
   iovec *iovp = v.get();
   memcpy(iovp, iov, sizeof(iovec) * iovcnt);
@@ -48,6 +52,29 @@ ssize_t TcpConn::WritevFullRaw(const iovec *iov, int iovcnt) {
     n = tcp_writev(c_, iovp, iovcnt);
     if (n < 0) return n;
     assert(n > 0);
+    len += n;
+  }
+
+  return len;
+}
+
+ssize_t TcpConn::ReadvFullRaw(const iovec *iov, int iovcnt) {
+  // first try to receive without copying the vector
+  ssize_t n = tcp_readv(c_, iov, iovcnt);
+  if (n <= 0) return n;
+
+  // sum total length and check if everything was transfered
+  if (static_cast<size_t>(n) == SumIOV(iov, iovcnt)) return n;
+
+  // partial transfer occurred, receive the rest
+  size_t len = n;
+  std::unique_ptr<iovec[]> v = std::unique_ptr<iovec[]>{new iovec[iovcnt]};
+  iovec *iovp = v.get();
+  memcpy(iovp, iov, sizeof(iovec) * iovcnt);
+  while (PullIOV(&iovp, &iovcnt, n)) {
+    n = tcp_readv(c_, iovp, iovcnt);
+    if (n == 0) break;
+    if (n < 0) return n;
     len += n;
   }
 

@@ -137,7 +137,8 @@ class TcpConn : public NetConn {
     size_t n = 0;
     while (n < len) {
       ssize_t ret = Read(pos + n, len - n);
-      if (ret <= 0) return ret;
+      if (ret == 0) break;
+      if (ret < 0) return ret;
       n += ret;
     }
     assert(n == len);
@@ -156,6 +157,14 @@ class TcpConn : public NetConn {
     }
     assert(n == len);
     return n;
+  }
+
+  // Reads exactly a vector of bytes from the TCP stream.
+  ssize_t ReadvFull(const iovec *iov, int iovcnt) {
+    if (__builtin_constant_p(iovcnt)) {
+      if (iovcnt == 1) return ReadFull(iov[0].iov_base, iov[0].iov_len);
+    }
+    return ReadvFullRaw(iov, iovcnt);
   }
 
   // Writes exactly a vector of bytes to the TCP stream.
@@ -181,6 +190,7 @@ class TcpConn : public NetConn {
   TcpConn &operator=(TcpConn &&) = delete;
 
   ssize_t WritevFullRaw(const iovec *iov, int iovcnt);
+  ssize_t ReadvFullRaw(const iovec *iov, int iovcnt);
 
   tcpconn_t *c_;
 };
