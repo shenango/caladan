@@ -8,6 +8,8 @@ extern "C" {
 #include "net.h"
 #include "sync.h"
 
+#include <cstdio>
+
 template <class ProtoHdr>
 struct Rpc {
   ProtoHdr req;

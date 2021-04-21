@@ -62,7 +62,7 @@ FLAGS += -DDIRECTPATH
 endif
 
 CFLAGS = -std=gnu11 $(FLAGS)
-CXXFLAGS = -std=gnu++11 $(FLAGS)
+CXXFLAGS = -std=gnu++17 $(FLAGS)
 
 # handy for debugging
 print-%  : ; @echo $* = $($*) 
