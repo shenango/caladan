@@ -29,8 +29,10 @@ class Spin {
  private:
   spinlock_t lock_;
 
-  Spin(const Spin&) = delete;
-  Spin& operator=(const Spin&) = delete;
+  Spin(const Spin &) = delete;
+  Spin &operator=(const Spin &) = delete;
+  Spin(Spin &&) = delete;
+  Spin &operator=(Spin &&) = delete;
 };
 
 // Pthread-like mutex support.
@@ -54,22 +56,26 @@ class Mutex {
  private:
   mutex_t mu_;
 
-  Mutex(const Mutex&) = delete;
-  Mutex& operator=(const Mutex&) = delete;
+  Mutex(const Mutex &) = delete;
+  Mutex &operator=(const Mutex &) = delete;
+  Mutex(Mutex &&) = delete;
+  Mutex &operator=(Mutex &&) = delete;
 };
 
 // RAII lock support (works with both Spin and Mutex).
 template <typename L>
 class ScopedLock {
  public:
-  explicit ScopedLock(L* lock) : lock_(lock) { lock_->Lock(); }
+  explicit ScopedLock(L *lock) : lock_(lock) { lock_->Lock(); }
   ~ScopedLock() { lock_->Unlock(); }
 
  private:
-  L* const lock_;
+  L *const lock_;
 
-  ScopedLock(const ScopedLock&) = delete;
-  ScopedLock& operator=(const ScopedLock&) = delete;
+  ScopedLock(const ScopedLock &) = delete;
+  ScopedLock &operator=(const ScopedLock &) = delete;
+  ScopedLock(ScopedLock &&) = delete;
+  ScopedLock &operator=(ScopedLock &&) = delete;
 };
 
 // Pthread-like condition variable support.
@@ -80,7 +86,7 @@ class CondVar {
 
   // Block until the condition variable is signaled. Recheck the condition
   // after wakeup, as no guarantees are made about preventing spurious wakeups.
-  void Wait(Mutex* mu) { condvar_wait(&cv_, &mu->mu_); }
+  void Wait(Mutex *mu) { condvar_wait(&cv_, &mu->mu_); }
 
   // Wake up one waiter.
   void Signal() { condvar_signal(&cv_); }
@@ -91,8 +97,10 @@ class CondVar {
  private:
   condvar_t cv_;
 
-  CondVar(const CondVar&) = delete;
-  CondVar& operator=(const CondVar&) = delete;
+  CondVar(const CondVar &) = delete;
+  CondVar &operator=(const CondVar &) = delete;
+  CondVar(CondVar &&) = delete;
+  CondVar &operator=(CondVar &&) = delete;
 };
 
 // Golang-like waitgroup support.
@@ -121,8 +129,10 @@ class WaitGroup {
  private:
   waitgroup_t wg_;
 
-  WaitGroup(const WaitGroup&) = delete;
-  WaitGroup& operator=(const WaitGroup&) = delete;
+  WaitGroup(const WaitGroup &) = delete;
+  WaitGroup &operator=(const WaitGroup &) = delete;
+  WaitGroup(WaitGroup &&) = delete;
+  WaitGroup &operator=(WaitGroup &&) = delete;
 };
 
 }  // namespace rt

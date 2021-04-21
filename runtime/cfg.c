@@ -473,7 +473,11 @@ int cfg_load(const char *path)
 #else
 		"disabled",
 #endif
+#ifdef DIRECTPATH
 		 cfg_directpath_enabled ? "enabled" : "disabled");
+#else
+		"disabled");
+#endif
 
 out:
 	fclose(f);

@@ -9,8 +9,6 @@ extern "C" {
 
 #include <functional>
 
-#include "macros.h"
-
 namespace rt {
 namespace thread_internal {
 
@@ -23,7 +21,6 @@ struct join_data {
       : done_(false), waiter_(nullptr), func_(func) {
     spin_lock_init(&lock_);
   }
-  DISALLOW_COPY_AND_ASSIGN(join_data);
 
   spinlock_t lock_;
   bool done_;
@@ -67,8 +64,11 @@ class Thread {
  public:
   // boilerplate constructors.
   Thread() : join_data_(nullptr) {}
-  DISALLOW_COPY_AND_ASSIGN(Thread);
   ~Thread();
+
+  // disable copy.
+  Thread(const Thread&) = delete;
+  Thread& operator=(const Thread&) = delete;
 
   // Move support.
   Thread(Thread&& t) : join_data_(t.join_data_) { t.join_data_ = nullptr; }
