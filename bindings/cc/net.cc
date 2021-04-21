@@ -41,7 +41,8 @@ ssize_t TcpConn::WritevFullRaw(const iovec *iov, int iovcnt) {
   assert(n > 0);
 
   // sum total length and check if everything was transfered
-  if (static_cast<size_t>(n) == SumIOV(iov, iovcnt)) return n;
+  size_t total = SumIOV(iov, iovcnt);
+  if (static_cast<size_t>(n) == total) return n;
 
   // partial transfer occurred, send the rest
   size_t len = n;
@@ -55,6 +56,7 @@ ssize_t TcpConn::WritevFullRaw(const iovec *iov, int iovcnt) {
     len += n;
   }
 
+  assert(len == total);
   return len;
 }
 
@@ -64,7 +66,8 @@ ssize_t TcpConn::ReadvFullRaw(const iovec *iov, int iovcnt) {
   if (n <= 0) return n;
 
   // sum total length and check if everything was transfered
-  if (static_cast<size_t>(n) == SumIOV(iov, iovcnt)) return n;
+  size_t total = SumIOV(iov, iovcnt);
+  if (static_cast<size_t>(n) == total) return n;
 
   // partial transfer occurred, receive the rest
   size_t len = n;
@@ -73,11 +76,11 @@ ssize_t TcpConn::ReadvFullRaw(const iovec *iov, int iovcnt) {
   memcpy(iovp, iov, sizeof(iovec) * iovcnt);
   while (PullIOV(&iovp, &iovcnt, n)) {
     n = tcp_readv(c_, iovp, iovcnt);
-    if (n == 0) break;
-    if (n < 0) return n;
+    if (n <= 0) return n;
     len += n;
   }
 
+  assert(len == total);
   return len;
 }
 

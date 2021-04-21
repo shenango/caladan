@@ -137,8 +137,7 @@ class TcpConn : public NetConn {
     size_t n = 0;
     while (n < len) {
       ssize_t ret = Read(pos + n, len - n);
-      if (ret == 0) break;
-      if (ret < 0) return ret;
+      if (ret <= 0) return ret;
       n += ret;
     }
     assert(n == len);
