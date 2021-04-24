@@ -2,6 +2,7 @@
 
 #include <cstring>
 #include <memory>
+#include <algorithm>
 
 namespace {
 
@@ -48,7 +49,7 @@ ssize_t TcpConn::WritevFullRaw(const iovec *iov, int iovcnt) {
   size_t len = n;
   std::unique_ptr<iovec[]> v = std::unique_ptr<iovec[]>{new iovec[iovcnt]};
   iovec *iovp = v.get();
-  memcpy(iovp, iov, sizeof(iovec) * iovcnt);
+  std::copy_n(iov, iovcnt, iovp);
   while (PullIOV(&iovp, &iovcnt, n)) {
     n = tcp_writev(c_, iovp, iovcnt);
     if (n < 0) return n;
@@ -73,7 +74,7 @@ ssize_t TcpConn::ReadvFullRaw(const iovec *iov, int iovcnt) {
   size_t len = n;
   std::unique_ptr<iovec[]> v = std::unique_ptr<iovec[]>{new iovec[iovcnt]};
   iovec *iovp = v.get();
-  memcpy(iovp, iov, sizeof(iovec) * iovcnt);
+  std::copy_n(iov, iovcnt, iovp);
   while (PullIOV(&iovp, &iovcnt, n)) {
     n = tcp_readv(c_, iovp, iovcnt);
     if (n <= 0) return n;

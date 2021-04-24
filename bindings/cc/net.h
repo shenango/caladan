@@ -74,10 +74,8 @@ class UdpConn : public NetConn {
   UdpConn(udpconn_t *c) : c_(c) {}
 
   // disable move and copy.
-  UdpConn(const UdpConn &) = delete;
-  UdpConn &operator=(const UdpConn &) = delete;
-  UdpConn(UdpConn &&) = delete;
-  UdpConn &operator=(UdpConn &&) = delete;
+  UdpConn(const UdpConn&) = delete;
+  UdpConn& operator=(const UdpConn&) = delete;
 
   udpconn_t *c_;
 };
@@ -183,10 +181,8 @@ class TcpConn : public NetConn {
   TcpConn(tcpconn_t *c) : c_(c) {}
 
   // disable move and copy.
-  TcpConn(const TcpConn &) = delete;
-  TcpConn &operator=(const TcpConn &) = delete;
-  TcpConn(TcpConn &&) = delete;
-  TcpConn &operator=(TcpConn &&) = delete;
+  TcpConn(const TcpConn&) = delete;
+  TcpConn& operator=(const TcpConn&) = delete;
 
   ssize_t WritevFullRaw(const iovec *iov, int iovcnt);
   ssize_t ReadvFullRaw(const iovec *iov, int iovcnt);
@@ -222,10 +218,8 @@ class TcpQueue {
   TcpQueue(tcpqueue_t *q) : q_(q) {}
 
   // disable move and copy.
-  TcpQueue(const TcpQueue &) = delete;
-  TcpQueue &operator=(const TcpQueue &) = delete;
-  TcpQueue(TcpQueue &&) = delete;
-  TcpQueue &operator=(TcpQueue &&) = delete;
+  TcpQueue(const TcpQueue&) = delete;
+  TcpQueue& operator=(const TcpQueue&) = delete;
 
   tcpqueue_t *q_;
 };

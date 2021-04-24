@@ -29,10 +29,8 @@ class Spin {
  private:
   spinlock_t lock_;
 
-  Spin(const Spin &) = delete;
-  Spin &operator=(const Spin &) = delete;
-  Spin(Spin &&) = delete;
-  Spin &operator=(Spin &&) = delete;
+  Spin(const Spin&) = delete;
+  Spin& operator=(const Spin&) = delete;
 };
 
 // Pthread-like mutex support.
@@ -56,10 +54,8 @@ class Mutex {
  private:
   mutex_t mu_;
 
-  Mutex(const Mutex &) = delete;
-  Mutex &operator=(const Mutex &) = delete;
-  Mutex(Mutex &&) = delete;
-  Mutex &operator=(Mutex &&) = delete;
+  Mutex(const Mutex&) = delete;
+  Mutex& operator=(const Mutex&) = delete;
 };
 
 // RAII lock support (works with both Spin and Mutex).
@@ -72,10 +68,8 @@ class ScopedLock {
  private:
   L *const lock_;
 
-  ScopedLock(const ScopedLock &) = delete;
-  ScopedLock &operator=(const ScopedLock &) = delete;
-  ScopedLock(ScopedLock &&) = delete;
-  ScopedLock &operator=(ScopedLock &&) = delete;
+  ScopedLock(const ScopedLock&) = delete;
+  ScopedLock& operator=(const ScopedLock&) = delete;
 };
 
 // Pthread-like condition variable support.
@@ -97,10 +91,8 @@ class CondVar {
  private:
   condvar_t cv_;
 
-  CondVar(const CondVar &) = delete;
-  CondVar &operator=(const CondVar &) = delete;
-  CondVar(CondVar &&) = delete;
-  CondVar &operator=(CondVar &&) = delete;
+  CondVar(const CondVar&) = delete;
+  CondVar& operator=(const CondVar&) = delete;
 };
 
 // Golang-like waitgroup support.
@@ -129,10 +121,8 @@ class WaitGroup {
  private:
   waitgroup_t wg_;
 
-  WaitGroup(const WaitGroup &) = delete;
-  WaitGroup &operator=(const WaitGroup &) = delete;
-  WaitGroup(WaitGroup &&) = delete;
-  WaitGroup &operator=(WaitGroup &&) = delete;
+  WaitGroup(const WaitGroup&) = delete;
+  WaitGroup& operator=(const WaitGroup&) = delete;
 };
 
 }  // namespace rt
