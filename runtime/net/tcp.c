@@ -108,16 +108,22 @@ static void tcp_worker(void *arg)
 	uint64_t now;
 
 	while (true) {
+		bool again = false;
 		now = microtime();
 
 		spin_lock_np(&tcp_lock);
 		list_for_each(&tcp_conns, c, global_link) {
+			if (preempt_needed()) {
+				again = true;
+				break;
+			}
 			if (load_acquire(&c->next_timeout) <= now)
 				tcp_handle_timeouts(c, now);
 		}
 		spin_unlock_np(&tcp_lock);
 
-		timer_sleep(10 * ONE_MS);
+		if (!again)
+			timer_sleep(10 * ONE_MS);
 	}
 }
 
