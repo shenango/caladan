@@ -47,7 +47,8 @@ static bool is_snd_full(tcpconn_t *c)
 {
 	assert_spin_lock_held(&c->lock);
 
-	return wraps_lte(c->pcb.snd_una + c->pcb.snd_wnd, c->pcb.snd_nxt);
+	/* allow one extra byte for zero window probing */
+	return wraps_lte(c->pcb.snd_una + c->pcb.snd_wnd + 1, c->pcb.snd_nxt);
 }
 
 /* see reset generation (RFC 793) */
@@ -245,10 +246,11 @@ void tcp_rx_conn(struct trans_entry *e, struct mbuf *m)
 
 	/* process acks and update send window */
 	if (wraps_lte(c->pcb.snd_una, ack)) {
-		if (c->pcb.snd_una != ack)
+		if (c->pcb.snd_una != ack) {
 			c->rep_acks = 0;
-		c->pcb.snd_una = ack;
-		tcp_conn_ack(c, &q);
+			c->pcb.snd_una = ack;
+			tcp_conn_ack(c, &q);
+		}
 
 		/* should we update the send window? */
 		if (wraps_lt(c->pcb.snd_wl1, seq) ||
@@ -487,10 +489,11 @@ __tcp_rx_conn(tcpconn_t *c, struct mbuf *m, uint32_t ack, uint32_t snd_nxt,
 	bool snd_was_full = is_snd_full(c);
 	if (wraps_lte(c->pcb.snd_una, ack) &&
 	    wraps_lte(ack, snd_nxt)) {
-		if (c->pcb.snd_una != ack)
+		if (c->pcb.snd_una != ack) {
 			c->rep_acks = 0;
-		c->pcb.snd_una = ack;
-		tcp_conn_ack(c, &q);
+			c->pcb.snd_una = ack;
+			tcp_conn_ack(c, &q);
+		}
 
 		/* should we update the send window? */
 		if (wraps_lt(c->pcb.snd_wl1, seq) ||
