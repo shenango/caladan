@@ -235,23 +235,30 @@ void tcp_rx_conn(struct trans_entry *e, struct mbuf *m)
 	/* Does it fit perfectly in the receive window? */
 	slow_path |= c->pcb.rcv_wnd < len;
 
+	/* Does the ack land outside snd_nxt? */
+	slow_path |= wraps_gt(ack, snd_nxt);
+
 	if (unlikely(slow_path))
 		return __tcp_rx_conn(c, m, ack, snd_nxt, win, optp, optlen);
 
 	STAT(RX_TCP_IN_ORDER)++;
 
-	c->rep_acks *= c->pcb.snd_una == ack;
-	c->pcb.snd_una = ack;
-	tcp_conn_ack(c, &q);
+	/* process acks and update send window */
+	if (wraps_lte(c->pcb.snd_una, ack)) {
+		if (c->pcb.snd_una != ack)
+			c->rep_acks = 0;
+		c->pcb.snd_una = ack;
+		tcp_conn_ack(c, &q);
 
-	/* should we update the send window? */
-	if (wraps_lt(c->pcb.snd_wl1, seq) ||
-	    (c->pcb.snd_wl1 == seq &&
-	     wraps_lte(c->pcb.snd_wl2, ack))) {
-		c->pcb.snd_wnd = win;
-		c->pcb.snd_wl1 = seq;
-		c->pcb.snd_wl2 = ack;
-		c->rep_acks = 0;
+		/* should we update the send window? */
+		if (wraps_lt(c->pcb.snd_wl1, seq) ||
+		    (c->pcb.snd_wl1 == seq &&
+		     wraps_lte(c->pcb.snd_wl2, ack))) {
+			c->pcb.snd_wnd = win;
+			c->pcb.snd_wl1 = seq;
+			c->pcb.snd_wl2 = ack;
+			c->rep_acks = 0;
+		}
 	}
 
 	nxt_wnd = (uint64_t)m->seg_end;
@@ -484,23 +491,25 @@ __tcp_rx_conn(tcpconn_t *c, struct mbuf *m, uint32_t ack, uint32_t snd_nxt,
 			c->rep_acks = 0;
 		c->pcb.snd_una = ack;
 		tcp_conn_ack(c, &q);
+
+		/* should we update the send window? */
+		if (wraps_lt(c->pcb.snd_wl1, seq) ||
+		    (c->pcb.snd_wl1 == seq &&
+		     wraps_lte(c->pcb.snd_wl2, ack))) {
+			uint32_t old_wnd = c->pcb.snd_wnd;
+			c->pcb.snd_wnd = win;
+			c->pcb.snd_wl1 = seq;
+			c->pcb.snd_wl2 = ack;
+			if (c->pcb.snd_wnd != old_wnd)
+				c->rep_acks = 0;
+		}
 	} else if (wraps_gt(ack, snd_nxt)) {
 		do_ack = true;
 		goto done;
 	}
-	/* should we update the send window? */
-	if (wraps_lt(c->pcb.snd_wl1, seq) ||
-	    (c->pcb.snd_wl1 == seq &&
-	     wraps_lte(c->pcb.snd_wl2, ack))) {
-		uint32_t old_wnd = c->pcb.snd_wnd;
-		c->pcb.snd_wnd = win;
-		c->pcb.snd_wl1 = seq;
-		c->pcb.snd_wl2 = ack;
-		if (c->pcb.snd_wnd != old_wnd)
-			c->rep_acks = 0;
-	}
-	if (snd_was_full && !is_snd_full(c))
+	if (snd_was_full && !is_snd_full(c)) {
 		waitq_release_start(&c->tx_wq, &waiters);
+	}
 
 	if (c->pcb.state == TCP_STATE_FIN_WAIT1 &&
 	    c->pcb.snd_una == snd_nxt) {
