@@ -35,6 +35,8 @@ void tcp_timer_update(tcpconn_t *c)
 
 	if (c->ack_delayed)
 		next_timeout = MIN(next_timeout, c->ack_ts + TCP_ACK_TIMEOUT);
+	if (c->zero_wnd)
+		next_timeout = MIN(next_timeout, c->zero_wnd_ts + TCP_ZERO_WND_TIMEOUT);
 
 	if (!c->tx_exclusive) {
 		m = list_top(&c->txq, struct mbuf, link);
@@ -51,7 +53,7 @@ void tcp_timer_update(tcpconn_t *c)
 /* check for timeouts in a TCP connection */
 static void tcp_handle_timeouts(tcpconn_t *c, uint64_t now)
 {
-	bool do_ack = false, do_retransmit = false;
+	bool do_ack = false, do_probe = false, do_retransmit = false;
 
 	spin_lock_np(&c->lock);
 	if (unlikely(c->pcb.state == TCP_STATE_CLOSED)) {
@@ -74,11 +76,19 @@ static void tcp_handle_timeouts(tcpconn_t *c, uint64_t now)
 		tcp_conn_put(c);
 		return;
 	}
+
 	if (c->ack_delayed && now - c->ack_ts >= TCP_ACK_TIMEOUT) {
 		log_debug("tcp: %p delayed ack timeout", c);
 		c->ack_delayed = false;
 		do_ack = true;
 	}
+
+	if (c->zero_wnd && now - c->zero_wnd_ts >= TCP_ZERO_WND_TIMEOUT) {
+		log_debug("tcp: %p zero window timeout", c);
+		c->zero_wnd_ts = now;
+		do_probe = true;
+	}
+
 	if (!c->tx_exclusive && !list_empty(&c->txq)) {
 		struct mbuf *m = list_top(&c->txq, struct mbuf, link);
 		if (now - m->timestamp >= TCP_RETRANSMIT_TIMEOUT) {
@@ -97,6 +107,8 @@ static void tcp_handle_timeouts(tcpconn_t *c, uint64_t now)
 
 	if (do_ack)
 		tcp_tx_ack(c);
+	if (do_probe)
+		tcp_tx_probe_window(c);
 	if (do_retransmit)
 		thread_spawn(tcp_retransmit, c);
 }
@@ -259,6 +271,7 @@ tcpconn_t *tcp_conn_alloc(void)
 	c->time_wait_ts = 0;
 	c->rep_acks = 0;
 	c->acks_delayed_cnt = 0;
+	c->zero_wnd = false;
 
 	/* initialize egress PCB */
 	c->pcb.state = TCP_STATE_CLOSED;
@@ -908,9 +921,16 @@ static int tcp_write_wait(tcpconn_t *c, size_t *winlen)
 	/* block until there is an actionable event */
 	while (!c->tx_closed &&
 	       (c->pcb.state < TCP_STATE_ESTABLISHED || c->tx_exclusive ||
-		wraps_lte(c->pcb.snd_una + c->pcb.snd_wnd + 1, c->pcb.snd_nxt))) {
+		tcp_is_snd_full(c))) {
+		/* arm window probing if needed */
+		if (!c->zero_wnd && tcp_is_snd_full(c)) {
+			c->zero_wnd = true;
+			c->zero_wnd_ts = microtime();
+			tcp_timer_update(c);
+		}
 		waitq_wait(&c->tx_wq, &c->lock);
 	}
+	c->zero_wnd = false;
 
 	/* is the socket closed? */
 	if (c->tx_closed) {
@@ -921,8 +941,7 @@ static int tcp_write_wait(tcpconn_t *c, size_t *winlen)
 	/* drop the lock to allow concurrent RX processing */
 	c->tx_exclusive = true;
 
-	/* an extra byte allows for window probing */
-	*winlen = c->pcb.snd_una + c->pcb.snd_wnd - c->pcb.snd_nxt + 1;
+	*winlen = c->pcb.snd_una + c->pcb.snd_wnd - c->pcb.snd_nxt;
 	c->acks_delayed_cnt = 0;
 	c->ack_delayed = false;
 	spin_unlock_np(&c->lock);

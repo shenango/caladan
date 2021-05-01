@@ -42,15 +42,6 @@ static bool is_acceptable(tcpconn_t *c, uint32_t len, uint32_t seq)
 		wraps_lt(seq + len - 1, c->pcb.rcv_nxt + c->pcb.rcv_wnd));
 }
 
-/* is the TX window full? */
-static bool is_snd_full(tcpconn_t *c)
-{
-	assert_spin_lock_held(&c->lock);
-
-	/* allow one extra byte for zero window probing */
-	return wraps_lte(c->pcb.snd_una + c->pcb.snd_wnd + 1, c->pcb.snd_nxt);
-}
-
 /* see reset generation (RFC 793) */
 static void send_rst(tcpconn_t *c, bool acked, uint32_t seq, uint32_t ack,
 		     uint32_t len)
@@ -228,7 +219,7 @@ void tcp_rx_conn(struct trans_entry *e, struct mbuf *m)
 	slow_path |= (c->pcb.state != TCP_STATE_ESTABLISHED);
 
 	/* Might we need to unblock waiting senders? */
-	slow_path |= is_snd_full(c);
+	slow_path |= tcp_is_snd_full(c);
 
 	/* Is the packet on the next in-order boundary? */
 	slow_path |= (seq != c->pcb.rcv_nxt) || !list_empty(&c->rxq_ooo);
@@ -486,7 +477,7 @@ __tcp_rx_conn(tcpconn_t *c, struct mbuf *m, uint32_t ack, uint32_t snd_nxt,
 			c->rep_acks = 0;
 		}
 	}
-	bool snd_was_full = is_snd_full(c);
+	bool snd_was_full = tcp_is_snd_full(c);
 	if (wraps_lte(c->pcb.snd_una, ack) &&
 	    wraps_lte(ack, snd_nxt)) {
 		if (c->pcb.snd_una != ack) {
@@ -510,7 +501,7 @@ __tcp_rx_conn(tcpconn_t *c, struct mbuf *m, uint32_t ack, uint32_t snd_nxt,
 		do_ack = true;
 		goto done;
 	}
-	if (snd_was_full && !is_snd_full(c)) {
+	if (snd_was_full && !tcp_is_snd_full(c)) {
 		waitq_release_start(&c->tx_wq, &waiters);
 	}
 

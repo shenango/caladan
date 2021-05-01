@@ -159,6 +159,37 @@ int tcp_tx_ack(tcpconn_t *c)
 	return ret;
 }
 
+/**
+ * tcp_tx_probe_window - send a packet to probe the window size
+ * @c: the connection to probe
+ *
+ * Deliberately use a sequence that has already been acked. The receiver
+ * will find it fails acceptability testing, and immediately send back an
+ * ack with the latest window.
+ *
+ * Returns 0 if succesful, otherwise fail.
+ */
+int tcp_tx_probe_window(tcpconn_t *c)
+{
+	struct mbuf *m;
+	int ret;
+
+	m = net_tx_alloc_mbuf();
+	if (unlikely(!m))
+		return -ENOMEM;
+
+	m->txflags = OLFLAG_TCP_CHKSUM;
+	m->seg_seq = load_acquire(&c->pcb.snd_una) - 1;
+	tcp_push_tcphdr(m, c, TCP_ACK, 5, 0);
+
+	/* transmit packet */
+	tcp_debug_egress_pkt(c, m);
+	ret = net_tx_ip(m, IPPROTO_TCP, c->e.raddr.ip);
+	if (unlikely(ret))
+		mbuf_free(m);
+	return ret;
+}
+
 static int tcp_push_options(struct mbuf *m, const struct tcp_options *opts)
 {
 	uint32_t *ptr;

@@ -22,6 +22,7 @@
 #define TCP_CONNECT_TIMEOUT	(5 * ONE_SECOND) /* FIXME */
 #define TCP_OOQ_ACK_TIMEOUT	(300 * ONE_MS)
 #define TCP_TIME_WAIT_TIMEOUT	(1 * ONE_SECOND) /* FIXME: should be 8 minutes */
+#define TCP_ZERO_WND_TIMEOUT	(300 * ONE_MS) /* FIXME: should be dynamic */
 #define TCP_RETRANSMIT_TIMEOUT	(300 * ONE_MS) /* FIXME: should be dynamic */
 #define TCP_FAST_RETRANSMIT_THRESH 3
 #define TCP_OOO_MAX_SIZE	2048
@@ -112,10 +113,12 @@ struct tcpconn {
 	/* timeouts */
 	uint64_t 		next_timeout;
 	uint64_t		ack_ts;
+	uint64_t		zero_wnd_ts;
 	union {
 		uint64_t		time_wait_ts;
 		uint64_t		attach_ts;
 	};
+	bool			zero_wnd;
 	bool			ack_delayed;
 	int			rep_acks;
 	int			acks_delayed_cnt;
@@ -129,7 +132,6 @@ extern void tcp_conn_set_state(tcpconn_t *c, int new_state);
 extern void tcp_conn_fail(tcpconn_t *c, int err);
 extern void tcp_conn_shutdown_rx(tcpconn_t *c);
 extern void tcp_conn_destroy(tcpconn_t *c);
-
 extern void tcp_timer_update(tcpconn_t *c);
 
 /**
@@ -182,6 +184,7 @@ extern int tcp_tx_raw_rst(struct netaddr laddr, struct netaddr raddr,
 extern int tcp_tx_raw_rst_ack(struct netaddr laddr, struct netaddr raddr,
 			      tcp_seq seq, tcp_seq ack);
 extern int tcp_tx_ack(tcpconn_t *c);
+extern int tcp_tx_probe_window(tcpconn_t *c);
 extern int tcp_tx_ctl(tcpconn_t *c, uint8_t flags,
 		      const struct tcp_options *opts);
 extern ssize_t tcp_tx_send(tcpconn_t *c, const void *buf, size_t len,
@@ -206,6 +209,14 @@ static inline void mbuf_list_free(struct list_head *h)
 
 		mbuf_free(m);
 	}
+}
+
+/* is the TX window full? */
+static inline bool tcp_is_snd_full(tcpconn_t *c)
+{
+	assert_spin_lock_held(&c->lock);
+
+	return wraps_lte(c->pcb.snd_una + c->pcb.snd_wnd, c->pcb.snd_nxt);
 }
 
 
