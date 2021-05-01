@@ -753,7 +753,8 @@ static ssize_t tcp_read_wait(tcpconn_t *c, size_t len,
 	}
 
 	c->pcb.rcv_wnd += readlen;
-	if (c->pcb.rcv_wnd >= c->tx_last_win + c->winmax / 4)
+	if (c->pcb.rcv_nxt + c->pcb.rcv_wnd >=
+	    c->tx_last_ack + c->tx_last_win + c->winmax / 4)
 		do_ack = true;
 	spin_unlock_np(&c->lock);
 
