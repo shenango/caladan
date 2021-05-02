@@ -345,7 +345,8 @@ __tcp_rx_conn(tcpconn_t *c, struct mbuf *m, uint32_t ack, uint32_t snd_nxt,
 	thread_t *rx_th = NULL;
 	struct mbuf *retransmit = NULL;
 	uint32_t seq, len;
-	bool do_ack = false, do_drop = true, fin = false;
+	bool do_ack = false, do_drop = true, fin = false, snd_was_full;
+	bool ack_updated = false, wnd_updated = false;
 	int ret;
 
 	list_head_init(&q);
@@ -456,16 +457,43 @@ __tcp_rx_conn(tcpconn_t *c, struct mbuf *m, uint32_t ack, uint32_t snd_nxt,
 		c->pcb.snd_wl2 = ack;
 		tcp_conn_set_state(c, TCP_STATE_ESTABLISHED);
 	}
+
+	/* process ack and window update */
+	snd_was_full = tcp_is_snd_full(c);
+	if (wraps_lte(c->pcb.snd_una, ack) &&
+	    wraps_lte(ack, snd_nxt)) {
+		if (c->pcb.snd_una != ack) {
+			ack_updated = true;
+			c->pcb.snd_una = ack;
+			tcp_conn_ack(c, &q);
+		}
+
+		/* should we update the send window? */
+		if (wraps_lt(c->pcb.snd_wl1, seq) ||
+		    (c->pcb.snd_wl1 == seq &&
+		     wraps_lte(c->pcb.snd_wl2, ack))) {
+			if (c->pcb.snd_wnd != win || c->pcb.snd_wl2 != ack)
+				wnd_updated = true;
+			c->pcb.snd_wnd = win;
+			c->pcb.snd_wl1 = seq;
+			c->pcb.snd_wl2 = ack;
+		}
+	} else if (wraps_gt(ack, snd_nxt)) {
+		do_ack = true;
+		goto done;
+	}
+	if (snd_was_full && !tcp_is_snd_full(c))
+		waitq_release_start(&c->tx_wq, &waiters);
+
 	/*
-	 * Detect a duplicate ACK if:
+	 * Fast retransmit -> detect a duplicate ACK if:
 	 * 1. The ACK number is the same as the largest seen.
 	 * 2. There is unacknowledged data pending.
 	 * 3. There is no data payload included with the ACK.
 	 * 4. There is no window update.
 	 */
-	if (unlikely(ack == c->pcb.snd_una &&
-	    c->pcb.snd_una != c->pcb.snd_nxt &&
-	    len == 0)) {
+	if (unlikely(!ack_updated && c->pcb.snd_una != c->pcb.snd_nxt &&
+		     len == 0 && !wnd_updated)) {
 		c->rep_acks++;
 		if (c->rep_acks >= TCP_FAST_RETRANSMIT_THRESH) {
 			if (c->tx_exclusive) {
@@ -476,33 +504,8 @@ __tcp_rx_conn(tcpconn_t *c, struct mbuf *m, uint32_t ack, uint32_t snd_nxt,
 			}
 			c->rep_acks = 0;
 		}
-	}
-	bool snd_was_full = tcp_is_snd_full(c);
-	if (wraps_lte(c->pcb.snd_una, ack) &&
-	    wraps_lte(ack, snd_nxt)) {
-		if (c->pcb.snd_una != ack) {
-			c->rep_acks = 0;
-			c->pcb.snd_una = ack;
-			tcp_conn_ack(c, &q);
-		}
-
-		/* should we update the send window? */
-		if (wraps_lt(c->pcb.snd_wl1, seq) ||
-		    (c->pcb.snd_wl1 == seq &&
-		     wraps_lte(c->pcb.snd_wl2, ack))) {
-			uint32_t old_wnd = c->pcb.snd_wnd;
-			c->pcb.snd_wnd = win;
-			c->pcb.snd_wl1 = seq;
-			c->pcb.snd_wl2 = ack;
-			if (c->pcb.snd_wnd != old_wnd)
-				c->rep_acks = 0;
-		}
-	} else if (wraps_gt(ack, snd_nxt)) {
-		do_ack = true;
-		goto done;
-	}
-	if (snd_was_full && !tcp_is_snd_full(c)) {
-		waitq_release_start(&c->tx_wq, &waiters);
+	} else {
+		c->rep_acks = 0;
 	}
 
 	if (c->pcb.state == TCP_STATE_FIN_WAIT1 &&
