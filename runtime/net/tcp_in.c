@@ -237,6 +237,7 @@ void tcp_rx_conn(struct trans_entry *e, struct mbuf *m)
 
 	/* process acks and update send window */
 	if (wraps_lte(c->pcb.snd_una, ack)) {
+		/* did sent segments get acked? */
 		if (c->pcb.snd_una != ack) {
 			c->rep_acks = 0;
 			c->pcb.snd_una = ack;
@@ -346,7 +347,7 @@ __tcp_rx_conn(tcpconn_t *c, struct mbuf *m, uint32_t ack, uint32_t snd_nxt,
 	struct mbuf *retransmit = NULL;
 	uint32_t seq, len;
 	bool do_ack = false, do_drop = true, fin = false, snd_was_full;
-	bool ack_updated = false, wnd_updated = false;
+	bool ack_same = false, wnd_updated = false;
 	int ret;
 
 	list_head_init(&q);
@@ -460,12 +461,13 @@ __tcp_rx_conn(tcpconn_t *c, struct mbuf *m, uint32_t ack, uint32_t snd_nxt,
 
 	/* process ack and window update */
 	snd_was_full = tcp_is_snd_full(c);
-	if (wraps_lte(c->pcb.snd_una, ack) &&
-	    wraps_lte(ack, snd_nxt)) {
+	if (wraps_lte(c->pcb.snd_una, ack) && wraps_lte(ack, snd_nxt)) {
+		/* did sent segments get acked? */
 		if (c->pcb.snd_una != ack) {
-			ack_updated = true;
 			c->pcb.snd_una = ack;
 			tcp_conn_ack(c, &q);
+		} else {
+			ack_same = true;
 		}
 
 		/* should we update the send window? */
@@ -492,7 +494,7 @@ __tcp_rx_conn(tcpconn_t *c, struct mbuf *m, uint32_t ack, uint32_t snd_nxt,
 	 * 3. There is no data payload included with the ACK.
 	 * 4. There is no window update.
 	 */
-	if (unlikely(!ack_updated && c->pcb.snd_una != c->pcb.snd_nxt &&
+	if (unlikely(ack_same && c->pcb.snd_una != c->pcb.snd_nxt &&
 		     len == 0 && !wnd_updated)) {
 		c->rep_acks++;
 		if (c->rep_acks >= TCP_FAST_RETRANSMIT_THRESH) {
@@ -504,7 +506,7 @@ __tcp_rx_conn(tcpconn_t *c, struct mbuf *m, uint32_t ack, uint32_t snd_nxt,
 			}
 			c->rep_acks = 0;
 		}
-	} else {
+	} else if (c->pcb.snd_una == ack) {
 		c->rep_acks = 0;
 	}
 
