@@ -37,7 +37,7 @@ void write_once(T &p, const T &val) {
 // ThreadWaker is used to wake the current thread after it parks.
 class ThreadWaker {
  public:
-  ThreadWaker() : th_(thread_self()) {}
+  ThreadWaker() : th_(nullptr) {}
   ~ThreadWaker() { assert(th_ == nullptr); }
 
   // disable copy.
@@ -51,6 +51,9 @@ class ThreadWaker {
     w.th_ = nullptr;
     return *this;
   }
+
+  // Prepares the running thread for waking after it parks.
+  void Arm() { th_ = thread_self(); }
 
   // Makes the thread runnable.
   void Wake(bool head = false) {
