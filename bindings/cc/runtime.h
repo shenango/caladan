@@ -11,6 +11,9 @@ extern "C" {
 
 namespace rt {
 
+// The highest number of cores supported.
+constexpr unsigned int kCoreLimit = NCPU;
+
 // Initializes the runtime. If successful, calls @main_func and does not return.
 int RuntimeInit(std::string cfg_path, std::function<void()> main_func);
 

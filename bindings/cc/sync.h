@@ -6,9 +6,101 @@ extern "C" {
 #include <base/lock.h>
 #include <base/stddef.h>
 #include <runtime/sync.h>
+#include <runtime/thread.h>
 }
 
+#include <type_traits>
+
 namespace rt {
+
+// Force the compiler to access a memory location.
+template<typename T>
+T volatile &access_once(T &t) {
+  static_assert(std::is_integral<T>::value, "Integral required.");
+  return static_cast<T volatile &>(t);
+}
+
+// Force the compiler to read a memory location.
+template<typename T>
+T read_once(const T &p) {
+  static_assert(std::is_integral<T>::value, "Integral required.");
+  return static_cast<const T volatile &>(p);
+}
+
+// Force the compiler to write a memory location.
+template<typename T>
+void write_once(T &p, const T &val) {
+  static_assert(std::is_integral<T>::value, "Integral required.");
+  static_cast<T volatile &>(p) = val;
+}
+
+// ThreadWaker is used to wake the current thread after it parks.
+class ThreadWaker {
+ public:
+  ThreadWaker() : th_(thread_self()) {}
+  ~ThreadWaker() { assert(th_ == nullptr); }
+
+  // disable copy.
+  ThreadWaker(const ThreadWaker&) = delete;
+  ThreadWaker& operator=(const ThreadWaker&) = delete;
+
+  // allow move.
+  ThreadWaker(ThreadWaker &&w) : th_(w.th_) { w.th_ = nullptr; }
+  ThreadWaker& operator=(ThreadWaker &&w) {
+    th_ = w.th_;
+    w.th_ = nullptr;
+    return *this;
+  }
+
+  // Makes the thread runnable.
+  void Ready(bool head = false) {
+    assert(th_ != nullptr);
+    if (head) {
+      thread_ready_head(th_);
+    } else {
+      thread_ready(th_);
+    }
+    th_ = nullptr;
+  }
+
+ private:
+  thread_t *th_;
+};
+
+// Disables preemption across a critical section.
+class Preempt {
+ public:
+  Preempt() {}
+  ~Preempt() {}
+
+  // disable move and copy.
+  Preempt(const Preempt&) = delete;
+  Preempt& operator=(const Preempt&) = delete;
+
+  // Disables preemption.
+  void Lock() { preempt_disable(); }
+
+  // Enables preemption.
+  void Unlock() { preempt_enable(); }
+
+  // Atomically enables preemption and parks the running thread.
+  void UnlockAndPark() { thread_park_and_preempt_enable(); }
+
+  // Returns true if preemption is currently disabled.
+  bool IsHeld() const { return !preempt_enabled(); }
+
+  // Returns true if preemption is needed (will handle it on Unlock()).
+  bool Needed() const {
+    assert(IsHeld());
+    return preempt_needed();
+  }
+
+  // Gets the current CPU index (not the same as the core number).
+  unsigned int get_cpu() const {
+    assert(IsHeld());
+    return read_once(kthread_idx);
+  }
+};
 
 // Spin lock support.
 class Spin {
@@ -22,9 +114,15 @@ class Spin {
   // Unlocks the spin lock.
   void Unlock() { spin_unlock_np(&lock_); }
 
+  // Atomically unlocks the spin lock and parks the running thread.
+  void UnlockAndPark() { thread_park_and_unlock_np(&lock_); }
+
   // Locks the spin lock only if it is currently unlocked. Returns true if
   // successful.
   bool TryLock() { return spin_try_lock_np(&lock_); }
+
+  // Returns true if the lock is currently held.
+  bool IsHeld() { return spin_lock_held(&lock_); }
 
  private:
   spinlock_t lock_;
@@ -51,6 +149,9 @@ class Mutex {
   // successful.
   bool TryLock() { return mutex_try_lock(&mu_); }
 
+  // Returns true if the mutex is currently held.
+  bool IsHeld() { return mutex_held(&mu_); }
+
  private:
   mutex_t mu_;
 
@@ -58,7 +159,7 @@ class Mutex {
   Mutex& operator=(const Mutex&) = delete;
 };
 
-// RAII lock support (works with both Spin and Mutex).
+// RAII lock support (works with Spin, Preempt, and Mutex).
 template <typename L>
 class ScopedLock {
  public:
@@ -71,6 +172,27 @@ class ScopedLock {
   ScopedLock(const ScopedLock&) = delete;
   ScopedLock& operator=(const ScopedLock&) = delete;
 };
+
+using SpinGuard = ScopedLock<Spin>;
+using MutexGuard = ScopedLock<Mutex>;
+using PreemptGuard = ScopedLock<Preempt>;
+
+// RAII lock and park support (works with both Spin and Preempt).
+template <typename L>
+class ScopedLockAndPark {
+ public:
+  explicit ScopedLockAndPark(L *lock) : lock_(lock) { lock_->Lock(); }
+  ~ScopedLockAndPark() { lock_->UnlockAndPark(); }
+
+ private:
+  L *const lock_;
+
+  ScopedLockAndPark(const ScopedLockAndPark&) = delete;
+  ScopedLockAndPark& operator=(const ScopedLockAndPark&) = delete;
+};
+
+using SpinGuardAndPark = ScopedLockAndPark<Spin>;
+using PreemptGuardAndPark = ScopedLockAndPark<Preempt>;
 
 // Pthread-like condition variable support.
 class CondVar {
