@@ -53,8 +53,8 @@ class ThreadWaker {
   }
 
   // Makes the thread runnable.
-  void Ready(bool head = false) {
-    assert(th_ != nullptr);
+  void Wake(bool head = false) {
+    if (th_ == nullptr) return;
     if (head) {
       thread_ready_head(th_);
     } else {
@@ -123,6 +123,12 @@ class Spin {
 
   // Returns true if the lock is currently held.
   bool IsHeld() { return spin_lock_held(&lock_); }
+
+  // Gets the current CPU index (not the same as the core number).
+  unsigned int get_cpu() {
+    assert(IsHeld());
+    return read_once(kthread_idx);
+  }
 
  private:
   spinlock_t lock_;
