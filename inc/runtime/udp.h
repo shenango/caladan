@@ -5,19 +5,24 @@
 #pragma once
 
 #include <base/types.h>
+#include <net/ethernet.h>
+#include <net/ip.h>
 #include <net/udp.h>
 #include <runtime/net.h>
 #include <sys/uio.h>
 
-/* the maximum size of a UDP payload */
-extern unsigned int udp_max_payload_size;
+/* the maximum possible payload size (for the largest possible MTU) */
+#define UDP_MAX_PAYLOAD_SIZE \
+	(ETH_MAX_MTU - sizeof(struct ip_hdr) - sizeof(struct udp_hdr))
+
+extern unsigned int udp_payload_size;
 
 /**
- * udp_get_payload_size - returns the maximum payload size
+ * udp_get_payload_size - returns the MTU-limited payload size
  */
-static inline unsigned int udp_get_max_payload_size(void)
+static inline unsigned int udp_get_payload_size(void)
 {
-	return udp_max_payload_size;
+	return udp_payload_size;
 }
 
 
