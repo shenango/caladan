@@ -55,7 +55,9 @@ class ThreadWaker {
   // Prepares the running thread for waking after it parks.
   void Arm() { th_ = thread_self(); }
 
-  // Makes the thread runnable.
+  // Makes the parked thread runnable. Must be called by another thread after
+  // the prior thread has called Arm() and has parked (or will park in the
+  // immediate future).
   void Wake(bool head = false) {
     if (th_ == nullptr) return;
     if (head) {
@@ -92,8 +94,9 @@ class Preempt {
   // Returns true if preemption is currently disabled.
   bool IsHeld() const { return !preempt_enabled(); }
 
-  // Returns true if preemption is needed (will handle it on Unlock()).
-  bool Needed() const {
+  // Returns true if preemption is needed. Will be handled on Unlock() or on
+  // UnlockAndPark().
+  bool PreemptNeeded() const {
     assert(IsHeld());
     return preempt_needed();
   }
@@ -126,6 +129,13 @@ class Spin {
 
   // Returns true if the lock is currently held.
   bool IsHeld() { return spin_lock_held(&lock_); }
+
+  // Returns true if preemption is needed. Will be handled on Unlock() or on
+  // UnlockAndPark().
+  bool PreemptNeeded() {
+    assert(IsHeld());
+    return preempt_needed();
+  }
 
   // Gets the current CPU index (not the same as the core number).
   unsigned int get_cpu() {

@@ -9,8 +9,8 @@ extern "C" {
 
 namespace rt {
 
-constexpr uint64_t kMilliseconds = 1000;
-constexpr uint64_t kSeconds = 1000000;
+static constexpr uint64_t kMilliseconds = 1000;
+static constexpr uint64_t kSeconds = 1000000;
 
 // Gets the current number of microseconds since the launch of the runtime.
 inline uint64_t MicroTime() { return microtime(); }

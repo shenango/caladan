@@ -20,9 +20,6 @@ class NetConn {
 // UDP Connections.
 class UdpConn : public NetConn {
  public:
-  // The maximum size of a UDP packet.
-  static constexpr size_t kMaxPayloadSize = UDP_MAX_PAYLOAD;
-
   ~UdpConn() { udp_close(c_); }
 
   // Creates a UDP connection between a local and remote address.
@@ -39,6 +36,11 @@ class UdpConn : public NetConn {
     int ret = udp_listen(laddr, &c);
     if (ret) return nullptr;
     return new UdpConn(c);
+  }
+
+  // Gets the maximum supported payload size.
+  static size_t MaxPayloadSize() {
+    return static_cast<size_t>(udp_max_payload_size);
   }
 
   // Gets the local UDP address.
