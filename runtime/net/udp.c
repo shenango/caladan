@@ -18,6 +18,8 @@
 #define UDP_IN_DEFAULT_CAP	512
 #define UDP_OUT_DEFAULT_CAP	2048
 
+unsigned int udp_max_payload_size;
+
 static int udp_send_raw(struct mbuf *m, size_t len,
 			struct netaddr laddr, struct netaddr raddr)
 {
@@ -374,7 +376,7 @@ ssize_t udp_write_to(udpconn_t *c, const void *buf, size_t len,
 	struct mbuf *m;
 	void *payload;
 
-	if (len > UDP_MAX_PAYLOAD)
+	if (len > udp_get_max_payload_size())
 		return -EMSGSIZE;
 	if (!raddr) {
 		if (c->e.match == TRANS_MATCH_3TUPLE)
@@ -655,7 +657,7 @@ ssize_t udp_send(const void *buf, size_t len,
 	struct mbuf *m;
 	int ret;
 
-	if (len > UDP_MAX_PAYLOAD)
+	if (len > udp_get_max_payload_size())
 		return -EMSGSIZE;
 	if (laddr.ip == 0)
 		laddr.ip = netcfg.addr;
@@ -702,7 +704,7 @@ ssize_t udp_sendv(const struct iovec *iov, int iovcnt,
 	/* write datagram payload */
 	for (i = 0; i < iovcnt; i++) {
 		len += iov[i].iov_len;
-		if (unlikely(len > UDP_MAX_PAYLOAD)) {
+		if (unlikely(len > udp_get_max_payload_size())) {
 			mbuf_free(m);
 			return -EMSGSIZE;
 		}
@@ -729,4 +731,17 @@ void udp_spawn_data_release(void *release_data)
 {
 	struct mbuf *m = release_data;
 	mbuf_free(m);
+}
+
+/**
+ * udp_init - initializes the UDP stack
+ *
+ * Returns 0 if successful.
+ */
+int udp_init(void)
+{
+	/* calculate maximum UDP payload size */
+	udp_max_payload_size = net_get_mtu();
+	udp_max_payload_size -= sizeof(struct ip_hdr) + sizeof(struct udp_hdr);
+	return 0;
 }

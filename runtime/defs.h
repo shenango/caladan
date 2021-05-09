@@ -626,6 +626,7 @@ extern int stack_init(void);
 extern int sched_init(void);
 extern int preempt_init(void);
 extern int net_init(void);
+extern int udp_init(void);
 extern int arp_init(void);
 extern int trans_init(void);
 extern int smalloc_init(void);

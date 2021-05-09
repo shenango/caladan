@@ -10,7 +10,15 @@
 #include <sys/uio.h>
 
 /* the maximum size of a UDP payload */
-#define UDP_MAX_PAYLOAD 1472
+extern unsigned int udp_max_payload_size;
+
+/**
+ * udp_get_payload_size - returns the maximum payload size
+ */
+static inline unsigned int udp_get_max_payload_size(void)
+{
+	return udp_max_payload_size;
+}
 
 
 /*

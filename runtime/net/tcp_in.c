@@ -328,7 +328,7 @@ done:
 	c->pcb.snd_mss = MAX(mss, TCP_MIN_MSS);
 	c->pcb.snd_wscale = wscale;
 	if (!(opt_en & TCP_OPTION_WSCALE)) {
-		c->pcb.rcv_wnd = c->winmax = UINT16_MAX;
+		c->pcb.rcv_wnd = c->winmax = MIN(c->winmax, UINT16_MAX);
 		c->pcb.rcv_wscale = 0;
 	}
 	if (!(opt_en & TCP_OPTION_MSS)) {

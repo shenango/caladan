@@ -186,7 +186,8 @@ static void stat_tcp_server(void *arg)
 static void stat_worker_udp(void *arg)
 {
 	const size_t cmd_len = strlen("stat");
-	char buf[UDP_MAX_PAYLOAD];
+	size_t payload_len = udp_get_max_payload_size();
+	char buf[payload_len];
 	struct netaddr laddr, raddr;
 	udpconn_t *c;
 	ssize_t ret, len;
@@ -201,18 +202,18 @@ static void stat_worker_udp(void *arg)
 	}
 
 	while (true) {
-		ret = udp_read_from(c, buf, UDP_MAX_PAYLOAD, &raddr);
+		ret = udp_read_from(c, buf, payload_len, &raddr);
 		if (ret < cmd_len)
 			continue;
 		if (strncmp(buf, "stat", cmd_len) != 0)
 			continue;
 
-		len = stat_write_buf(buf, UDP_MAX_PAYLOAD);
+		len = stat_write_buf(buf, payload_len);
 		if (len < 0) {
 			log_err("stat: couldn't generate stat buffer");
 			continue;
 		}
-		assert(len <= UDP_MAX_PAYLOAD);
+		assert(len <= payload_len);
 
 		ret = udp_write_to(c, buf, len, &raddr);
 		WARN_ON(ret != len);
