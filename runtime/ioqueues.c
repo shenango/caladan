@@ -30,9 +30,9 @@
 #define COMMAND_QUEUE_MCOUNT	4096
 
 /* the egress buffer pool must be large enough to fill all the TXQs entirely */
-static unsigned int calculate_egress_pool_size(void)
+static size_t calculate_egress_pool_size(void)
 {
-	unsigned int buflen = MBUF_DEFAULT_LEN;
+	size_t buflen = MBUF_DEFAULT_LEN;
 	return align_up(PACKET_QUEUE_MCOUNT *
 			buflen * MAX(1, guaranteedks) * 8UL,
 			PGSIZE_2MB);
