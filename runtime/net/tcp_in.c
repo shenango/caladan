@@ -325,7 +325,7 @@ static int tcp_parse_options(tcpconn_t *c, const unsigned char *ptr, int len)
 	}
 
 done:
-	c->pcb.snd_mss = MAX(mss, TCP_MIN_MSS);
+	c->pcb.snd_mss = MIN(MAX(mss, TCP_MIN_MSS), c->pcb.rcv_mss);
 	c->pcb.snd_wscale = wscale;
 	if (!(opt_en & TCP_OPTION_WSCALE)) {
 		c->pcb.rcv_wnd = c->winmax = MIN(c->winmax, UINT16_MAX);
