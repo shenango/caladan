@@ -92,14 +92,6 @@ class TcpConn : public NetConn {
  public:
   ~TcpConn() { tcp_close(c_); }
 
-  // Creates a TCP connection with a given affinity
-  static TcpConn *DialAffinity(uint32_t affinity, netaddr raddr) {
-    tcpconn_t *c;
-    int ret = tcp_dial_affinity(affinity, raddr, &c);
-    if (ret) return nullptr;
-    return new TcpConn(c);
-  }
-
   // Creates a TCP connection between a local and remote address.
   static TcpConn *Dial(netaddr laddr, netaddr raddr) {
     tcpconn_t *c;
@@ -108,10 +100,18 @@ class TcpConn : public NetConn {
     return new TcpConn(c);
   }
 
-  // Creates a new TCP connection with matching affinity
-  TcpConn *DialAffinity(netaddr raddr) {
+  // Creates a TCP connection with affinity to a CPU index.
+  static TcpConn *DialAffinity(unsigned int cpu, netaddr raddr) {
     tcpconn_t *c;
-    int ret = tcp_dial_conn_affinity(c_, raddr, &c);
+    int ret = tcp_dial_affinity(cpu, raddr, &c);
+    if (ret) return nullptr;
+    return new TcpConn(c);
+  }
+
+  // Creates a new TCP connection with affinity to another TCP connection.
+  static TcpConn *DialAffinity(TcpConn *cin, netaddr raddr) {
+    tcpconn_t *c;
+    int ret = tcp_dial_conn_affinity(cin->c_, raddr, &c);
     if (ret) return nullptr;
     return new TcpConn(c);
   }

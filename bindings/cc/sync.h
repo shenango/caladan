@@ -185,6 +185,20 @@ class ScopedLock {
   explicit ScopedLock(L *lock) : lock_(lock) { lock_->Lock(); }
   ~ScopedLock() { lock_->Unlock(); }
 
+  // Park is useful for blocking and waiting on a condition.
+  // Only works with Spin and Preempt (not Mutex).
+  // Example:
+  // rt::ThreadWaker w;
+  // rt::SpinLock l;
+  // rt::SpinGuard guard(l);
+  // while (condition) guard.Park(&w);
+  void Park(ThreadWaker *w) {
+    assert(lock_->IsHeld());
+    w->Arm();
+    lock_->UnlockAndPark();
+    lock_->Lock();
+  }
+
  private:
   L *const lock_;
 
