@@ -98,7 +98,7 @@ void OnetoOneHandler(std::unique_ptr<rt::TcpConn> conn) {
   for (auto &addr : memcached_addrs) {
     rt::TcpConn *c;
     if (use_affinity_dial) {
-      c = conn->DialAffinity(addr);
+      c = rt::TcpConn::DialAffinity(conn.get(), addr);
     } else {
       c = rt::TcpConn::Dial({0, 0}, addr);
     }
