@@ -1,3 +1,5 @@
+#include <memory>
+
 #include "thread.h"
 
 namespace rt {
@@ -5,7 +7,9 @@ namespace thread_internal {
 
 // A helper to jump from a C function to a C++ std::function.
 void ThreadTrampoline(void *arg) {
-  (*static_cast<std::function<void()> *>(arg))();
+  auto *func_ptr = static_cast<std::function<void()> *>(arg);
+  (*func_ptr)();
+  std::destroy_at(func_ptr);
 }
 
 // A helper to jump from a C function to a C++ std::function. This variant
@@ -14,7 +18,7 @@ void ThreadTrampolineWithJoin(void *arg) {
   thread_internal::join_data *d =
       static_cast<thread_internal::join_data *>(arg);
   d->func_();
-  d->func_.~function<void()>();
+  std::destroy_at(&d->func_);
   spin_lock_np(&d->lock_);
   if (d->done_) {
     spin_unlock_np(&d->lock_);
