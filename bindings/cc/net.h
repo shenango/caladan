@@ -23,7 +23,7 @@ class UdpConn : public NetConn {
   ~UdpConn() { udp_close(c_); }
 
   // The maximum possible payload size (with the maximum MTU).
-  static constexpr size_t kMaxPayloadSize = UDP_MAX_PAYLOAD_SIZE;
+  static constexpr size_t kMaxPayloadSize = UDP_MAX_PAYLOAD;
 
   // Creates a UDP connection between a local and remote address.
   static UdpConn *Dial(netaddr laddr, netaddr raddr) {

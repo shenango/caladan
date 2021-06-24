@@ -12,7 +12,7 @@
 #include <sys/uio.h>
 
 /* the maximum possible payload size (for the largest possible MTU) */
-#define UDP_MAX_PAYLOAD_SIZE \
+#define UDP_MAX_PAYLOAD \
 	(ETH_MAX_MTU - sizeof(struct ip_hdr) - sizeof(struct udp_hdr))
 
 extern unsigned int udp_payload_size;
