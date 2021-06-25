@@ -76,6 +76,8 @@ struct rte_ether_addr zero_mac = {
 struct rte_ether_addr broadcast_mac = {
 		.addr_bytes = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}
 };
+bool use_static_server_eth = false;
+struct rte_ether_addr static_server_eth;
 uint16_t next_port = 50000;
 static uint64_t snd_times[MAX_SAMPLES];
 static uint64_t rcv_times[MAX_SAMPLES];
@@ -361,6 +363,8 @@ static void do_client(uint8_t port)
 	uint32_t nb_tx, nb_rx, i;
 	uint64_t reqs = 0;
 	struct rte_ether_addr server_eth;
+	struct rte_ether_addr *p_server_eth;
+	char mac_buf[64];
 	struct nbench_req *control_req;
 	struct nbench_resp *control_resp;
 	bool setup_port = false;
@@ -384,7 +388,15 @@ static void do_client(uint8_t port)
 	printf("\nCore %u running in client mode. [Ctrl+C to quit]\n",
 			rte_lcore_id());
 
+	if (use_static_server_eth) {
+		p_server_eth = &static_server_eth;
+		printf("Using static server MAC addr\n");
+		goto got_mac;
+	}
+	p_server_eth = &server_eth;
+
 	/* get the mac address of the server via ARP */
+	printf("Using ARP to resolve server MAC\n");
 	while (true) {
 		send_arp(RTE_ARP_OP_REQUEST, broadcast_mac, server_ip);
 		sleep(1);
@@ -410,13 +422,15 @@ static void do_client(uint8_t port)
 						rte_is_same_ether_addr(&a_hdr->arp_data.arp_tha, &my_eth) &&
 						a_hdr->arp_data.arp_tip == rte_cpu_to_be_32(my_ip)) {
 					/* got a response from server! */
-					rte_ether_addr_copy(&a_hdr->arp_data.arp_sha, &server_eth);
+					rte_ether_addr_copy(&a_hdr->arp_data.arp_sha, p_server_eth);
 					goto got_mac;
 				}
 			}
 		}
 	}
 got_mac:
+	rte_ether_format_addr(&mac_buf[0], 64, p_server_eth);
+	printf("Got server MAC addr: %s\n", &mac_buf[0]);
 
 	/* randomize inter-arrival times by up to RANDOM_US */
 	srand(rte_get_timer_cycles());
@@ -437,7 +451,7 @@ got_mac:
 		eth_hdr = (struct rte_ether_hdr *) buf_ptr;
 
 		rte_ether_addr_copy(&my_eth, &eth_hdr->s_addr);
-		rte_ether_addr_copy(&server_eth, &eth_hdr->d_addr);
+		rte_ether_addr_copy(p_server_eth, &eth_hdr->d_addr);
 		eth_hdr->ether_type = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4);
 
 		/* IPv4 header */
@@ -736,6 +750,7 @@ static int dpdk_init(int argc, char *argv[])
 static int parse_netperf_args(int argc, char *argv[])
 {
 	long tmp;
+	int next_arg;
 
 	/* argv[0] is still the program name */
 	if (argc < 3) {
@@ -752,20 +767,31 @@ static int parse_netperf_args(int argc, char *argv[])
 			printf("not enough arguments left: %d\n", argc);
 			return -EINVAL;
 		}
-		str_to_ip(argv[3], &server_ip);
-		if (sscanf(argv[4], "%u", &client_port) != 1)
+
+		next_arg = 3;
+		str_to_ip(argv[next_arg++], &server_ip);
+		if (sscanf(argv[next_arg++], "%u", &client_port) != 1)
 			return -EINVAL;
-		if (sscanf(argv[5], "%u", &server_port) != 1)
+		if (sscanf(argv[next_arg++], "%u", &server_port) != 1)
 			return -EINVAL;
-		str_to_long(argv[6], &tmp);
+		str_to_long(argv[next_arg++], &tmp);
 		seconds = tmp;
-		str_to_long(argv[7], &tmp);
+		str_to_long(argv[next_arg++], &tmp);
 		payload_len = tmp;
-		str_to_long(argv[8], &tmp);
+		str_to_long(argv[next_arg++], &tmp);
 		interval_us = tmp;
 		if (argc >= 7) {
+			if (!strcmp(argv[next_arg], "--static_arp")) {
+				/* parse static server MAC addr from
+				   XX:XX:XX:XX:XX:XX */
+				next_arg++;
+				use_static_server_eth = true;
+				rte_ether_unformat_addr(argv[next_arg++],
+						&static_server_eth);
+			}
+
 			/* long output file name */
-			output_filename = argv[9];
+			output_filename = argv[next_arg++];
 		}
 	} else if (!strcmp(argv[1], "UDP_SERVER")) {
 		mode = MODE_UDP_SERVER;

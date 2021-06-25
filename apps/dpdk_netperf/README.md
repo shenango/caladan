@@ -13,7 +13,7 @@ sudo ./build/dpdk_netperf -l2 --socket-mem=128 -- UDP_SERVER 192.168.1.2
 
 On the client (IP 192.168.1.3):
 ```
-sudo ./build/dpdk_netperf -l2 --socket-mem=128 -- UDP_CLIENT 192.168.1.3 192.168.1.2 50000 8001 10 8
+sudo ./build/dpdk_netperf -l2 --socket-mem=128 -- UDP_CLIENT 192.168.1.3 192.168.1.2 50000 8001 10 8 50
 ```
 
 ## Shenango spinning (IOKernel + runtime)

@@ -52,6 +52,8 @@ ifeq ($(CONFIG_RTE_TOOLCHAIN_GCC),y)
 CFLAGS_main.o += -Wno-return-type
 endif
 
-EXTRA_CFLAGS += -O3 -g -Wfatal-errors -Wno-format-nonliteral
+# allow experimental API for rte_ether_unformat_addr
+# (-DALLOW_EXPERIMENTAL_API also works)
+EXTRA_CFLAGS += -O3 -g -Wfatal-errors -Wno-format-nonliteral -Wno-error=deprecated-declarations
 
 include $(RTE_SDK)/mk/rte.extapp.mk
