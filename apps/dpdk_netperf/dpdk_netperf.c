@@ -22,17 +22,13 @@
 #define MAX_SAMPLES (100*1000*1000)
 #define RANDOM_US 10
 
+#define FULL_MASK 0xFFFFFFFF
+#define EMPTY_MASK 0x0
+
 static const struct rte_eth_conf port_conf_default = {
 	.rxmode = {
 		.max_rx_pkt_len = RTE_ETHER_MAX_LEN,
 		.offloads = DEV_RX_OFFLOAD_IPV4_CKSUM,
-		.mq_mode = ETH_MQ_RX_RSS,
-	},
-	.rx_adv_conf = {
-		.rss_conf = {
-			.rss_key = NULL,
-			.rss_hf = ETH_RSS_NONFRAG_IPV4_UDP | ETH_RSS_NONFRAG_IPV6_UDP,
-		},
 	},
 	.txmode = {
 		.offloads = DEV_TX_OFFLOAD_IPV4_CKSUM | DEV_TX_OFFLOAD_UDP_CKSUM,
@@ -178,6 +174,80 @@ port_init(uint8_t port, struct rte_mempool *mbuf_pool, unsigned int n_queues)
 	rte_eth_promiscuous_enable(port);
 
 	return 0;
+}
+
+static struct rte_flow *setup_flow(int port_id, uint32_t src_ip,
+				uint32_t src_mask, uint32_t dst_ip,
+				uint32_t dst_mask, uint16_t start_q,
+				uint16_t n_queues, struct rte_flow_error *error)
+{
+	struct rte_flow_attr attr;
+	struct rte_flow_item pattern[3];
+	struct rte_flow_item_ipv4 ip_spec;
+	struct rte_flow_item_ipv4 ip_mask;
+	struct rte_flow_action action[2];
+	uint8_t rss_key[52];
+	struct rte_eth_rss_conf rss_conf;
+	uint16_t queues[RTE_MAX_QUEUES_PER_PORT];
+	struct rte_flow_action_rss action_rss;
+	int ret, i;
+	struct rte_flow *flow = NULL;
+
+	/* only check ingress packets */
+	memset(&attr, 0, sizeof(struct rte_flow_attr));
+	attr.ingress = 1;
+
+	/* setup match pattern */
+	memset(pattern, 0, sizeof(pattern));
+
+	/* match all ethernet addrs */
+	pattern[0].type = RTE_FLOW_ITEM_TYPE_ETH;
+
+	/* apply the IPs and their masks */
+	memset(&ip_spec, 0, sizeof(struct rte_flow_item_ipv4));
+	memset(&ip_mask, 0, sizeof(struct rte_flow_item_ipv4));
+	ip_spec.hdr.src_addr = htonl(src_ip);
+	ip_mask.hdr.src_addr = src_mask;
+	ip_spec.hdr.dst_addr = htonl(dst_ip);
+	ip_mask.hdr.dst_addr = dst_mask;
+	pattern[1].type = RTE_FLOW_ITEM_TYPE_IPV4;
+	pattern[1].spec = &ip_spec;
+	pattern[1].mask = &ip_mask;
+
+	/* must always include end */
+	pattern[2].type = RTE_FLOW_ITEM_TYPE_END;
+
+	/* setup action */
+	memset(action, 0, sizeof(action));
+	action[0].type = RTE_FLOW_ACTION_TYPE_RSS;
+	action[0].conf = &action_rss;
+	action[1].type = RTE_FLOW_ACTION_TYPE_END;
+
+	rss_conf = (struct rte_eth_rss_conf) {
+		.rss_key = rss_key,
+		.rss_key_len = 52,
+	};
+	ret = rte_eth_dev_rss_hash_conf_get(port_id, &rss_conf);
+	if (ret)
+		return NULL;
+
+	for (i = 0; i < n_queues; i++)
+		queues[i] = start_q + i;
+	action_rss = (struct rte_flow_action_rss) {
+		.types = rss_conf.rss_hf,
+		.key_len = rss_conf.rss_key_len,
+		.queue_num = n_queues,
+		.key = rss_key,
+		.queue = queues,
+	};
+
+	ret = rte_flow_validate(port_id, &attr, pattern, action, error);
+	if (ret)
+		return NULL;
+
+	flow = rte_flow_create(port_id, &attr, pattern, action, error);
+
+	return flow;
 }
 
 /*
@@ -520,8 +590,8 @@ do_server(void *arg)
 	struct nbench_req *control_req;
 	struct nbench_resp *control_resp;
 
-	printf("on server core with lcore_id: %d, queue: %d\n", rte_lcore_id(),
-			queue);
+	printf("on server core with lcore_id: %d, queue: %d, num_queues: %d\n", rte_lcore_id(), queue,
+			num_queues);
 
 	/*
 	 * Check that the port is on the same NUMA node as the polling thread
@@ -721,6 +791,8 @@ main(int argc, char *argv[])
 {
 	int args_parsed, res, lcore_id;
 	uint64_t i;
+	struct rte_flow *flow;
+	struct rte_flow_error error;
 
 	/* Initialize dpdk. */
 	args_parsed = dpdk_init(argc, argv);
@@ -737,6 +809,22 @@ main(int argc, char *argv[])
 		printf("\nWARNING: Too many lcores enabled. Only 1 used.\n");
 	if (port_init(dpdk_port, rx_mbuf_pool, num_queues) != 0)
 		rte_exit(EXIT_FAILURE, "Cannot init port %"PRIu8 "\n", dpdk_port);
+
+	if (mode == MODE_UDP_SERVER && num_queues > 1) {
+		if (num_queues != 2 && num_queues != 4 && num_queues != 8 &&
+			num_queues != 16 && num_queues != 32 &&
+			num_queues != 64 && num_queues != 128)
+			rte_exit(EXIT_FAILURE, "number of queues must be a power of two\n");
+
+		/* set up a flow rule to use RSS to distribute packets across all queues */
+		flow = setup_flow(dpdk_port, 0x0, EMPTY_MASK, my_ip, FULL_MASK, 0, num_queues, &error);
+		if (!flow) {
+			printf("Flow can't be created %d message: %s\n",
+				error.type,
+				error.message ? error.message : "(no stated reason)");
+			rte_exit(EXIT_FAILURE, "Failed to set up flows\n");
+		}
+	}
 
 	if (mode == MODE_UDP_CLIENT)
 		do_client(dpdk_port);
