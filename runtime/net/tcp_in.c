@@ -474,11 +474,13 @@ __tcp_rx_conn(tcpconn_t *c, struct mbuf *m, uint32_t ack, uint32_t snd_nxt,
 		if (wraps_lt(c->pcb.snd_wl1, seq) ||
 		    (c->pcb.snd_wl1 == seq &&
 		     wraps_lte(c->pcb.snd_wl2, ack))) {
-			if (c->pcb.snd_wnd != win || c->pcb.snd_wl2 != ack)
-				wnd_updated = true;
-			c->pcb.snd_wnd = win;
-			c->pcb.snd_wl1 = seq;
-			c->pcb.snd_wl2 = ack;
+			if (!ack_same || c->pcb.snd_wnd <= win) {
+				if (c->pcb.snd_wnd != win || c->pcb.snd_wl2 != ack)
+					wnd_updated = true;
+				c->pcb.snd_wnd = win;
+				c->pcb.snd_wl1 = seq;
+				c->pcb.snd_wl2 = ack;
+			}
 		}
 	} else if (wraps_gt(ack, snd_nxt)) {
 		do_ack = true;
