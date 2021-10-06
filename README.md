@@ -12,13 +12,19 @@ For any questions about Caladan, please email <caladan@csail.mit.edu>.
 
 1) Clone the Caladan repository.
 
-2) Set up submodules (e.g., DPDK, SPDK, and rdma-core).
+2) Install dependencies.
+
+```
+sudo apt install make gcc cmake pkg-config libnl-3-dev libnl-route-3-dev libnuma-dev uuid-dev libssl-dev libaio-dev libcunit1-dev libclang-dev
+```
+
+3) Set up submodules (e.g., DPDK, SPDK, and rdma-core).
 
 ```
 make submodules
 ```
 
-3) Build the scheduler (IOKernel), the Caladan runtime, and Ksched and perform some machine setup.
+4) Build the scheduler (IOKernel), the Caladan runtime, and Ksched and perform some machine setup.
 Before building, set the parameters in build/config (e.g., `CONFIG_SPDK=y` to use
 storage, `CONFIG_DIRECTPATH=y` to use directpath, and the MLX4 or MLX5 flags to use
 MLX4 or MLX5 NICs, respectively, ). To enable debugging, set `CONFIG_DEBUG=y` before building.
@@ -30,7 +36,7 @@ popd
 sudo ./scripts/setup_machine.sh
 ```
 
-4) Install Rust and build a synthetic client-server application.
+5) Install Rust and build a synthetic client-server application.
 
 ```
 curl https://sh.rustup.rs -sSf | sh
@@ -43,7 +49,7 @@ cargo update
 cargo build --release
 ```
 
-5) Run the synthetic application with a client and server. The client
+6) Run the synthetic application with a client and server. The client
 sends requests to the server, which performs a specified amount of
 fake work (e.g., computing square roots for 10us), before responding.
 
