@@ -60,12 +60,13 @@ class ThreadWaker {
   // immediate future).
   void Wake(bool head = false) {
     if (th_ == nullptr) return;
-    if (head) {
-      thread_ready_head(th_);
-    } else {
-      thread_ready(th_);
-    }
+    thread_t *th = th_;
     th_ = nullptr;
+    if (head) {
+      thread_ready_head(th);
+    } else {
+      thread_ready(th);
+    }
   }
 
  private:
