@@ -12,18 +12,18 @@ extern "C" {
 
 pub fn storage_block_size() -> Result<usize> {
     let bsize = unsafe { block_size };
-    if bsize <= 0 {
+    if bsize == 0 {
         return Err(Error::new(ErrorKind::Other, "storage not enabled"));
     }
-    return Ok(bsize as usize);
+    Ok(bsize as usize)
 }
 
 pub fn storage_num_blocks() -> Result<usize> {
     let nblocks = unsafe { num_blocks };
-    if nblocks <= 0 {
+    if nblocks == 0 {
         return Err(Error::new(ErrorKind::Other, "storage not enabled"));
     }
-    return Ok(nblocks as usize);
+    Ok(nblocks as usize)
 }
 
 pub fn storage_read(buf: &mut [u8], lba: u64) -> Result<usize> {

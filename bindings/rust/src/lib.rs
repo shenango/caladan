@@ -80,7 +80,7 @@ pub fn microtime() -> u64 {
 
 pub fn sleep(duration: Duration) {
     unsafe {
-        ffi::timer_sleep(duration.as_secs() * 1000_000 + duration.subsec_nanos() as u64 / 1000)
+        ffi::timer_sleep(duration.as_secs() * 1_000_000 + duration.subsec_nanos() as u64 / 1000)
     }
 }
 
@@ -102,6 +102,7 @@ where
 pub struct WaitGroup {
     inner: Arc<ffi::waitgroup>,
 }
+
 impl WaitGroup {
     pub fn new() -> Self {
         let mut inner_uninit = Arc::new_uninit();
@@ -119,12 +120,20 @@ impl WaitGroup {
         self.add(-1)
     }
 }
+
+impl Default for WaitGroup {
+    fn default() -> Self {
+        WaitGroup::new()
+    }
+}
+
 unsafe impl Send for WaitGroup {}
 unsafe impl Sync for WaitGroup {}
 
 pub struct SpinLock {
     inner: UnsafeCell<ffi::spinlock_t>,
 }
+
 impl SpinLock {
     pub fn new() -> Self {
         Self {
@@ -132,6 +141,7 @@ impl SpinLock {
         }
     }
 
+    #[allow(clippy::mut_from_ref)]
     #[inline]
     unsafe fn as_atomic(&self) -> &mut AtomicI32 {
         mem::transmute(&mut (*self.inner.get()).locked)
@@ -176,6 +186,13 @@ impl SpinLock {
         assert_eq!(inner.swap(0, Ordering::Release), 1);
     }
 }
+
+impl Default for SpinLock {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 unsafe impl Send for SpinLock {}
 unsafe impl Sync for SpinLock {}
 
