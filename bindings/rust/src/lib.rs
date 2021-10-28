@@ -30,7 +30,7 @@ pub mod tcp;
 pub mod thread;
 pub mod udp;
 
-pub use asm::*;
+pub use crate::asm::*;
 
 fn convert_error(ret: c_int) -> Result<(), i32> {
     if ret == 0 {
