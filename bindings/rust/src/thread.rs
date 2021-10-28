@@ -26,7 +26,7 @@ where
 {
     let f = arg as *mut F;
     let f: F = unsafe { mem::transmute_copy(&*f as &F) };
-    let _result = panic::catch_unwind(panic::AssertUnwindSafe(move || f()));
+    let _result = panic::catch_unwind(panic::AssertUnwindSafe(f));
 }
 
 pub(crate) extern "C" fn box_trampoline<F>(arg: *mut c_void)
@@ -35,7 +35,7 @@ where
     F: Send + 'static,
 {
     let f = unsafe { Box::from_raw(arg as *mut F) };
-    let _result = panic::catch_unwind(panic::AssertUnwindSafe(move || f()));
+    let _result = panic::catch_unwind(panic::AssertUnwindSafe(f));
 }
 pub(crate) extern "C" fn base_trampoline<T, F>(arg: *mut c_void)
 where
@@ -47,7 +47,7 @@ where
     let base = arg as *mut StackBase<T, F>;
     let base = unsafe { &mut *base };
     let f: F = base.f.take().unwrap();
-    let result = panic::catch_unwind(panic::AssertUnwindSafe(move || f()));
+    let result = panic::catch_unwind(panic::AssertUnwindSafe(f));
 
     // Set return value.
     let d = unsafe { &mut *base.join_data.get() };
@@ -98,20 +98,20 @@ impl<T: Send + 'static> JoinHandle<T> {
         unsafe {
             let join_data = (&*self.join_data).get();
             self.join_data = ptr::null();
-            (&*join_data).lock.lock_np();
+            (*join_data).lock.lock_np();
 
             // If the thread isn't done, block until it is.
-            if !(&*join_data).done {
-                (&mut *join_data).done = true;
-                (&mut *join_data).waiter = thread_self();
-                ffi::thread_park_and_unlock_np((&*join_data).lock.as_raw());
-                (&*join_data).lock.lock_np();
+            if !(*join_data).done {
+                (*join_data).done = true;
+                (*join_data).waiter = thread_self();
+                ffi::thread_park_and_unlock_np((*join_data).lock.as_raw());
+                (*join_data).lock.lock_np();
             }
 
             // Extract the return value, and let the other thread exit.
-            let data = (&mut *join_data).data.take().unwrap();
-            assert!((&*join_data).waiter != ptr::null_mut());
-            ffi::thread_ready((&*join_data).waiter);
+            let data = (*join_data).data.take().unwrap();
+            assert!((*join_data).waiter != ptr::null_mut());
+            ffi::thread_ready((*join_data).waiter);
             preempt_enable();
             data
         }
@@ -203,7 +203,7 @@ where
     unsafe { ffi::thread_ready(th) };
 
     // Construct a JoinHandle for the new thread.
-    #[cfg_attr(rustfmt, rustfmt_skip)]
+    #[rustfmt::skip]
     let &mut StackBase { ref mut join_data, .. } = unsafe { &mut *buf };
     JoinHandle {
         join_data: join_data as *const UnsafeCell<JoinData<T>>,
