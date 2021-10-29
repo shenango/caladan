@@ -1,7 +1,7 @@
 #![allow(non_upper_case_globals)]
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
-#![feature(llvm_asm)]
+#![feature(asm)]
 #![feature(integer_atomics)]
 #![feature(thread_local)]
 #![feature(new_uninit)]
@@ -43,8 +43,8 @@ fn convert_error(ret: c_int) -> Result<(), i32> {
 #[inline]
 pub fn preempt_enable() {
     unsafe {
-        llvm_asm!("" ::: "memory" : "volatile");
-        llvm_asm!("subl $$1, %fs:preempt_cnt@tpoff" : : : "memory", "cc" : "volatile");
+        std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::SeqCst);
+        asm!("subl 1, fs:{0}@tpoff", sym ffi::preempt_cnt);
         if ffi::preempt_cnt == 0 {
             ffi::preempt();
         }
@@ -54,8 +54,8 @@ pub fn preempt_enable() {
 #[inline]
 pub fn preempt_disable() {
     unsafe {
-        llvm_asm!("addl $$1, %fs:preempt_cnt@tpoff" : : : "memory", "cc" : "volatile");
-        llvm_asm!("" ::: "memory" : "volatile");
+        asm!("addl 1, fs:{0}@tpoff", sym ffi::preempt_cnt);
+        std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::SeqCst);
     }
 }
 
