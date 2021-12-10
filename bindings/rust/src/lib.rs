@@ -44,7 +44,7 @@ fn convert_error(ret: c_int) -> Result<(), i32> {
 pub fn preempt_enable() {
     unsafe {
         std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::SeqCst);
-        asm!("subl 1, fs:{0}@tpoff", sym ffi::preempt_cnt);
+        asm!("dec DWORD PTR fs:{0}@TPOFF", sym ffi::preempt_cnt);
         if ffi::preempt_cnt == 0 {
             ffi::preempt();
         }
@@ -54,7 +54,7 @@ pub fn preempt_enable() {
 #[inline]
 pub fn preempt_disable() {
     unsafe {
-        asm!("addl 1, fs:{0}@tpoff", sym ffi::preempt_cnt);
+        asm!("inc DWORD PTR fs:{0}@TPOFF", sym ffi::preempt_cnt);
         std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::SeqCst);
     }
 }
