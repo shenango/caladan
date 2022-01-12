@@ -195,3 +195,32 @@ impl Drop for UdpSpawner {
         unsafe { ffi::udp_destroy_spawner(self.0) }
     }
 }
+
+pub fn udp_accept<F: Fn(UdpConnection) + Clone + Send + Sync + 'static>(
+    local_addr: SocketAddrV4,
+    perconn: F,
+) -> io::Result<()> {
+    let laddr = ffi::netaddr {
+        ip: NetworkEndian::read_u32(&local_addr.ip().octets()),
+        port: local_addr.port(),
+    };
+    let mut sk = std::ptr::null_mut();
+    unsafe {
+        let err = ffi::udp_conn_listen(laddr, 40, &mut sk as _);
+        if err != 0 {
+            return Err(std::io::Error::from_raw_os_error(err));
+        }
+
+        loop {
+            let mut cn = std::ptr::null_mut();
+            let err = ffi::udp_accept(sk, &mut cn as _);
+            if err != 0 {
+                return Err(std::io::Error::from_raw_os_error(err));
+            }
+
+            let cn = UdpConnection(cn);
+            let pc = perconn.clone();
+            crate::thread::spawn_detached(move || pc(cn));
+        }
+    }
+}
