@@ -94,3 +94,8 @@ static inline ssize_t udp_respondv(const struct iovec *iov, int iovcnt,
 {
 	return udp_sendv(iov, iovcnt, d->laddr, d->raddr);
 }
+
+struct udp_conn_spawner;
+typedef struct udp_conn_spawner udpconnspawn_t;
+int udp_conn_listen(struct netaddr laddr, int backlog, udpconnspawn_t **c_out);
+int udp_accept(udpconnspawn_t *q, udpconn_t **c_out);

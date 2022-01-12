@@ -60,6 +60,7 @@ struct udpconn {
 	int			outq_len;
 	waitq_t			outq_wq;
 
+    struct list_node queue_link;
 	struct kref		ref;
 	struct flow_registration		flow;
 };
@@ -639,6 +640,151 @@ void udp_destroy_spawner(udpspawner_t *s)
 	deregister_flow(&s->flow);
 	kref_put(&s->ref, udp_release_spawner_ref);
 }
+
+
+
+
+
+
+
+/* udp per-address spawner.
+ * Mostly copied from tcp. */ 
+struct udp_conn_spawner {
+	struct trans_entry	e;
+	spinlock_t		l;
+	waitq_t			wq;
+	struct list_head	conns;
+	int			backlog;
+	bool			shutdown;
+
+	struct kref ref;
+};
+
+static void udp_conn_queue_recv(struct trans_entry *e, struct mbuf *m)
+{
+	udpconnspawn_t *q = container_of(e, udpconnspawn_t, e);
+	const struct ip_hdr *iphdr;
+	const struct udp_hdr *udphdr;
+    struct netaddr raddr;
+	udpconn_t *c;
+	thread_t *th;
+
+    iphdr = mbuf_network_hdr(m, *iphdr);
+	udphdr = mbuf_transport_hdr(m, *udphdr);
+	if (unlikely(!udphdr)) {
+		mbuf_free(m);
+		return;
+	}
+
+	/* make sure the connection queue isn't full */
+	spin_lock_np(&q->l);
+	if (unlikely(q->backlog == 0 || q->shutdown)) {
+		spin_unlock_np(&q->l);
+		goto done;
+	}
+	q->backlog--;
+	spin_unlock_np(&q->l);
+
+	/* create a new connection */
+	raddr.ip = ntoh32(iphdr->saddr);
+	raddr.port = ntoh16(udphdr->src_port);
+    if (-1 == udp_dial(e->laddr, raddr, &c)) {
+		spin_unlock_np(&q->l);
+		goto done;
+    }
+
+    /* now that it's in the trans table, "recv" it, by recirculating */
+    net_rx_trans(m);
+
+	/* wake a thread to accept the connection */
+	spin_lock_np(&q->l);
+	list_add_tail(&q->conns, &c->queue_link);
+	th = waitq_signal(&q->wq, &q->l);
+	spin_unlock_np(&q->l);
+	waitq_signal_finish(th);
+
+done:
+	mbuf_free(m);
+}
+
+/* operations for udp listen queues */
+static const struct trans_ops udp_conn_queue_ops = {
+	.recv = udp_conn_queue_recv,
+};
+
+/**
+ * udp_conn_listen - creates a udp listening queue for a local address
+ * @laddr: the local address to listen on
+ * @backlog: the maximum number of unaccepted sockets to queue
+ * @q_out: a pointer to store the newly created listening queue
+ *
+ * Returns 0 if successful, otherwise fails.
+ */
+int udp_conn_listen(struct netaddr laddr, int backlog, udpconnspawn_t **c_out)
+{
+	udpconnspawn_t *c;
+	int ret;
+
+	/* only can support one local IP so far */
+	if (laddr.ip == 0)
+		laddr.ip = netcfg.addr;
+	else if (laddr.ip != netcfg.addr)
+		return -EINVAL;
+
+	c = smalloc(sizeof(*c));
+	if (!c)
+		return -ENOMEM;
+
+	trans_init_3tuple(&c->e, IPPROTO_UDP, &udp_conn_queue_ops, laddr);
+	spin_lock_init(&c->l);
+	waitq_init(&c->wq);
+	list_head_init(&c->conns);
+	c->backlog = backlog;
+	c->shutdown = false;
+	kref_init(&c->ref);
+
+    ret = trans_table_add(&c->e);
+	if (ret) {
+		sfree(c);
+		return ret;
+	}
+
+	*c_out = c;
+	return 0;
+}
+
+/**
+ * udp_accept - accepts a UDP connection
+ * @q: the listen queue to accept the connection on
+ * @c_out: a pointer to store the connection
+ *
+ * Returns 0 if successful, otherwise -EPIPE if the listen queue was closed.
+ */
+int udp_accept(udpconnspawn_t *q, udpconn_t **c_out)
+{
+	udpconn_t *c;
+
+	spin_lock_np(&q->l);
+	while (list_empty(&q->conns) && !q->shutdown)
+		waitq_wait(&q->wq, &q->l);
+
+	/* was the queue drained and shutdown? */
+	if (list_empty(&q->conns) && q->shutdown) {
+		spin_unlock_np(&q->l);
+		return -EPIPE;
+	}
+
+	/* otherwise a new connection is available */
+	q->backlog++;
+	c = list_pop(&q->conns, udpconn_t, queue_link);
+	assert(c != NULL);
+	spin_unlock_np(&q->l);
+
+	*c_out = c;
+	return 0;
+}
+
+/* end udp per-addr spawner */
 
 /**
  * udp_send - sends a UDP datagram
