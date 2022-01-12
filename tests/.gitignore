@@ -17,6 +17,7 @@ test_smalloc
 test_thread
 test_udp
 test_poll
+test_mutex
 test_storage
 test_storage_iops
 netperf

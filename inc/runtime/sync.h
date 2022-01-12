@@ -80,6 +80,12 @@ static inline void assert_mutex_held(mutex_t *m)
 }
 
 
+extern bool mutex_try_lock_(mutex_t *m);
+extern void mutex_lock_(mutex_t *m);
+extern void mutex_unlock_(mutex_t *m);
+extern bool mutex_held_(mutex_t *m);
+extern void assert_mutex_held_(mutex_t *m);
+
 /*
  * Condition variable support
  */

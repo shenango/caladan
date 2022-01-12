@@ -34,3 +34,7 @@ path = "src/test_poll.rs"
 [[bin]]
 name = "udp"
 path = "src/test_udp.rs"
+
+[[bin]]
+name = "mutex"
+path = "src/test_mutex.rs"

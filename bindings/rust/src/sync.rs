@@ -8,6 +8,96 @@ use std::os::raw::c_int;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Arc;
 
+pub struct Mutex<T> {
+    data: Arc<UnsafeCell<T>>,
+    inner: Arc<ffi::mutex>,
+}
+
+impl<T> Clone for Mutex<T> {
+    fn clone(&self) -> Self {
+        Self {
+            data: Arc::clone(&self.data),
+            inner: Arc::clone(&self.inner),
+        }
+    }
+}
+
+unsafe impl<T> Send for Mutex<T> {}
+unsafe impl<T> Sync for Mutex<T> {}
+
+impl<T: Default> Default for Mutex<T> {
+    fn default() -> Self {
+        Mutex::new(Default::default())
+    }
+}
+
+impl<T> Mutex<T> {
+    pub fn new(data: T) -> Self {
+        let mut uninit = Arc::new_uninit();
+        unsafe {
+            ffi::mutex_init(Arc::get_mut_unchecked(&mut uninit).as_mut_ptr());
+            Self {
+                data: Arc::new(UnsafeCell::new(data)),
+                inner: uninit.assume_init(),
+            }
+        }
+    }
+
+    pub fn lock(&self) -> MutexGuard<T> {
+        unsafe {
+            ffi::mutex_lock_(&*self.inner as *const _ as *mut _);
+            MutexGuard { mutex: &self }
+        }
+    }
+
+    pub fn try_lock(&self) -> Result<MutexGuard<T>, ()> {
+        if unsafe { ffi::mutex_try_lock_(&*self.inner as *const _ as *mut _) } {
+            Ok(MutexGuard { mutex: &self })
+        } else {
+            Err(())
+        }
+    }
+
+    pub unsafe fn lock_manual(&self) {
+        ffi::mutex_lock_(&*self.inner as *const _ as *mut _);
+    }
+
+    pub unsafe fn unlock_manual(&self) {
+        ffi::assert_mutex_held_(&*self.inner as *const _ as *mut _);
+        ffi::mutex_unlock_(&*self.inner as *const _ as *mut _);
+    }
+
+    pub unsafe fn inner(&self) -> *mut T {
+        self.data.get()
+    }
+}
+
+pub struct MutexGuard<'a, T> {
+    mutex: &'a Mutex<T>,
+}
+
+impl<'a, T> Deref for MutexGuard<'a, T> {
+    type Target = T;
+    fn deref(&self) -> &Self::Target {
+        unsafe { &*self.mutex.data.get() }
+    }
+}
+
+impl<'a, T: Sized> DerefMut for MutexGuard<'a, T> {
+    fn deref_mut(&mut self) -> &mut T {
+        unsafe { &mut *self.mutex.data.get() }
+    }
+}
+
+impl<'a, T> Drop for MutexGuard<'a, T> {
+    fn drop(&mut self) {
+        unsafe {
+            ffi::assert_mutex_held_(&*self.mutex.inner as *const _ as *mut _);
+            ffi::mutex_unlock_(&*self.mutex.inner as *const _ as *mut _)
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct WaitGroup {
     inner: Arc<ffi::waitgroup>,

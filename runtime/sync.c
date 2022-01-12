@@ -62,6 +62,52 @@ void mutex_init(mutex_t *m)
 	list_head_init(&m->waiters);
 }
 
+/**
+ * mutex_try_lock - attempts to acquire a mutex
+ * @m: the mutex to acquire
+ *
+ * Returns true if the acquire was successful.
+ */
+bool mutex_try_lock_(mutex_t *m)
+{
+	return mutex_try_lock(m);
+}
+
+/**
+ * mutex_lock - acquires a mutex
+ * @m: the mutex to acquire
+ */
+void mutex_lock_(mutex_t *m)
+{
+	mutex_lock(m);
+}
+
+/**
+ * mutex_unlock - releases a mutex
+ * @m: the mutex to release
+ */
+void mutex_unlock_(mutex_t *m)
+{
+    mutex_unlock(m);
+}
+/**
+ * mutex_held - is the mutex currently held?
+ * @m: the mutex to check
+ */
+bool mutex_held_(mutex_t *m)
+{
+	return mutex_held(m);
+}
+
+/**
+ * assert_mutex_held - asserts that a mutex is currently held
+ * @m: the mutex that must be held
+ */
+void assert_mutex_held_(mutex_t *m)
+{
+	assert_mutex_held(m);
+}
+
 /*
  * Read-write mutex support
  */
