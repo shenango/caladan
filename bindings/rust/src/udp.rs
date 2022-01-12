@@ -14,6 +14,7 @@ fn isize_to_result(i: isize) -> io::Result<usize> {
     }
 }
 
+#[derive(Clone)]
 pub struct UdpConnection(*mut ffi::udpconn_t);
 impl UdpConnection {
     pub fn dial(local_addr: SocketAddrV4, remote_addr: SocketAddrV4) -> io::Result<Self> {

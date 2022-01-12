@@ -22,6 +22,7 @@ pub mod ffi {
 }
 
 mod asm;
+pub mod poll;
 pub mod storage;
 pub mod tcp;
 pub mod thread;

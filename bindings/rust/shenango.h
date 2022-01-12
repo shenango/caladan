@@ -13,6 +13,7 @@
 #include <runtime/smalloc.h>
 #include <runtime/storage.h>
 #include <runtime/sync.h>
+#include <runtime/poll.h>
 #include <runtime/tcp.h>
 #include <runtime/thread.h>
 #include <runtime/timer.h>

@@ -26,3 +26,7 @@ path = "src/test_hello.rs"
 [[bin]]
 name = "smalloc"
 path = "src/test_smalloc.rs"
+
+[[bin]]
+name = "poll"
+path = "src/test_poll.rs"
