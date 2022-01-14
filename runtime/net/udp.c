@@ -703,6 +703,8 @@ static void udp_conn_queue_recv(struct trans_entry *e, struct mbuf *m)
 	spin_unlock_np(&q->l);
 	waitq_signal_finish(th);
 
+    return;
+
 done:
 	mbuf_free(m);
 }

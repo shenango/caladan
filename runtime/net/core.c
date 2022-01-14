@@ -447,16 +447,38 @@ static uint32_t net_get_ip_route(uint32_t daddr)
 int net_tx_ip(struct mbuf *m, uint8_t proto, uint32_t daddr)
 {
 	struct eth_addr dhost;
+    struct ip_hdr *iphdr;
+    uint16_t len;
 	int ret;
 
-	/* prepend the IP header */
-	net_push_iphdr(m, proto, daddr);
-
-	/* ask NIC to calculate IP checksum */
-	m->txflags |= OLFLAG_IP_CHKSUM | OLFLAG_IPV4;
+    /* prepend the IP header */
+    net_push_iphdr(m, proto, daddr);
 
 	/* apply IP routing */
-	daddr = net_get_ip_route(daddr);
+    if (daddr == netcfg.addr)  {
+        /* loopback */
+        mbuf_mark_network_offset(m);
+        iphdr = mbuf_pull_hdr_or_null(m, *iphdr);
+        switch(proto) {
+        case IPPROTO_ICMP:
+            len = ntoh16(iphdr->len) - sizeof(*iphdr);
+            net_rx_icmp(m, iphdr, len);
+            return 0;
+
+        case IPPROTO_UDP:
+        case IPPROTO_TCP:
+            net_rx_trans(m);
+            return 0;
+
+        default:
+            return -EINVAL;
+        }
+    } else {
+        daddr = net_get_ip_route(daddr);
+    }
+
+    /* ask NIC to calculate IP checksum */
+    m->txflags |= OLFLAG_IP_CHKSUM | OLFLAG_IPV4;
 
 	/* need to use ARP to resolve dhost */
 	ret = arp_lookup(daddr, &dhost, m);
