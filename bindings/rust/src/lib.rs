@@ -19,6 +19,7 @@ mod asm;
 pub mod poll;
 pub mod storage;
 pub mod sync;
+pub mod time;
 // preserve import paths.
 pub use sync::{SpinLock, WaitGroup};
 pub mod tcp;

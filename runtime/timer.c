@@ -229,6 +229,37 @@ static void __timer_sleep(uint64_t deadline_us)
 	thread_park_and_unlock_np(&k->timer_lock);
 }
 
+void timer_sleep_init(struct timer_entry *e) {
+    timer_init(e, timer_finish_sleep, (unsigned long)thread_self());
+    e->localk = NULL;
+}
+
+void timer_sleep_wait(struct timer_entry *e, uint64_t duration_us) {
+    struct kthread *k;
+    uint64_t deadline_us = microtime() + duration_us;
+
+    e->arg = (unsigned long)thread_self();
+
+	k = getk();
+	spin_lock_np(&k->timer_lock);
+	putk();
+	timer_start_locked(e, deadline_us);
+	update_q_ptrs(k);
+	thread_park_and_unlock_np(&k->timer_lock);
+}
+
+void timer_sleep_cancel(struct timer_entry *e) {
+    thread_t *th;
+    if (!e->localk || !timer_cancel(e)) {
+        // was already fired or never armed
+        return;
+    } else {
+        // need to wake up the thread
+        th = (thread_t*) e->arg;
+        thread_ready(th);
+    }
+}
+
 /**
  * timer_sleep_until - sleeps until a deadline
  * @deadline_us: the deadline time in microseconds

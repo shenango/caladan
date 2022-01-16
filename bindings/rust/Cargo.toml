@@ -42,3 +42,7 @@ path = "src/test_mutex.rs"
 [[bin]]
 name = "condvar"
 path = "src/test_condvar.rs"
+
+[[bin]]
+name = "timer"
+path = "src/test_timer.rs"

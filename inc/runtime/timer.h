@@ -40,6 +40,14 @@ timer_init(struct timer_entry *e, timer_fn_t fn, unsigned long arg)
 extern void timer_start(struct timer_entry *e, uint64_t deadline_us);
 extern bool timer_cancel(struct timer_entry *e);
 
+/**
+ * timer_sleep_init - initializes a timer that wakes the thread that calls this function.
+ * @e: timer entry to initialize. This entry can later be passed to timer_sleep_wait to perform the sleep (MUST be called from the same thread)
+ * or timer_sleep_cancel to cancel the sleep and wake the thread immediately.
+ */
+extern void timer_sleep_init(struct timer_entry *e);
+extern void timer_sleep_wait(struct timer_entry *e, uint64_t duration_us);
+extern void timer_sleep_cancel(struct timer_entry *e);
 
 /*
  * High-level API
