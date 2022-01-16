@@ -99,6 +99,46 @@ impl<'a, T> Drop for MutexGuard<'a, T> {
 }
 
 #[derive(Clone)]
+pub struct Condvar {
+    inner: Arc<ffi::condvar_t>,
+}
+
+unsafe impl Send for Condvar {}
+unsafe impl Sync for Condvar {}
+
+impl Condvar {
+    pub fn new() -> Self {
+        let mut inner_uninit = Arc::new_uninit();
+        unsafe { ffi::condvar_init(Arc::get_mut_unchecked(&mut inner_uninit).as_mut_ptr()) };
+        let inner = unsafe { inner_uninit.assume_init() };
+        Self { inner }
+    }
+
+    pub fn signal(&self) {
+        unsafe { ffi::condvar_signal(&*self.inner as *const _ as *mut _) }
+    }
+
+    pub fn broadcast(&self) {
+        unsafe { ffi::condvar_broadcast(&*self.inner as *const _ as *mut _) }
+    }
+
+    pub fn wait<'m, T>(&self, mux: &'m Mutex<T>) -> MutexGuard<'m, T> {
+        unsafe {
+            // 1. lock the mutex.
+            mux.lock_manual();
+            // 2. condvar_wait will unlock the mutex and sleep internally.
+            // When it returns, the mutex will be re-locked.
+            ffi::condvar_wait(
+                &*self.inner as *const _ as *mut _,
+                &*mux.inner as *const _ as *mut _,
+            );
+        }
+
+        MutexGuard { mutex: mux }
+    }
+}
+
+#[derive(Clone)]
 pub struct WaitGroup {
     inner: Arc<ffi::waitgroup>,
 }
