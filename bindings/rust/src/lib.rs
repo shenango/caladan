@@ -1,11 +1,12 @@
 #![allow(non_upper_case_globals)]
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
-#![feature(llvm_asm)]
 #![feature(integer_atomics)]
 #![feature(thread_local)]
 #![feature(new_uninit)]
 #![feature(get_mut_unchecked)]
+#![feature(asm_const)]
+#![feature(asm_sym)]
 
 extern crate byteorder;
 
@@ -16,6 +17,7 @@ use std::os::raw::{c_int, c_void};
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
+use std::arch::asm;
 
 pub mod ffi {
     include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
@@ -40,8 +42,8 @@ fn convert_error(ret: c_int) -> Result<(), i32> {
 #[inline]
 pub fn preempt_enable() {
     unsafe {
-        llvm_asm!("" ::: "memory" : "volatile");
-        llvm_asm!("subl $$1, %fs:preempt_cnt@tpoff" : : : "memory", "cc" : "volatile");
+        std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::SeqCst);
+        asm!("subl $1, %fs:[preempt_cnt@tpoff]", options(att_syntax));
         if ffi::preempt_cnt == 0 {
             ffi::preempt();
         }
@@ -51,8 +53,8 @@ pub fn preempt_enable() {
 #[inline]
 pub fn preempt_disable() {
     unsafe {
-        llvm_asm!("addl $$1, %fs:preempt_cnt@tpoff" : : : "memory", "cc" : "volatile");
-        llvm_asm!("" ::: "memory" : "volatile");
+        asm!("addl $1, %fs:[preempt_cnt@tpoff]", options(att_syntax));
+        std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::SeqCst);
     }
 }
 
