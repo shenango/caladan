@@ -1,7 +1,6 @@
 #![allow(non_upper_case_globals)]
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
-#![feature(asm)]
 #![feature(asm_sym)]
 #![feature(thread_local)]
 #![feature(new_uninit)]
@@ -9,6 +8,7 @@
 
 extern crate byteorder;
 
+use std::arch::asm;
 use std::cell::UnsafeCell;
 use std::ffi::CString;
 use std::mem;
