@@ -233,6 +233,22 @@ static int __cpuidle ksched_idle(struct cpuidle_device *dev,
 	return index;
 }
 
+static inline long get_granted_core_id(void)
+{
+	struct ksched_percpu *p = this_cpu_ptr(&kp);
+
+	if (unlikely(p->running_task == NULL ||
+		     p->running_task->pid != task_pid_vnr(current))) {
+		/* The thread is waken up by a user-sent signal instead of
+		 * the iokernel. In this case no core was granted. We should
+		 * put the thread back into sleep immediately after handling
+		 * the signal. */
+		return -ERESTARTSYS;
+	}
+
+	return smp_processor_id();
+}
+
 static long ksched_park(void)
 {
 	struct ksched_percpu *p;
@@ -292,7 +308,7 @@ park:
 	mark_task_parked(current);
 	schedule();
 	__set_current_state(TASK_RUNNING);
-	return smp_processor_id();
+	return get_granted_core_id();
 }
 
 static long ksched_start(void)
@@ -302,7 +318,7 @@ static long ksched_start(void)
 	mark_task_parked(current);
 	schedule();
 	__set_current_state(TASK_RUNNING);
-	return smp_processor_id();
+	return get_granted_core_id();
 }
 
 static void ksched_deliver_signal(struct ksched_percpu *p, unsigned int signum)
