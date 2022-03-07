@@ -116,6 +116,7 @@ static void ksched_next_tid(struct ksched_percpu *kp, int cpu, pid_t tid)
 {
 	struct task_struct *p;
 	int ret;
+	unsigned long flags;
 	bool already_running;
 
 	/* release previous task */
@@ -134,8 +135,10 @@ static void ksched_next_tid(struct ksched_percpu *kp, int cpu, pid_t tid)
 		return;
 	}
 
+	raw_spin_lock_irqsave(&p->pi_lock, flags);
 	already_running = p->on_cpu || p->state == TASK_WAKING ||
 		p->state == TASK_RUNNING || !try_mark_task_unparked(p);
+	raw_spin_unlock_irqrestore(&p->pi_lock, flags);
 	if (unlikely(already_running)) {
 		rcu_read_unlock();
 		return;
