@@ -56,6 +56,28 @@ struct ksched_percpu {
 /* per-cpu data to coordinate context switching and signal delivery */
 static DEFINE_PER_CPU(struct ksched_percpu, kp);
 
+enum {
+	PARKED = 0,
+	UNPARKED
+};
+
+void mark_task_parked(struct task_struct *tsk)
+{
+	/* borrow the trace field here which is origally used by Ftrace */
+	tsk->trace = PARKED;
+}
+
+bool try_mark_task_unparked(struct task_struct *tsk) {
+	bool success = false;
+
+	if (tsk->trace == PARKED) {
+		success = true;
+		tsk->trace = UNPARKED;
+	}
+
+	return success;
+}
+
 /**
  * ksched_measure_pmc - read a performance counter
  * @sel: selects an x86 performance counter
@@ -94,6 +116,7 @@ static void ksched_next_tid(struct ksched_percpu *kp, int cpu, pid_t tid)
 {
 	struct task_struct *p;
 	int ret;
+	bool already_running;
 
 	/* release previous task */
 	if (kp->running_task) {
@@ -111,14 +134,16 @@ static void ksched_next_tid(struct ksched_percpu *kp, int cpu, pid_t tid)
 		return;
 	}
 
-	if (WARN_ON_ONCE(p->on_cpu || p->state == TASK_WAKING ||
-			 p->state == TASK_RUNNING)) {
+	already_running = p->on_cpu || p->state == TASK_WAKING ||
+		p->state == TASK_RUNNING || !try_mark_task_unparked(p);
+	if (unlikely(already_running)) {
 		rcu_read_unlock();
 		return;
 	}
 
 	ret = set_cpus_allowed_ptr(p, cpumask_of(cpu));
 	if (unlikely(ret)) {
+		mark_task_parked(p);
 		rcu_read_unlock();
 		return;
 	}
@@ -261,6 +286,7 @@ static long ksched_park(void)
 park:
 	/* put this task to sleep and reschedule so the next task can run */
 	__set_current_state(TASK_INTERRUPTIBLE);
+	mark_task_parked(current);
 	schedule();
 	__set_current_state(TASK_RUNNING);
 	return smp_processor_id();
@@ -270,6 +296,7 @@ static long ksched_start(void)
 {
 	/* put this task to sleep and reschedule so the next task can run */
 	__set_current_state(TASK_INTERRUPTIBLE);
+	mark_task_parked(current);
 	schedule();
 	__set_current_state(TASK_RUNNING);
 	return smp_processor_id();
