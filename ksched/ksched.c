@@ -32,6 +32,7 @@
 #include <linux/smp.h>
 #include <linux/uaccess.h>
 #include <linux/signal.h>
+#include <linux/version.h>
 
 #include "ksched.h"
 #include "../iokernel/pmc.h"
@@ -136,8 +137,13 @@ static void ksched_next_tid(struct ksched_percpu *kp, int cpu, pid_t tid)
 	}
 
 	raw_spin_lock_irqsave(&p->pi_lock, flags);
-	already_running = p->on_cpu || p->state == TASK_WAKING ||
-		p->state == TASK_RUNNING || !try_mark_task_unparked(p);
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5,14,0)
+	already_running = p->on_cpu || READ_ONCE(p->state) == TASK_WAKING ||
+			  task_is_running(p) || !try_mark_task_unparked(p);
+#else
+	already_running = p->on_cpu || READ_ONCE(p->__state) == TASK_WAKING ||
+			  task_is_running(p) || !try_mark_task_unparked(p);
+#endif
 	raw_spin_unlock_irqrestore(&p->pi_lock, flags);
 	if (unlikely(already_running)) {
 		rcu_read_unlock();
