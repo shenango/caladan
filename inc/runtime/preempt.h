@@ -87,7 +87,7 @@ static inline void assert_preempt_disabled(void)
  */
 static inline void clear_preempt_needed(void)
 {
-	preempt_cnt |= PREEMPT_NOT_PENDING;
+	preempt_cnt = preempt_cnt | PREEMPT_NOT_PENDING;
 }
 
 /**
