@@ -527,24 +527,6 @@ void thread_park_and_preempt_enable(void)
 	enter_schedule(curth);
 }
 
-/**
- * thread_yield - yields the currently running thread
- *
- * Yielding will give other threads and softirqs a chance to run.
- */
-void thread_yield(void)
-{
-	thread_t *curth = thread_self();
-
-	/* check for softirqs */
-	softirq_run();
-
-	preempt_disable();
-	curth->thread_ready = false;
-	thread_ready(curth);
-	enter_schedule(curth);
-}
-
 static void thread_ready_prepare(struct kthread *k, thread_t *th)
 {
 	/* check for misuse where a ready thread is marked ready again */
@@ -685,33 +667,17 @@ void thread_ready_head(thread_t *th)
 static void thread_finish_cede(void)
 {
 	struct kthread *k = myk();
-	thread_t *th, *myth = thread_self();
+	thread_t *myth = thread_self();
 
+	/* update stats and scheduler state */
 	myth->thread_running = false;
-	myth->thread_ready = true;
 	myth->last_cpu = k->curr_cpu;
 	__self = NULL;
-
-	/* clear thread run start time */
 	ACCESS_ONCE(k->q_ptrs->run_start_tsc) = UINT64_MAX;
-
 	STAT(PROGRAM_CYCLES) += rdtsc() - last_tsc;
 
-	/* ensure preempted thread cuts the line,
-	 * possibly displacing the newest element in a full runqueue
-	 * into the overflow queue
-	 */
-	spin_lock(&k->lock);
-	ACCESS_ONCE(k->q_ptrs->oldest_tsc) = myth->ready_tsc;
-	ACCESS_ONCE(k->q_ptrs->rq_head)++;
-	th = k->rq[--k->rq_tail % RUNTIME_RQ_SIZE];
-	k->rq[k->rq_tail % RUNTIME_RQ_SIZE] = myth;
-	if (unlikely(k->rq_head - k->rq_tail > RUNTIME_RQ_SIZE)) {
-		list_add(&k->rq_overflow, &th->link);
-		k->rq_head--;
-		STAT(RQ_OVERFLOW)++;
-	}
-	spin_unlock(&k->lock);
+	/* mark ceded thread ready at head of runqueue */
+	thread_ready_head(myth);
 
 	/* increment the RCU generation number (even - pretend in sched) */
 	store_release(&k->rcu_gen, k->rcu_gen + 1);
@@ -742,6 +708,24 @@ void thread_cede(void)
 	/* this will switch from the thread stack to the runtime stack */
 	preempt_disable();
 	jmp_runtime(thread_finish_cede);
+}
+
+/**
+ * thread_yield - yields the currently running thread
+ *
+ * Yielding will give other threads and softirqs a chance to run.
+ */
+void thread_yield(void)
+{
+	thread_t *curth = thread_self();
+
+	/* check for softirqs */
+	softirq_run();
+
+	preempt_disable();
+	curth->thread_ready = false;
+	thread_ready(curth);
+	enter_schedule(curth);
 }
 
 static __always_inline thread_t *__thread_create(void)
