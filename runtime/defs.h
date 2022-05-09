@@ -469,6 +469,7 @@ extern struct kthread *ks[NCPU];
 extern bool cfg_prio_is_lc;
 extern uint64_t cfg_ht_punish_us;
 extern uint64_t cfg_qdelay_us;
+extern uint64_t cfg_quantum_us;
 
 extern void kthread_park(bool voluntary);
 extern void kthread_wait_to_attach(void);

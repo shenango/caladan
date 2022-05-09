@@ -92,6 +92,7 @@ struct sched_spec {
 	unsigned int		preferred_socket;
 	uint64_t		qdelay_us;
 	uint64_t		ht_punish_us;
+	uint64_t		quantum_us;
 };
 
 #define CONTROL_HDR_MAGIC	0x696f6b3a /* "iok:" */

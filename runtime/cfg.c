@@ -179,7 +179,7 @@ static int parse_runtime_ht_punish_us(const char *name, const char *val)
 		return ret;
 
 	if (tmp < 0) {
-		log_err("ht_punish_us must be positive");
+		log_err("runtime_ht_punish_us must be positive");
 		return -EINVAL;
 	}
 
@@ -202,6 +202,24 @@ static int parse_runtime_qdelay_us(const char *name, const char *val)
 	}
 
 	cfg_qdelay_us = tmp;
+	return 0;
+}
+
+static int parse_runtime_quantum_us(const char *name, const char *val)
+{
+	long tmp;
+	int ret;
+
+	ret = str_to_long(val, &tmp);
+	if (ret)
+		return ret;
+
+	if (tmp < 0) {
+		log_err("runtime_quantum_us must be positive");
+		return -EINVAL;
+	}
+
+	cfg_quantum_us = tmp;
 	return 0;
 }
 
@@ -362,6 +380,7 @@ static const struct cfg_handler cfg_handlers[] = {
 	{ "runtime_priority", parse_runtime_priority, false },
 	{ "runtime_ht_punish_us", parse_runtime_ht_punish_us, false },
 	{ "runtime_qdelay_us", parse_runtime_qdelay_us, false },
+	{ "runtime_quantum_us", parse_runtime_quantum_us, false },
 	{ "static_arp", parse_static_arp_entry, false },
 	{ "log_level", parse_log_level, false },
 	{ "disable_watchdog", parse_watchdog_flag, false },
@@ -465,8 +484,8 @@ int cfg_load(const char *path)
 		 maxks, guaranteedks, maxks - guaranteedks, spinks);
 	log_info("cfg: task is %s",
 		 cfg_prio_is_lc ? "latency critical (LC)" : "best effort (BE)");
-	log_info("cfg: THRESH_QD: %ld, THRESH_HT: %ld",
-		 cfg_qdelay_us, cfg_ht_punish_us);
+	log_info("cfg: THRESH_QD: %ld, THRESH_HT: %ld THRESH_QUANTUM: %ld",
+		 cfg_qdelay_us, cfg_ht_punish_us, cfg_quantum_us);
 	log_info("cfg: storage %s, directpath %s",
 #ifdef DIRECT_STORAGE
 		 cfg_storage_enabled ? "enabled" : "disabled",
