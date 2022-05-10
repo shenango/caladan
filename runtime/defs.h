@@ -501,7 +501,7 @@ extern int preferred_socket;
 
 extern bool disable_watchdog;
 extern bool softirq_pending(struct kthread *k);
-extern bool softirq_sched(struct kthread *k);
+extern bool softirq_run_locked(struct kthread *k);
 extern bool softirq_run(void);
 
 

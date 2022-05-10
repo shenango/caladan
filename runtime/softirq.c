@@ -40,14 +40,14 @@ bool softirq_pending(struct kthread *k)
 }
 
 /**
- * softirq_sched - schedule softirq work in scheduler context
+ * softirq_run_locked - schedule softirq work with kthread lock held
  * @k: the kthread to check for softirq work
  *
  * The kthread's lock must be held when calling this function.
  *
- * Returns true if softirq work was marked ready.
+ * Returns true if softirq work was scheduled.
  */
-bool softirq_sched(struct kthread *k)
+bool softirq_run_locked(struct kthread *k)
 {
 	bool work_done = false;
 
@@ -86,15 +86,14 @@ bool softirq_sched(struct kthread *k)
 }
 
 /**
- * softirq_run - schedule softirq work in thread context
- * @k: the kthread to check for softirq work
+ * softirq_run - schedule softirq work
  *
- * Returns true if softirq work was marked ready.
+ * Returns true if softirq work was scheduled.
  */
 bool softirq_run(void)
 {
 	struct kthread *k;
-	bool work_done = false;
+	bool work_done;
 
 	k = getk();
 	if (!softirq_pending(k)) {
@@ -102,35 +101,7 @@ bool softirq_run(void)
 		return false;
 	}
 	spin_lock(&k->lock);
-
-	/* check for iokernel softirq work */
-	if (!k->iokernel_busy && softirq_iokernel_pending(k)) {
-		k->iokernel_busy = true;
-		thread_ready_head_locked(k->iokernel_softirq);
-		work_done = true;
-	}
-
-	/* check for directpath softirq work */
-	if (!k->directpath_busy && softirq_directpath_pending(k)) {
-		k->directpath_busy = true;
-		thread_ready_head_locked(k->directpath_softirq);
-		work_done = true;
-	}
-
-	/* check for timer softirq work */
-	if (!k->timer_busy && softirq_timer_pending(k)) {
-		k->timer_busy = true;
-		thread_ready_head_locked(k->timer_softirq);
-		work_done = true;
-	}
-
-	/* check for storage softirq work */
-	if (!k->storage_busy && softirq_storage_pending(k)) {
-		k->storage_busy = true;
-		thread_ready_head_locked(k->storage_softirq);
-		work_done = true;
-	}
-
+	work_done = softirq_run_locked(k);
 	spin_unlock(&k->lock);
 	putk();
 

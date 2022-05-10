@@ -259,7 +259,7 @@ static bool steal_work(struct kthread *l, struct kthread *r)
 	}
 
 	/* check for softirqs */
-	if (softirq_sched(r)) {
+	if (softirq_run_locked(r)) {
 		STAT(SOFTIRQS_STOLEN)++;
 		spin_unlock(&r->lock);
 		return true;
@@ -275,7 +275,7 @@ static __noinline bool do_watchdog(struct kthread *l)
 
 	assert_spin_lock_held(&l->lock);
 
-	work = softirq_sched(l);
+	work = softirq_run_locked(l);
 	if (work)
 		STAT(SOFTIRQS_LOCAL)++;
 	return work;
@@ -343,7 +343,7 @@ static __noreturn __noinline void schedule(void)
 
 again:
 	/* then check for local softirqs */
-	if (softirq_sched(l)) {
+	if (softirq_run_locked(l)) {
 		STAT(SOFTIRQS_LOCAL)++;
 		goto done;
 	}
@@ -363,7 +363,7 @@ again:
 	}
 
 	/* recheck for local softirqs one last time */
-	if (softirq_sched(l)) {
+	if (softirq_run_locked(l)) {
 		STAT(SOFTIRQS_LOCAL)++;
 		goto done;
 	}
