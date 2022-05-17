@@ -48,6 +48,10 @@
 .globl __jmp_thread
 .type __jmp_thread, @function
 __jmp_thread:
+	/* restore ip and stack */
+	movq    RSP(%rdi), %rsp
+	movq    RIP(%rdi), %rsi
+
 	/* restore callee regs */
 	movq    RBX(%rdi), %rbx
 	movq    RBP(%rdi), %rbp
@@ -55,10 +59,6 @@ __jmp_thread:
 	movq    R13(%rdi), %r13
 	movq    R14(%rdi), %r14
 	movq    R15(%rdi), %r15
-
-	/* restore ip and stack */
-	movq    RSP(%rdi), %rsp
-	movq    RIP(%rdi), %rsi
 
 	/* set first argument (in case new thread) */
 	movq    RDI(%rdi), %rdi /* ARG0 */
@@ -114,7 +114,7 @@ __jmp_thread_direct:
 
 	/* restore ip and stack */
 	movq    RSP(%rsi), %rsp
-	movq    RIP(%rsi), %rcx
+	movq    RIP(%rsi), %r8
 
 	/* clear the stack busy flag */
 	movl	$0, (%rdx)
@@ -135,11 +135,11 @@ __jmp_thread_direct:
 	jz	1f
 
 	/* jump into trap frame */
-	jmpq	*%rcx
+	jmpq	*%r8
 	nop
 
 1:	/* cold-path, save RIP and park the kthread */
-	pushq	%rcx
+	pushq	%r8
 	pushq	%rdi
 	pushq	%r15
 	movq	%rsp, %r15
@@ -148,8 +148,8 @@ __jmp_thread_direct:
 	movq	%r15, %rsp /* restore SP */
 	popq	%r15
 	popq	%rdi
-	popq	%rcx
-	jmpq	*%rcx
+	popq	%r8
+	jmpq	*%r8
 
 /**
  * __jmp_runtime - saves the current trap frame and jumps to a function in the
