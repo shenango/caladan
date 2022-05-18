@@ -24,6 +24,21 @@ static void set_preempt_needed(void)
 	preempt_cnt &= ~PREEMPT_NOT_PENDING;
 }
 
+static void yield_thread_if_needed(void)
+{
+	thread_t *curth = thread_self();
+
+	/*
+	 * If the quantum is not spent fully, don't yield. This catches the
+	 * race condition where the IOKernel requested a yield, but the runtime
+	 * already rescheduled before the signal was delivered.
+	 */
+	if (rdtsc() - curth->run_start_tsc < cycles_per_us * cfg_quantum_us)
+		return;
+
+	thread_yield();
+}
+
 /* handles preemptive cede signals from the iokernel */
 static void handle_sigusr1(int s, siginfo_t *si, void *c)
 {
@@ -59,7 +74,7 @@ static void handle_sigusr2(int s, siginfo_t *si, void *c)
 		return;
 	}
 
-	thread_yield();
+	yield_thread_if_needed();
 }
 
 /**
@@ -82,7 +97,7 @@ void preempt(void)
 
 	if (*yield_pending) {
 		*yield_pending = false;
-		thread_yield();
+		yield_thread_if_needed();
 	}
 }
 
