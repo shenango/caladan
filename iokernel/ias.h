@@ -4,7 +4,6 @@
 
 #pragma once
 
-
 /*
  * Constant tunables
  */
@@ -13,10 +12,8 @@
 #define IAS_NPROC			32
 /* the memory bandwidth limit */
 #define IAS_BW_LIMIT			25000.0
-/* the bandwidth controller's adjustment interval */
-#define IAS_BW_INTERVAL_US		10
-/* the HT controller's adjustment interval */
-#define IAS_HT_INTERVAL_US		10
+/* the interval that each subcontroller polls */
+#define IAS_POLL_INTERVAL_US		10
 /* the time before the core-local cache is assumed to be evicted */
 #define IAS_LOC_EVICTED_US		100
 /* the debug info printing interval */
@@ -34,6 +31,7 @@ struct ias_data {
 	unsigned int		is_lc:1;
 	unsigned int		idx; /* a unique index */
 	uint64_t		qdelay_us;
+	uint64_t		quantum_us;
 	struct list_node	all_link;
 	DEFINE_BITMAP(reserved_cores, NCPU);
 
@@ -49,7 +47,6 @@ struct ias_data {
 	/* the hyperthread subcontroller */
 	uint64_t		ht_punish_us;
 	uint64_t		ht_punish_count;
-	float			ht_punish_tsc_inv;
 
 	/* memory bandwidth subcontroller */
 	float			bw_llc_miss_rate;
@@ -81,12 +78,6 @@ extern int ias_add_kthread_on_core(unsigned int core);
 DECLARE_BITMAP(ias_ht_punished_cores, NCPU);
 
 struct ias_ht_data {
-	/* the scheduler's generation counter */
-	uint64_t	sgen;
-	/* the runtime's generation counter */
-	uint64_t	rgen;
-	/* the last time these counters were updated */
-	uint64_t	last_us;
 	/* the fraction of the punish budget used so far */
 	float		budget_used;
 };
@@ -101,6 +92,7 @@ static inline float ias_ht_budget_used(unsigned int core)
 	return ias_ht_percore[core].budget_used;
 }
 
+
 /*
  * Bandwidth (BW) subcontroller definitions
  */
@@ -108,6 +100,13 @@ static inline float ias_ht_budget_used(unsigned int core)
 extern void ias_bw_poll(void);
 extern int ias_bw_init(void);
 extern float ias_bw_estimate_multiplier;
+
+
+/*
+ * Time sharing (TS) subcontroller definitions
+ */
+
+extern void ias_ts_poll(void);
 
 
 /*
@@ -121,3 +120,4 @@ extern uint64_t	ias_bw_sample_failures;
 extern uint64_t ias_bw_sample_aborts;
 extern uint64_t ias_ht_punish_count;
 extern uint64_t ias_ht_relax_count;
+extern uint64_t ias_ts_yield_count;

@@ -96,23 +96,12 @@ static float ias_ht_poll_one(unsigned int core, uint64_t cur_tsc)
 	struct ias_ht_data *htd = &ias_ht_percore[core];
 	struct ias_data *sd = cores[core];
 	struct thread *th = sched_get_thread_on_core(core);
-	uint64_t sgen, start_ts, delay_ts;
 	float budget_used = 0;
 
-	/* check if we might be able to punish the sibling's HT lane */
-	if (sd && sd->ht_punish_us > 0 && th != NULL) {
-		/* update generation counters */
-		sgen = ias_gen[core];
-
-		/* relax once if scheduler gen changes */
-		if (sgen == htd->sgen) {
-			start_ts = ACCESS_ONCE(th->q_ptrs->run_start_tsc);
-			delay_ts = cur_tsc - MIN(cur_tsc, start_ts);
-			budget_used = (float)delay_ts * sd->ht_punish_tsc_inv;
-		}
-		htd->sgen = sgen;
+	if (sd && sd->ht_punish_us >0 && th != NULL) {
+		budget_used = (float)th->metrics.uthread_elapsed_us /
+			      (float)sd->ht_punish_us;
 	}
-
 	htd->budget_used = budget_used;
 	return budget_used;
 }

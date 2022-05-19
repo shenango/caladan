@@ -229,6 +229,30 @@ int sched_idle_on_core(uint32_t mwait_hint, unsigned int core)
 }
 
 /**
+ * sched_yield_on_core - yields the running uthread on the core
+ * @core: the core number to preempt
+ *
+ * Returns 0 if successful, otherwise fail.
+ */
+int sched_yield_on_core(unsigned int core)
+{
+	struct thread *th;
+
+	th = sched_get_thread_on_core(core);
+	if (!th)
+		return -ENOENT;
+
+	/* check to make sure the last yield request finished */
+	if (th->last_yield_rcu_gen == th->metrics.rcu_gen)
+		return 0;
+
+	/* send the yield signal */
+	th->last_yield_rcu_gen = th->metrics.rcu_gen;
+	ksched_enqueue_intr(core, KSCHED_INTR_YIELD);
+	return 0;
+}
+
+/**
  * sched_get_thread_on_core - retrieves the thread currently on a core
  * @core: the core number to get the thread for
  *
@@ -310,6 +334,25 @@ static uint64_t calc_delay_tsc(uint64_t tsc)
 	return cur_tsc - MIN(tsc, cur_tsc);
 }
 
+static void
+sched_update_kthread_metrics(struct thread *th, bool work_pending)
+{
+	uint32_t rcu_gen, uthread_elapsed_tsc;
+
+	rcu_gen = ACCESS_ONCE(th->q_ptrs->rcu_gen);
+	if ((rcu_gen & 0x1) == 0) {
+		/* in scheduler context, no thread running */
+		uthread_elapsed_tsc = 0;
+	} else {
+		uint64_t tsc = ACCESS_ONCE(th->q_ptrs->run_start_tsc);
+		uthread_elapsed_tsc = cur_tsc - MIN(tsc, cur_tsc);
+	}
+
+	th->metrics.uthread_elapsed_us = uthread_elapsed_tsc / cycles_per_us;
+	th->metrics.rcu_gen = rcu_gen;
+	th->metrics.work_pending = work_pending;
+}
+
 static bool
 sched_measure_kthread_delay(struct thread *th,
 			    uint64_t *rxq_tsc, uint64_t *uthread_tsc,
@@ -388,6 +431,7 @@ sched_measure_kthread_delay(struct thread *th,
 		busy = true;
 	*storage_tsc = calc_delay_tsc(th->storage_hwq.busy_since);
 
+	sched_update_kthread_metrics(th, busy);
 	return busy;
 }
 
