@@ -408,7 +408,8 @@ struct kthread {
 	bool			directpath_busy;
 	bool			timer_busy;
 	bool			storage_busy;
-	unsigned int		pad2[3];
+	unsigned int		pad2;
+	uint64_t		last_softirq_tsc;
 
 	/* 9th cache-line, storage nvme queues */
 	struct storage_q	storage_q;
@@ -500,7 +501,7 @@ extern int preferred_socket;
  */
 
 extern bool disable_watchdog;
-extern bool softirq_pending(struct kthread *k);
+extern bool softirq_pending(struct kthread *k, uint64_t now_tsc);
 extern bool softirq_run_locked(struct kthread *k);
 extern bool softirq_run(void);
 
