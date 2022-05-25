@@ -139,7 +139,7 @@ static void ksched_next_tid(struct ksched_percpu *kp, int cpu, pid_t tid)
 	raw_spin_lock_irqsave(&p->pi_lock, flags);
 #if LINUX_VERSION_CODE < KERNEL_VERSION(5,14,0)
 	already_running = p->on_cpu || READ_ONCE(p->state) == TASK_WAKING ||
-			  task_is_running(p) || !try_mark_task_unparked(p);
+			  p->state == TASK_RUNNING || !try_mark_task_unparked(p);
 #else
 	already_running = p->on_cpu || READ_ONCE(p->__state) == TASK_WAKING ||
 			  task_is_running(p) || !try_mark_task_unparked(p);
