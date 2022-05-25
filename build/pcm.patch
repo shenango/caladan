@@ -1,60 +1,56 @@
-From 18b1133df02a9a32a66f81dfc40537bff083aab1 Mon Sep 17 00:00:00 2001
+From 1c2f7e628cbd5df5998b7f4998757c040c7bae5d Mon Sep 17 00:00:00 2001
 From: Josh Fried <joshuafried@gmail.com>
-Date: Fri, 11 Sep 2020 01:22:33 -0400
+Date: Wed, 25 May 2022 01:15:32 -0400
 Subject: [PATCH] PCM for caladan
 
 ---
- Makefile        | 11 ++++++-----
- cpucounters.cpp | 14 +++++++++-----
- cpucounters.h   |  3 ++-
- pcm-caladan.cpp | 33 +++++++++++++++++++++++++++++++++
- 4 files changed, 50 insertions(+), 11 deletions(-)
- create mode 100644 pcm-caladan.cpp
+ CMakeLists.txt      |  2 +-
+ src/CMakeLists.txt  |  2 +-
+ src/cpucounters.cpp | 12 ++++++++----
+ src/cpucounters.h   |  3 ++-
+ src/pcm-caladan.cpp | 33 +++++++++++++++++++++++++++++++++
+ 5 files changed, 45 insertions(+), 7 deletions(-)
+ create mode 100644 src/pcm-caladan.cpp
 
-diff --git a/Makefile b/Makefile
-index 2620526..5e82e8d 100644
---- a/Makefile
-+++ b/Makefile
-@@ -20,12 +20,13 @@ endif
- CXXFLAGS += -Wall -g -O3 -Wno-unknown-pragmas -std=c++11 -fPIC
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 7abc2a6..8733031 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -41,7 +41,7 @@ if(UNIX)  # APPLE, LINUX, FREE_BSD
+     set (PCM_COMMON_FLAGS "-Wno-unknown-pragmas -fPIC")
  
- # uncomment if your Linux kernel supports access to /dev/mem from user space
--# CXXFLAGS += -DPCM_USE_PCI_MM_LINUX
-+CXXFLAGS += -DPCM_USE_PCI_MM_LINUX
-+CXXFLAGS += -DPCM_SILENT
+     if(LINUX)
+-       set (PCM_COMMON_FLAGS "${PCM_COMMON_FLAGS} -Wextra -DPCM_USE_PERF")
++       set (PCM_COMMON_FLAGS "${PCM_COMMON_FLAGS} -Wextra -DPCM_USE_PCI_MM_LINUX -DPCM_SILENT")
+     endif(LINUX)
  
- # rely on Linux perf support (user needs CAP_SYS_ADMIN privileges), comment out to disable
--ifneq ($(wildcard /usr/include/linux/perf_event.h),)
--CXXFLAGS += -DPCM_USE_PERF
--endif
-+#ifneq ($(wildcard /usr/include/linux/perf_event.h),)
-+#CXXFLAGS += -DPCM_USE_PERF
-+#endif
+     # adding the required PCM common flags
+diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
+index 8c86c5c..d60b7c3 100644
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -13,7 +13,7 @@
+ # All pcm-* executables
+ set(PROJECT_NAMES pcm pcm-numa pcm-latency pcm-power pcm-msr pcm-memory pcm-tsx pcm-pcie pcm-core pcm-iio pcm-lspci pcm-pcicfg pcm-mmio pcm-raw)
  
- ifeq ($(UNAME), Linux)
- LIB= -pthread -lrt
-@@ -49,7 +50,7 @@ CXX=c++
- LIB= -lpthread -lc++
- endif
+-file(GLOB COMMON_SOURCES msr.cpp cpucounters.cpp pci.cpp mmio.cpp bw.cpp utils.cpp topology.cpp debug.cpp threadpool.cpp)
++file(GLOB COMMON_SOURCES msr.cpp cpucounters.cpp pci.cpp mmio.cpp bw.cpp utils.cpp topology.cpp debug.cpp threadpool.cpp pcm-caladan.cpp)
+ file(GLOB UNUX_SOURCES dashboard.cpp resctrl.cpp)
  
--COMMON_OBJS = msr.o cpucounters.o pci.o mmio.o client_bw.o utils.o topology.o dashboard.o debug.o threadpool.o
-+COMMON_OBJS = msr.o cpucounters.o pci.o mmio.o client_bw.o utils.o topology.o dashboard.o debug.o threadpool.o pcm-caladan.o
- EXE_OBJS = $(EXE:.x=.o)
- OBJS = $(COMMON_OBJS) $(EXE_OBJS)
- 
-diff --git a/cpucounters.cpp b/cpucounters.cpp
-index 5ae2bd8..93d2c46 100644
---- a/cpucounters.cpp
-+++ b/cpucounters.cpp
-@@ -1657,6 +1657,7 @@ void PCM::initUncorePMUsDirect()
-             }
+ if(UNIX)  # LINUX, FREE_BSD, APPLE
+diff --git a/src/cpucounters.cpp b/src/cpucounters.cpp
+index 4bc2477..b98d4d9 100644
+--- a/src/cpucounters.cpp
++++ b/src/cpucounters.cpp
+@@ -1920,6 +1920,7 @@ void PCM::initUncorePMUsDirect()
          }
      }
+ 
 +#if 0
      if (hasPCICFGUncore() && MSR.size())
      {
          cboPMUs.resize(num_sockets);
-@@ -1689,6 +1690,7 @@ void PCM::initUncorePMUsDirect()
+@@ -1954,6 +1955,7 @@ void PCM::initUncorePMUsDirect()
              }
          }
      }
@@ -62,23 +58,26 @@ index 5ae2bd8..93d2c46 100644
  }
  
  #ifdef PCM_USE_PERF
-@@ -1866,12 +1868,12 @@ PCM::PCM() :
- 
-     showSpecControlMSRs();
+@@ -2164,7 +2166,7 @@ PCM::PCM() :
+         printDetailedSystemTopology();
+     }
  
 -    initEnergyMonitoring();
 +    // initEnergyMonitoring();
  
+ #ifndef PCM_SILENT
+     std::cerr << "\n";
+@@ -2172,7 +2174,7 @@ PCM::PCM() :
+ 
      initUncoreObjects();
  
-     // Initialize RMID to the cores for QOS monitoring
--    initRMID();
-+    // initRMID();
+-    initRDT();
++    // initRDT();
  
      readCPUMicrocodeLevel();
  
-@@ -1881,10 +1883,12 @@ PCM::PCM() :
-     perfEventHandle.resize(num_cores, dummy);
+@@ -2181,10 +2183,12 @@ PCM::PCM() :
+     perfEventHandle.resize(num_cores, std::vector<int>(PERF_MAX_COUNTERS, -1));
  #endif
  
 +#if 0
@@ -87,10 +86,10 @@ index 5ae2bd8..93d2c46 100644
          coreTaskQueues.push_back(std::make_shared<CoreTaskQueue>(i));
      }
 +#endif
- }
  
- void PCM::enableJKTWorkaround(bool enable)
-@@ -5105,7 +5109,7 @@ void ServerPCICFGUncore::initDirect(uint32 socket_, const PCM * pcm)
+ #ifndef PCM_SILENT
+     std::cerr << "\n";
+@@ -6142,7 +6146,7 @@ void ServerPCICFGUncore::initDirect(uint32 socket_, const PCM * pcm)
                          std::make_shared<PCICFGRegister32>(handle, XPF_MC_CH_PCI_PMON_CTL1_ADDR),
                          std::make_shared<PCICFGRegister32>(handle, XPF_MC_CH_PCI_PMON_CTL2_ADDR),
                          std::make_shared<PCICFGRegister32>(handle, XPF_MC_CH_PCI_PMON_CTL3_ADDR),
@@ -99,36 +98,29 @@ index 5ae2bd8..93d2c46 100644
                          std::make_shared<PCICFGRegister64>(handle, XPF_MC_CH_PCI_PMON_CTR1_ADDR),
                          std::make_shared<PCICFGRegister64>(handle, XPF_MC_CH_PCI_PMON_CTR2_ADDR),
                          std::make_shared<PCICFGRegister64>(handle, XPF_MC_CH_PCI_PMON_CTR3_ADDR),
-@@ -5573,7 +5577,7 @@ void ServerPCICFGUncore::programServerUncoreMemoryMetrics(const int rankA, const
-             EDCCntConfig[EventPosition::WRITE] = MC_CH_PCI_PMON_CTL_EVENT(0x02) + MC_CH_PCI_PMON_CTL_UMASK(1);  // monitor reads on counter 1: WPQ
+@@ -6762,7 +6766,7 @@ void ServerPCICFGUncore::programServerUncoreMemoryMetrics(const ServerUncoreMemo
+             }
              break;
          default:
 -            MCCntConfig[EventPosition::READ] = MC_CH_PCI_PMON_CTL_EVENT(0x04) + MC_CH_PCI_PMON_CTL_UMASK(3);  // monitor reads on counter 0: CAS_COUNT.RD
 +            MCCntConfig[EventPosition::READ] = MC_CH_PCI_PMON_CTL_EVENT(0x04) + MC_CH_PCI_PMON_CTL_UMASK(0xf);  // monitor reads AND WRITES on counter 0: CAS_COUNT.RD
              MCCntConfig[EventPosition::WRITE] = MC_CH_PCI_PMON_CTL_EVENT(0x04) + MC_CH_PCI_PMON_CTL_UMASK(12); // monitor writes on counter 1: CAS_COUNT.WR
-             if (PMM)
+             if (setEvents2_3(MC_CH_PCI_PMON_CTL_EVENT(0x04) + MC_CH_PCI_PMON_CTL_UMASK(2)) == false) // monitor partial writes on counter 2: CAS_COUNT.RD_UNDERFILL
              {
-@@ -6849,4 +6853,4 @@ void PCM::setupCustomCoreEventsForNuma(PCM::ExtendedCustomCoreEventDescription&
-     }
- }
- 
--} // namespace pcm
-\ No newline at end of file
-+} // namespace pcm
-diff --git a/cpucounters.h b/cpucounters.h
-index 12f7fdf..abb461a 100644
---- a/cpucounters.h
-+++ b/cpucounters.h
-@@ -567,7 +567,6 @@ class PCM_API PCM
-     bool allow_multiple_instances;
-     bool programmed_pmu;
+diff --git a/src/cpucounters.h b/src/cpucounters.h
+index 11ce5f9..dd3ac58 100644
+--- a/src/cpucounters.h
++++ b/src/cpucounters.h
+@@ -602,7 +602,6 @@ class PCM_API PCM
+     static PCM * instance;
+     bool programmed_core_pmu{false};
      std::vector<std::shared_ptr<SafeMsrHandle> > MSR;
 -    std::vector<std::shared_ptr<ServerPCICFGUncore> > server_pcicfg_uncore;
      std::vector<UncorePMU> pcuPMUs;
      std::vector<std::map<int32, UncorePMU> > iioPMUs;
-     std::vector<UncorePMU> uboxPMUs;
-@@ -604,6 +603,8 @@ class PCM_API PCM
-     bool forceRTMAbortMode;
+     std::vector<std::map<int32, UncorePMU> > irpPMUs;
+@@ -653,6 +652,8 @@ class PCM_API PCM
+     bool linux_arch_perfmon = false;
  
  public:
 +    std::vector<std::shared_ptr<ServerPCICFGUncore> > server_pcicfg_uncore;
@@ -136,11 +128,11 @@ index 12f7fdf..abb461a 100644
      enum { MAX_C_STATE = 10 }; // max C-state on Intel architecture
  
      //! \brief Returns true if the specified core C-state residency metric is supported
-diff --git a/pcm-caladan.cpp b/pcm-caladan.cpp
+diff --git a/src/pcm-caladan.cpp b/src/pcm-caladan.cpp
 new file mode 100644
-index 0000000..896f2a4
+index 0000000..d3bd8dd
 --- /dev/null
-+++ b/pcm-caladan.cpp
++++ b/src/pcm-caladan.cpp
 @@ -0,0 +1,33 @@
 +
 +#include "cpucounters.h"
@@ -171,10 +163,10 @@ index 0000000..896f2a4
 +		cpcm = PCM::getInstance();
 +		server_pcicfg_uncore = cpcm->server_pcicfg_uncore.at(socket);
 +		caladan_cfg = server_pcicfg_uncore.get();
-+		caladan_cfg->programServerUncoreMemoryMetrics(-1, -1, false, false);
++		caladan_cfg->programServerUncoreMemoryMetrics(PartialWrites, -1, -1);
 +		return 0;
 +	}
 +}
 -- 
-2.17.1
+2.34.1
 

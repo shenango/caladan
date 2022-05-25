@@ -18,13 +18,25 @@ fn main() {
 
     // consult shared.mk for other libraries... sorry y'all.
     let output = Command::new("make")
-        .args(&["-f", "../../Makefile", "print-RUNTIME_LIBS", "ROOT_PATH=../../"])
+        .args(&[
+            "-f",
+            "../../Makefile",
+            "print-RUNTIME_LIBS",
+            "ROOT_PATH=../../",
+        ])
         .output()
         .unwrap();
     for t in String::from_utf8_lossy(&output.stdout).split_whitespace() {
         if t.starts_with("-L") {
             println!("cargo:rustc-flags={}", t.replace("-L", "-L "));
-        } else if t == "-lpthread" || t.ends_with(".a") {
+        } else if t == "-lmlx5" || t == "-libverbs" || t.contains("spdk") {
+            println!("cargo:rustc-link-lib=static={}", t.replace("-l", ""));
+        } else if t.starts_with("-l:lib") {
+            println!(
+                "cargo:rustc-link-lib=static={}",
+                t.replace("-l:lib", "").replace(".a", "")
+            );
+        } else if t == "-lpthread" {
         } else if t.starts_with("-l") {
             println!("cargo:rustc-link-lib={}", t.replace("-l", ""));
         }

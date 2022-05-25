@@ -95,12 +95,19 @@ static inline int dpdk_port_init(uint8_t port, struct rte_mempool *mbuf_pool)
 		return -1;
 
 	/* Get default device configuration */
-	rte_eth_dev_info_get(0, &dev_info);
+	rte_eth_dev_info_get(port, &dev_info);
 	rxconf = &dev_info.default_rxconf;
 	rxconf->rx_free_thresh = 64;
-	dp.is_mlx = !strncmp(dev_info.driver_name, "net_mlx", 7);
 
-	if (!strncmp(dev_info.driver_name, "net_mlx5", 8)) {
+	bool is_mlx5 =
+	       !strncmp(dev_info.driver_name, "mlx5_pci",
+	                strlen("mlx5_pci")) ||
+	       !strncmp(dev_info.driver_name, "net_mlx5", strlen("net_mlx5"));
+
+	dp.is_mlx = is_mlx5 || !strncmp(dev_info.driver_name, "net_mlx4",
+	                                strlen("net_mlx4"));
+
+	if (is_mlx5) {
 		nb_rxd = MLX5_RX_RING_SIZE;
 		nb_txd = MLX5_TX_RING_SIZE;
 	}
@@ -208,7 +215,7 @@ int dpdk_init(void)
 	argv[2] = buf;
 	argv[3] = "--socket-mem=128";
 	if (nic_pci_addr_str) {
-		argv[4] = "-w";
+		argv[4] = "--allow";
 		argv[5] = nic_pci_addr_str;
 	} else {
 		argv[4] = "--vdev=net_tap0";

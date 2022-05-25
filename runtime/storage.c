@@ -53,17 +53,6 @@ static void seq_complete(void *arg, const struct spdk_nvme_cpl *completion)
 }
 
 /**
- * probe_cb - callback run after nvme devices have been probed
- *
- */
-static bool probe_cb(void *cb_ctx, const struct spdk_nvme_transport_id *trid,
-		     struct spdk_nvme_ctrlr_opts *opts)
-{
-	opts->io_queue_size = UINT16_MAX;
-	return true;
-}
-
-/**
  * attach_cb - callback run after nvme device has been attached
  *
  */
@@ -376,7 +365,7 @@ int storage_init(void)
 		return 1;
 	}
 
-	rc = spdk_nvme_probe(NULL, NULL, probe_cb, attach_cb, NULL);
+	rc = spdk_nvme_probe(NULL, NULL, NULL, attach_cb, NULL);
 	if (rc != 0) {
 		log_err("spdk_nvme_probe() failed");
 		return 1;

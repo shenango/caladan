@@ -1,48 +1,34 @@
-From bb9dd2886a29574945a64900244528618d25653b Mon Sep 17 00:00:00 2001
+From 5def348ef07bb27384fdc8e516a1ad37c948308f Mon Sep 17 00:00:00 2001
 From: Josh Fried <joshuafried@gmail.com>
-Date: Mon, 17 Aug 2020 23:14:07 -0400
+Date: Wed, 1 Jun 2022 21:51:14 -0400
 Subject: [PATCH] MLX4 support for the iokernel datapath
 
 ---
- config/common_base                        |  2 +-
- drivers/net/mlx4/Makefile                 |  2 ++
- drivers/net/mlx4/mlx4_custom.h            |  8 ++++++++
- drivers/net/mlx4/mlx4_mr.c                | 17 +++++++++++++++++
- drivers/net/mlx4/mlx4_rxtx.c              |  2 +-
- drivers/net/mlx4/mlx4_rxtx.h              | 12 ++++++++++++
- drivers/net/mlx4/rte_pmd_mlx4_version.map |  4 ++++
- 7 files changed, 45 insertions(+), 2 deletions(-)
+ drivers/net/mlx4/meson.build   |  2 ++
+ drivers/net/mlx4/mlx4_custom.h |  8 ++++++++
+ drivers/net/mlx4/mlx4_mr.c     | 17 +++++++++++++++++
+ drivers/net/mlx4/mlx4_rxtx.c   |  2 +-
+ drivers/net/mlx4/mlx4_rxtx.h   | 12 ++++++++++++
+ drivers/net/mlx4/version.map   |  5 +++++
+ 6 files changed, 45 insertions(+), 1 deletion(-)
  create mode 100644 drivers/net/mlx4/mlx4_custom.h
 
-diff --git a/config/common_base b/config/common_base
-index 7dec7ed45..5392d19d4 100644
---- a/config/common_base
-+++ b/config/common_base
-@@ -347,7 +347,7 @@ CONFIG_RTE_LIBRTE_IPN3KE_PMD=n
- #
- # Compile burst-oriented Mellanox ConnectX-3 (MLX4) PMD
- #
--CONFIG_RTE_LIBRTE_MLX4_PMD=n
-+CONFIG_RTE_LIBRTE_MLX4_PMD=y
- CONFIG_RTE_LIBRTE_MLX4_DEBUG=n
+diff --git a/drivers/net/mlx4/meson.build b/drivers/net/mlx4/meson.build
+index 0cf9938a88..db115ee49c 100644
+--- a/drivers/net/mlx4/meson.build
++++ b/drivers/net/mlx4/meson.build
+@@ -8,6 +8,8 @@ if not is_linux
+ 	subdir_done()
+ endif
  
- #
-diff --git a/drivers/net/mlx4/Makefile b/drivers/net/mlx4/Makefile
-index 329569dc1..fcbf9ff7d 100644
---- a/drivers/net/mlx4/Makefile
-+++ b/drivers/net/mlx4/Makefile
-@@ -10,6 +10,8 @@ LIB_GLUE = $(LIB_GLUE_BASE).$(LIB_GLUE_VERSION)
- LIB_GLUE_BASE = librte_pmd_mlx4_glue.so
- LIB_GLUE_VERSION = 18.02.0
- 
-+SYMLINK-$(CONFIG_RTE_LIBRTE_MLX4_PMD)-include += mlx4_custom.h
++headers = files('mlx4_custom.h')
 +
- # Sources.
- SRCS-$(CONFIG_RTE_LIBRTE_MLX4_PMD) += mlx4.c
- SRCS-$(CONFIG_RTE_LIBRTE_MLX4_PMD) += mlx4_ethdev.c
+ static_ibverbs = (get_option('ibverbs_link') == 'static')
+ dlopen_ibverbs = (get_option('ibverbs_link') == 'dlopen')
+ LIB_GLUE_BASE = 'librte_net_mlx4_glue.so'
 diff --git a/drivers/net/mlx4/mlx4_custom.h b/drivers/net/mlx4/mlx4_custom.h
 new file mode 100644
-index 000000000..93520da22
+index 0000000000..93520da225
 --- /dev/null
 +++ b/drivers/net/mlx4/mlx4_custom.h
 @@ -0,0 +1,8 @@
@@ -55,7 +41,7 @@ index 000000000..93520da22
 +
 +#endif /* RTE_PMD_MLX4_CUSTOM_H */
 diff --git a/drivers/net/mlx4/mlx4_mr.c b/drivers/net/mlx4/mlx4_mr.c
-index 470cee06b..5d174b0ca 100644
+index 6b2f0cf187..fbb389d76b 100644
 --- a/drivers/net/mlx4/mlx4_mr.c
 +++ b/drivers/net/mlx4/mlx4_mr.c
 @@ -1460,3 +1460,20 @@ mlx4_mr_release(struct rte_eth_dev *dev)
@@ -80,10 +66,10 @@ index 470cee06b..5d174b0ca 100644
 +	 mlx4_glue->dereg_mr(ibv_mr);
 +}
 diff --git a/drivers/net/mlx4/mlx4_rxtx.c b/drivers/net/mlx4/mlx4_rxtx.c
-index 4dc0adb93..468c0e412 100644
+index adc1c9bf81..f40d594250 100644
 --- a/drivers/net/mlx4/mlx4_rxtx.c
 +++ b/drivers/net/mlx4/mlx4_rxtx.c
-@@ -950,7 +950,7 @@ mlx4_tx_burst(void *dpdk_txq, struct rte_mbuf **pkts, uint16_t pkts_n)
+@@ -949,7 +949,7 @@ mlx4_tx_burst(void *dpdk_txq, struct rte_mbuf **pkts, uint16_t pkts_n)
  				elt->buf = NULL;
  				break;
  			}
@@ -93,7 +79,7 @@ index 4dc0adb93..468c0e412 100644
  				/* MR does not exist. */
  				DEBUG("%p: unable to get MP <-> MR association",
 diff --git a/drivers/net/mlx4/mlx4_rxtx.h b/drivers/net/mlx4/mlx4_rxtx.h
-index 8baf33fa9..a03dadd09 100644
+index 9de6c59411..0b48ef68c8 100644
 --- a/drivers/net/mlx4/mlx4_rxtx.h
 +++ b/drivers/net/mlx4/mlx4_rxtx.h
 @@ -26,6 +26,7 @@
@@ -127,18 +113,19 @@ index 8baf33fa9..a03dadd09 100644
 +}
 +
  #endif /* MLX4_RXTX_H_ */
-diff --git a/drivers/net/mlx4/rte_pmd_mlx4_version.map b/drivers/net/mlx4/rte_pmd_mlx4_version.map
-index f9f17e4f6..6652a8d76 100644
---- a/drivers/net/mlx4/rte_pmd_mlx4_version.map
-+++ b/drivers/net/mlx4/rte_pmd_mlx4_version.map
-@@ -1,3 +1,7 @@
- DPDK_20.0 {
- 	local: *;
-+
+diff --git a/drivers/net/mlx4/version.map b/drivers/net/mlx4/version.map
+index 4a76d1d52d..9242af155d 100644
+--- a/drivers/net/mlx4/version.map
++++ b/drivers/net/mlx4/version.map
+@@ -1,3 +1,8 @@
+ DPDK_21 {
 +	global:
++
 +	mlx4_manual_reg_mr;
 +	mlx4_manual_dereg_mr;
++
+ 	local: *;
  };
 -- 
-2.17.1
+2.25.1
 

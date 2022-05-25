@@ -377,6 +377,8 @@ static void control_loop(void)
 		}
 
 		nrdy = select(maxfd + 1, &readset, NULL, NULL, NULL);
+		while (nrdy == -1 && errno == EINTR)
+			nrdy = select(maxfd + 1, &readset, NULL, NULL, NULL);
 		if (nrdy == -1) {
 			log_err("control: select() failed [%s]",
 				strerror(errno));

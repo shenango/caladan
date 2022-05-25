@@ -46,8 +46,8 @@ stress_shm: $(lib_obj) $(stress_shm_obj) $(librt_libs) $(RUNTIME_DEPS)
 	$(LDXX) -o $@ $(LDFLAGS) $(lib_obj) $(stress_shm_obj) \
 	$(librt_libs) $(RUNTIME_LIBS)
 
-stress_shm_query: $(lib_obj) $(stress_shm_query_obj) $(RUNTIME_DEPS) ../../deps/pcm/libPCM.a
-	$(LDXX) -o $@ $(LDFLAGS) $(lib_obj) $(stress_shm_query_obj) $(RUNTIME_LIBS) ../../deps/pcm/libPCM.a
+stress_shm_query: $(lib_obj) $(stress_shm_query_obj) $(RUNTIME_DEPS) ../../deps/pcm/build/src/libpcm.a
+	$(LDXX) -o $@ $(LDFLAGS) $(lib_obj) $(stress_shm_query_obj) $(RUNTIME_LIBS) ../../deps/pcm/build/src/libpcm.a
 
 interference: $(lib_obj) $(interference_obj) $(librt_libs) $(RUNTIME_DEPS)
 	$(LDXX) -o $@ $(LDFLAGS) $(lib_obj) $(interference_obj) \

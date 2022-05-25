@@ -1,30 +1,30 @@
 diff --git a/providers/mlx5/dr_domain.c b/providers/mlx5/dr_domain.c
-index 11af4589..61dc6e45 100644
+index 5e172d09..61aa29f2 100644
 --- a/providers/mlx5/dr_domain.c
 +++ b/providers/mlx5/dr_domain.c
-@@ -188,9 +188,9 @@ static int dr_domain_caps_init(struct ibv_context *ctx,
- 	if (ret)
- 		return ret;
- 
--	/* Non FDB type is supported only over root table */
--	if (dmn->type != MLX5DV_DR_DOMAIN_TYPE_FDB)
+@@ -206,9 +206,9 @@ static int dr_domain_caps_init(struct ibv_context *ctx,
+ 	/* Non FDB type is supported over root table or when we can enable
+ 	 * force-loopback.
+ 	 */
+-	if ((dmn->type != MLX5DV_DR_DOMAIN_TYPE_FDB) &&
+-	    !dmn->info.caps.roce_caps.fl_rc_qp_when_roce_enabled)
 -		return 0;
-+//	/* Non FDB type is supported only over root table */
-+//	if (dmn->type != MLX5DV_DR_DOMAIN_TYPE_FDB)
++//	if ((dmn->type != MLX5DV_DR_DOMAIN_TYPE_FDB) &&
++//	    !dmn->info.caps.roce_caps.fl_rc_qp_when_roce_enabled)
 +//		return 0;
  
- 	ret = dr_devx_query_device(ctx, &dmn->info.caps);
+ 	ret = dr_domain_query_fdb_caps(ctx, dmn);
  	if (ret)
-@@ -285,6 +285,7 @@ mlx5dv_dr_domain_create(struct ibv_context *ctx,
- 	dmn->ctx = ctx;
+@@ -321,6 +321,7 @@ mlx5dv_dr_domain_create(struct ibv_context *ctx,
  	dmn->type = type;
  	atomic_init(&dmn->refcount, 1);
+ 	list_head_init(&dmn->tbl_list);
 +	dmn->spinlock = 0;
  
  	if (dr_domain_caps_init(ctx, dmn)) {
  		dr_dbg(dmn, "Failed init domain, no caps\n");
 diff --git a/providers/mlx5/dr_rule.c b/providers/mlx5/dr_rule.c
-index 7a3bf633..f6f90a60 100644
+index 9239fe5d..8082ab58 100644
 --- a/providers/mlx5/dr_rule.c
 +++ b/providers/mlx5/dr_rule.c
 @@ -32,6 +32,7 @@
@@ -35,7 +35,7 @@ index 7a3bf633..f6f90a60 100644
  #include "mlx5dv_dr.h"
  
  #define DR_RULE_MAX_STE_CHAIN (DR_RULE_MAX_STES + DR_ACTION_MAX_STES)
-@@ -1294,6 +1295,41 @@ struct mlx5dv_dr_rule *mlx5dv_dr_rule_create(struct mlx5dv_dr_matcher *matcher,
+@@ -1341,6 +1342,41 @@ struct mlx5dv_dr_rule *mlx5dv_dr_rule_create(struct mlx5dv_dr_matcher *matcher,
  	return rule;
  }
  
@@ -78,7 +78,7 @@ index 7a3bf633..f6f90a60 100644
  {
  	struct mlx5dv_dr_matcher *matcher = rule->matcher;
 diff --git a/providers/mlx5/dr_send.c b/providers/mlx5/dr_send.c
-index 64d892ea..c10bb720 100644
+index cf58c02a..5469e39b 100644
 --- a/providers/mlx5/dr_send.c
 +++ b/providers/mlx5/dr_send.c
 @@ -39,7 +39,7 @@
@@ -90,8 +90,8 @@ index 64d892ea..c10bb720 100644
  
  enum {
  	CQ_OK = 0,
-@@ -614,7 +614,7 @@ static void dr_fill_data_segs(struct dr_send_ring *send_ring,
- 		send_info->read.send_flags = IBV_SEND_SIGNALED;
+@@ -616,7 +616,7 @@ static void dr_fill_data_segs(struct dr_send_ring *send_ring,
+ 		send_info->read.send_flags = 0;
  }
  
 -static int dr_postsend_icm_data(struct mlx5dv_dr_domain *dmn,
@@ -99,7 +99,7 @@ index 64d892ea..c10bb720 100644
  				struct postsend_info *send_info)
  {
  	struct dr_send_ring *send_ring = dmn->send_ring;
-@@ -643,6 +643,31 @@ static int dr_postsend_icm_data(struct mlx5dv_dr_domain *dmn,
+@@ -645,6 +645,31 @@ static int dr_postsend_icm_data(struct mlx5dv_dr_domain *dmn,
  	return 0;
  }
  
@@ -132,10 +132,10 @@ index 64d892ea..c10bb720 100644
  				   struct dr_ste_htbl *htbl,
  				   uint8_t **data,
 diff --git a/providers/mlx5/libmlx5.map b/providers/mlx5/libmlx5.map
-index 1558e093..aeb4820b 100644
+index 7fd90ec0..5e289e07 100644
 --- a/providers/mlx5/libmlx5.map
 +++ b/providers/mlx5/libmlx5.map
-@@ -105,4 +105,7 @@ MLX5_1.10 {
+@@ -105,6 +105,9 @@ MLX5_1.10 {
  		mlx5dv_dr_table_create;
  		mlx5dv_dr_table_destroy;
  		mlx5dv_qp_ex_from_ibv_qp_ex;
@@ -143,12 +143,14 @@ index 1558e093..aeb4820b 100644
 +		postsend_lock;
 +		postsend_unlock;
  } MLX5_1.9;
+ 
+ MLX5_1.11 {
 diff --git a/providers/mlx5/mlx5.c b/providers/mlx5/mlx5.c
-index d818ce6d..53e5183e 100644
+index 0a091f5b..99fc094f 100644
 --- a/providers/mlx5/mlx5.c
 +++ b/providers/mlx5/mlx5.c
-@@ -740,6 +740,13 @@ int mlx5dv_query_device(struct ibv_context *ctx_in,
- 		comp_mask_out |= MLX5DV_CONTEXT_MASK_FLOW_ACTION_FLAGS;
+@@ -807,6 +807,13 @@ int mlx5dv_query_device(struct ibv_context *ctx_in,
+ 		}
  	}
  
 +	if (attrs_out->comp_mask & MLX5DV_CONTEXT_MASK_HCA_CORE_CLOCK) {
@@ -162,26 +164,10 @@ index d818ce6d..53e5183e 100644
  
  	return 0;
 diff --git a/providers/mlx5/mlx5dv.h b/providers/mlx5/mlx5dv.h
-index 4e9c2733..a14e53c7 100644
+index 07d3c3dc..20e6d7c9 100644
 --- a/providers/mlx5/mlx5dv.h
 +++ b/providers/mlx5/mlx5dv.h
-@@ -72,6 +72,7 @@ enum mlx5dv_context_comp_mask {
- 	MLX5DV_CONTEXT_MASK_DYN_BFREGS		= 1 << 4,
- 	MLX5DV_CONTEXT_MASK_CLOCK_INFO_UPDATE	= 1 << 5,
- 	MLX5DV_CONTEXT_MASK_FLOW_ACTION_FLAGS	= 1 << 6,
-+	MLX5DV_CONTEXT_MASK_HCA_CORE_CLOCK	 = 1 << 8,
- };
- 
- struct mlx5dv_cqe_comp_caps {
-@@ -122,6 +123,7 @@ struct mlx5dv_context {
- 	uint32_t	max_dynamic_bfregs;
- 	uint64_t	max_clock_info_update_nsec;
- 	uint32_t        flow_action_flags; /* use enum mlx5dv_flow_action_cap_flags */
-+	void            *hca_core_clock;
- };
- 
- enum mlx5dv_context_flags {
-@@ -1416,6 +1418,13 @@ mlx5dv_dr_rule_create(struct mlx5dv_dr_matcher *matcher,
+@@ -1490,6 +1490,13 @@ mlx5dv_dr_rule_create(struct mlx5dv_dr_matcher *matcher,
  		      size_t num_actions,
  		      struct mlx5dv_dr_action *actions[]);
  
@@ -196,18 +182,18 @@ index 4e9c2733..a14e53c7 100644
  
  enum mlx5dv_dr_action_flags {
 diff --git a/providers/mlx5/mlx5dv_dr.h b/providers/mlx5/mlx5dv_dr.h
-index ffc400d7..89188c0b 100644
+index 091a797c..1f2f27a5 100644
 --- a/providers/mlx5/mlx5dv_dr.h
 +++ b/providers/mlx5/mlx5dv_dr.h
-@@ -629,6 +629,7 @@ struct mlx5dv_dr_domain {
- 	struct dr_icm_pool		*action_icm_pool;
- 	struct dr_send_ring		*send_ring;
+@@ -731,6 +731,7 @@ struct mlx5dv_dr_domain {
  	struct dr_domain_info		info;
+ 	struct list_head		tbl_list;
+ 	uint32_t			flags;
 +	int spinlock;
  };
  
  struct dr_table_rx_tx {
-@@ -986,6 +987,8 @@ struct dr_send_ring {
+@@ -1176,6 +1177,8 @@ struct dr_send_ring {
  int dr_send_ring_alloc(struct mlx5dv_dr_domain *dmn);
  void dr_send_ring_free(struct dr_send_ring *send_ring);
  int dr_send_ring_force_drain(struct mlx5dv_dr_domain *dmn);

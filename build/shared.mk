@@ -24,10 +24,18 @@ RUNTIME_DEPS = $(ROOT_PATH)/libruntime.a $(ROOT_PATH)/libnet.a \
 RUNTIME_LIBS = $(ROOT_PATH)/libruntime.a $(ROOT_PATH)/libnet.a \
 	       $(ROOT_PATH)/libbase.a -lpthread
 
+# PKG_CONFIG_PATH
+PKG_CONFIG_PATH := $(ROOT_PATH)/rdma-core/build/lib/pkgconfig:$(PKG_CONFIG_PATH)
+PKG_CONFIG_PATH := $(ROOT_PATH)/dpdk/build/lib/x86_64-linux-gnu/pkgconfig:$(PKG_CONFIG_PATH)
+PKG_CONFIG_PATH := $(ROOT_PATH)/spdk/build/lib/pkgconfig:$(PKG_CONFIG_PATH)
+
 # mlx5 build
 MLX5_INC = -I$(ROOT_PATH)/rdma-core/build/include
-MLX5_LIBS = -L$(ROOT_PATH)/rdma-core/build/lib/statics/
-MLX5_LIBS += -lmlx5 -libverbs -lnl-3 -lnl-route-3
+MLX5_LIBS = -L$(ROOT_PATH)/rdma-core/build/lib/
+MLX5_LIBS += -L$(ROOT_PATH)/rdma-core/build/lib/statics/
+MLX5_LIBS += -L$(ROOT_PATH)/rdma-core/build/util/
+MLX5_LIBS += -L$(ROOT_PATH)/rdma-core/build/ccan/
+MLX5_LIBS += -l:libmlx5.a -l:libibverbs.a -lnl-3 -lnl-route-3 -lrdmacm -lrdma_util -lccan
 
 # parse configuration options
 ifeq ($(CONFIG_DEBUG),y)
@@ -50,9 +58,10 @@ endif
 endif
 ifeq ($(CONFIG_SPDK),y)
 FLAGS += -DDIRECT_STORAGE
-RUNTIME_LIBS += -L$(ROOT_PATH)/spdk/build/lib -L$(ROOT_PATH)/spdk/dpdk/build/lib
-RUNTIME_LIBS += -lspdk_nvme -lspdk_util -lspdk_env_dpdk -lspdk_log -lspdk_sock \
-		-ldpdk -lpthread -lrt -luuid -lcrypto -lnuma -ldl
+RUNTIME_LIBS += $(shell PKG_CONFIG_PATH="$(PKG_CONFIG_PATH)" pkg-config --libs --static libdpdk)
+RUNTIME_LIBS += $(shell PKG_CONFIG_PATH="$(PKG_CONFIG_PATH)" pkg-config --libs --static spdk_nvme)
+RUNTIME_LIBS += $(shell PKG_CONFIG_PATH="$(PKG_CONFIG_PATH)" pkg-config --libs --static spdk_env_dpdk)
+RUNTIME_LIBS += $(shell PKG_CONFIG_PATH="$(PKG_CONFIG_PATH)" pkg-config --libs --static spdk_syslibs)
 INC += -I$(ROOT_PATH)/spdk/include
 endif
 ifeq ($(CONFIG_DIRECTPATH),y)
@@ -65,4 +74,4 @@ CFLAGS = -std=gnu11 $(FLAGS)
 CXXFLAGS = -std=gnu++17 $(FLAGS)
 
 # handy for debugging
-print-%  : ; @echo $* = $($*) 
+print-%  : ; @echo $* = $($*)
