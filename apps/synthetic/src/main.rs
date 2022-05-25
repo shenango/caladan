@@ -214,7 +214,7 @@ fn run_spawner_server(addr: SocketAddrV4, workerspec: &str) {
     }
     extern "C" fn echo(d: *mut shenango::ffi::udp_spawn_data) {
         unsafe {
-            let buf = slice::from_raw_parts((*d).buf as *mut u8, (*d).len);
+            let buf = slice::from_raw_parts((*d).buf as *mut u8, (*d).len as usize);
             let payload = Payload::deserialize(&mut &buf[..]).unwrap();
             let worker = SPAWNER_WORKER.as_ref().unwrap();
             worker.work(payload.work_iterations, payload.randomness);
