@@ -8,7 +8,11 @@
 
 static inline void cpu_relax(void)
 {
+#if __has_builtin(__builtin_ia32_pause)
+	__builtin_ia32_pause();
+#else
 	asm volatile("pause");
+#endif
 }
 
 static inline void cpu_serialize(void)
@@ -19,18 +23,31 @@ static inline void cpu_serialize(void)
 
 static inline uint64_t rdtsc(void)
 {
-	uint32_t a, d;
+#if __has_builtin(__builtin_ia32_rdtsc)
+	return __builtin_ia32_rdtsc();
+#else
+	uint64_t a, d;
 	asm volatile("rdtsc" : "=a" (a), "=d" (d));
-	return ((uint64_t)a) | (((uint64_t)d) << 32);
+	return a | (d << 32);
+#endif
 }
 
 static inline uint64_t rdtscp(uint32_t *auxp)
 {
-	uint32_t a, d, c;
+	uint64_t ret;
+	uint32_t c;
+
+#if __has_builtin(__builtin_ia32_rdtscp)
+	ret = __builtin_ia32_rdtscp(&c);
+#else
+	uint64_t a, d;
 	asm volatile("rdtscp" : "=a" (a), "=d" (d), "=c" (c));
+	ret = a | (d << 32);
+#endif
+
 	if (auxp)
 		*auxp = c;
-	return ((uint64_t)a) | (((uint64_t)d) << 32);
+	return ret;
 }
 
 static inline uint64_t __mm_crc32_u64(uint64_t crc, uint64_t val)
