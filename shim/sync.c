@@ -41,40 +41,30 @@ BUILD_ASSERT(sizeof(pthread_rwlock_t) >= sizeof(rwmutex_t));
 		return fn(arg1, arg2, arg3);                                   \
 	}
 
-extern int __pthread_mutex_init(pthread_mutex_t *mutex,
-		       const pthread_mutexattr_t *mutexattr);
-extern int __pthread_mutex_trylock(pthread_mutex_t *mutex);
-extern int __pthread_mutex_lock(pthread_mutex_t *mutex);
-extern int __pthread_mutex_unlock(pthread_mutex_t *mutex);
-
 int pthread_mutex_init(pthread_mutex_t *mutex,
 		       const pthread_mutexattr_t *mutexattr)
 {
-	if (unlikely(!__self))
-		return __pthread_mutex_init(mutex, mutexattr);
+	NOTSELF_2ARG(int, __func__, mutex, mutexattr);
 	mutex_init((mutex_t *)mutex);
 	return 0;
 }
 
 int pthread_mutex_lock(pthread_mutex_t *mutex)
 {
-	if (unlikely(!__self))
-		return __pthread_mutex_lock(mutex);
+	NOTSELF_1ARG(int, __func__, mutex);
 	mutex_lock((mutex_t *)mutex);
 	return 0;
 }
 
 int pthread_mutex_trylock(pthread_mutex_t *mutex)
 {
-	if (unlikely(!__self))
-		return __pthread_mutex_trylock(mutex);
+	NOTSELF_1ARG(int, __func__, mutex);
 	return mutex_try_lock((mutex_t *)mutex) ? 0 : EBUSY;
 }
 
 int pthread_mutex_unlock(pthread_mutex_t *mutex)
 {
-	if (unlikely(!__self))
-		return __pthread_mutex_unlock(mutex);
+	NOTSELF_1ARG(int, __func__, mutex);
 	mutex_unlock((mutex_t *)mutex);
 	return 0;
 }
