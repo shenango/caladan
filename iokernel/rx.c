@@ -205,7 +205,7 @@ static struct rte_mempool *rx_pktmbuf_pool_create_in_shm(const char *name,
 		uint16_t data_room_size, int socket_id)
 {
 	unsigned elt_size;
-	struct rte_pktmbuf_pool_private mbp_priv;
+	struct rte_pktmbuf_pool_private mbp_priv = {0};
 	struct rte_mempool *mp;
 	int ret, heap_id;
 	size_t pg_size, pg_shift, min_chunk_size, align, len;
