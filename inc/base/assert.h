@@ -17,6 +17,7 @@ extern void logk_bug(bool fatal, const char *expr,
 #define __build_assert_if_constant(cond)
 #endif /* __CHECKER__ */
 
+#undef assert
 /* these assertions will get compiled out in release builds (fails on false) */
 #if DEBUG
 #define assert(cond)						\
