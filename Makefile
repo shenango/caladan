@@ -41,6 +41,11 @@ PCM_LIBS = -lm -lstdc++
 # dpdk libs
 DPDK_LIBS=$(shell PKG_CONFIG_PATH=$(PKG_CONFIG_PATH) pkg-config --libs --static libdpdk)
 
+# additional libs for running with Mellanox NICs
+ifeq ($(CONFIG_MLX5),y)
+$(iokernel_obj): INC += $(MLX5_INC)
+endif
+
 # must be first
 all: libbase.a libnet.a libruntime.a iokerneld $(test_targets)
 
