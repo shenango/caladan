@@ -188,12 +188,12 @@ static void update_oldest_tsc(struct kthread *k)
 
 static bool steal_work(struct kthread *l, struct kthread *r)
 {
-	thread_t *th;
 	uint64_t now_tsc = rdtsc();
-	uint32_t i, avail, rq_tail, overflow = 0;
+	uint32_t i, lsize, rsize, num_to_steal = 0;
+	thread_t *th;
 
 	assert_spin_lock_held(&l->lock);
-	assert(l->rq_head == 0 && l->rq_tail == 0);
+	assert(myk() == l);
 
 	if (!work_available(r, now_tsc))
 		return false;
@@ -210,54 +210,26 @@ static bool steal_work(struct kthread *l, struct kthread *r)
 		drain_overflow(r);
 	}
 #endif
-	/* try to steal directly from the runqueue */
-	avail = load_acquire(&r->rq_head) - r->rq_tail;
-	if (avail) {
-		/* steal half the tasks */
-		avail = div_up(avail, 2);
-		rq_tail = r->rq_tail;
-		for (i = 0; i < avail; i++)
-			l->rq[i] = r->rq[rq_tail++ % RUNTIME_RQ_SIZE];
-		store_release(&r->rq_tail, rq_tail);
 
-		/*
-		 * Drain the remote overflow queue, so newly readied tasks
-		 * don't cut in front tasks in the oveflow queue
-		 */
-		while (true) {
-			th = list_pop(&r->rq_overflow, thread_t, link);
-			if (!th)
-				break;
-
-			list_add_tail(&l->rq_overflow, &th->link);
-			overflow++;
+	/* first try to steal directly from the runqueue */
+	lsize = l->q_ptrs->rq_head - l->rq_tail;
+	rsize = ACCESS_ONCE(r->q_ptrs->rq_head) - r->rq_tail;
+	if (lsize < rsize)
+		num_to_steal = MIN((rsize - lsize) / 2, RUNTIME_RQ_SIZE);
+	if (num_to_steal) {
+		for (i = 0; i < num_to_steal; i++) {
+			th = r->rq[r->rq_tail++ % RUNTIME_RQ_SIZE];
+			thread_ready_head_locked(th);
 		}
 
-		ACCESS_ONCE(r->q_ptrs->rq_tail) += avail + overflow;
+		ACCESS_ONCE(r->q_ptrs->rq_tail) += num_to_steal;
+		drain_overflow(r);
 		update_oldest_tsc(r);
 		spin_unlock(&r->lock);
-
-		l->rq_head = avail;
-		update_oldest_tsc(l);
-		ACCESS_ONCE(l->q_ptrs->rq_head) += avail + overflow;
-		STAT(THREADS_STOLEN) += avail + overflow;
 		return true;
 	}
 
-	/* check for overflow tasks */
-	th = list_pop(&r->rq_overflow, thread_t, link);
-	if (th) {
-		ACCESS_ONCE(r->q_ptrs->rq_tail)++;
-		update_oldest_tsc(r);
-		spin_unlock(&r->lock);
-		l->rq[l->rq_head++ % RUNTIME_RQ_SIZE] = th;
-		ACCESS_ONCE(l->q_ptrs->oldest_tsc) = th->ready_tsc;
-		ACCESS_ONCE(l->q_ptrs->rq_head)++;
-		STAT(THREADS_STOLEN)++;
-		return true;
-	}
-
-	/* check for softirqs */
+	/* otherwise try to steal softirqs */
 	if (softirq_run_locked(r)) {
 		STAT(SOFTIRQS_STOLEN)++;
 		spin_unlock(&r->lock);
@@ -334,9 +306,6 @@ static __noreturn __noinline void schedule(void)
 	if (l->rq_head != l->rq_tail)
 		goto done;
 
-	/* reset the local runqueue since it's empty */
-	l->rq_head = l->rq_tail = 0;
-
 again:
 	/* then check for local softirqs */
 	if (softirq_run_locked(l)) {
@@ -396,7 +365,7 @@ done:
 	/* pop off a thread and run it */
 	assert(l->rq_head != l->rq_tail);
 	th = l->rq[l->rq_tail++ % RUNTIME_RQ_SIZE];
-	ACCESS_ONCE(l->q_ptrs->rq_tail)++;
+	ACCESS_ONCE(l->q_ptrs->rq_tail) = l->rq_tail;
 
 	/* move overflow tasks into the runqueue */
 	if (unlikely(!list_empty(&l->rq_overflow)))
@@ -458,7 +427,7 @@ static __always_inline void enter_schedule(thread_t *curth)
 
 	/* pop the next runnable thread from the queue */
 	th = k->rq[k->rq_tail++ % RUNTIME_RQ_SIZE];
-	ACCESS_ONCE(k->q_ptrs->rq_tail)++;
+	ACCESS_ONCE(k->q_ptrs->rq_tail) = k->rq_tail;
 
 	/* move overflow tasks into the runqueue */
 	if (unlikely(!list_empty(&k->rq_overflow)))
