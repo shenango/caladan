@@ -604,6 +604,10 @@ int tcp_dial(struct netaddr laddr, struct netaddr raddr, tcpconn_t **c_out)
 	if (unlikely(!c))
 		return -ENOMEM;
 
+	/* rewrite loopback address */
+	if (raddr.ip == ((127 << 24) | 1))
+		raddr.ip = netcfg.addr;
+
 	/*
 	 * Attach the connection to the transport layer. From this point onward
 	 * ingress packets can be dispatched to the connection.
@@ -660,6 +664,10 @@ int tcp_dial(struct netaddr laddr, struct netaddr raddr, tcpconn_t **c_out)
  */
 int tcp_dial_conn_affinity(tcpconn_t *in, struct netaddr raddr, tcpconn_t **c_out)
 {
+	/* rewrite loopback address */
+	if (raddr.ip == ((127 << 24) | 1))
+		raddr.ip = netcfg.addr;
+
 	uint32_t in_aff = net_ops.get_flow_affinity(
 			  IPPROTO_TCP, in->e.laddr.port, in->e.raddr);
 	return tcp_dial_affinity(in_aff, raddr, c_out);
@@ -686,6 +694,10 @@ int tcp_dial_affinity(uint32_t in_aff, struct netaddr raddr, tcpconn_t **c_out)
 	tcpconn_t *c;
 
 	base_port = start_port = rand_crc32c(in_aff);
+
+	/* rewrite loopback address */
+	if (raddr.ip == ((127 << 24) | 1))
+		raddr.ip = netcfg.addr;
 
 	while (true) {
 		do {

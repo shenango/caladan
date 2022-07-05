@@ -430,6 +430,48 @@ static uint32_t net_get_ip_route(uint32_t daddr)
 	return daddr;
 }
 
+static int net_tx_local_loopback(struct mbuf *m_in, uint8_t proto)
+{
+	int ret;
+	struct mbuf *m;
+	void *buf;
+
+	/* allocate the buffer to store the payload */
+	m = smalloc(mbuf_length(m_in) + MBUF_HEAD_LEN);
+	if (unlikely(!m))
+		return -ENOMEM;
+
+	buf = (unsigned char *)m + MBUF_HEAD_LEN;
+
+	/* copy the payload and release the buffer */
+	memcpy(buf, mbuf_data(m_in), mbuf_length(m_in));
+
+	mbuf_init(m, buf, mbuf_length(m_in), 0);
+	m->len = mbuf_length(m_in);
+	m->csum_type = CHECKSUM_TYPE_UNNECESSARY;
+	m->release = (void (*)(struct mbuf *))sfree;
+
+	mbuf_mark_network_offset(m);
+	mbuf_pull_hdr(m, struct ip_hdr);
+	switch(proto) {
+		case IPPROTO_UDP:
+		case IPPROTO_TCP:
+			/* spawn a thread to handle RX, caller may hold a lock */
+			ret = thread_spawn((void (*)(void *))net_rx_trans, m);
+			if (unlikely(ret)) {
+				log_err_ratelimited("failed to spawn loopback thread");
+				mbuf_drop(m);
+			}
+			break;
+		default:
+			/* don't support ping etc for now */
+			mbuf_drop(m);
+			break;
+	}
+	mbuf_free(m_in);
+	return 0;
+}
+
 /**
  * net_tx_ip - transmits an IP packet
  * @m: the mbuf to transmit
@@ -451,6 +493,10 @@ int net_tx_ip(struct mbuf *m, uint8_t proto, uint32_t daddr)
 
 	/* prepend the IP header */
 	net_push_iphdr(m, proto, daddr);
+
+	/* route loopbacks */
+	if (daddr == netcfg.addr)
+		return net_tx_local_loopback(m, proto);
 
 	/* ask NIC to calculate IP checksum */
 	m->txflags |= OLFLAG_IP_CHKSUM | OLFLAG_IPV4;
