@@ -4,12 +4,15 @@
 
 #pragma once
 
+#include <features.h>
 #include <base/types.h>
 
 static inline void cpu_relax(void)
 {
-#if __has_builtin(__builtin_ia32_pause)
+#if __GNUC_PREREQ(10, 0)
+#  if __has_builtin(__builtin_ia32_pause)
 	__builtin_ia32_pause();
+#  endif
 #else
 	asm volatile("pause");
 #endif
@@ -23,8 +26,10 @@ static inline void cpu_serialize(void)
 
 static inline uint64_t rdtsc(void)
 {
-#if __has_builtin(__builtin_ia32_rdtsc)
+#if __GNUC_PREREQ(10, 0)
+#  if __has_builtin(__builtin_ia32_rdtsc)
 	return __builtin_ia32_rdtsc();
+#  endif
 #else
 	uint64_t a, d;
 	asm volatile("rdtsc" : "=a" (a), "=d" (d));
@@ -37,8 +42,10 @@ static inline uint64_t rdtscp(uint32_t *auxp)
 	uint64_t ret;
 	uint32_t c;
 
-#if __has_builtin(__builtin_ia32_rdtscp)
+#if __GNUC_PREREQ(10, 0)
+#  if __has_builtin(__builtin_ia32_rdtscp)
 	ret = __builtin_ia32_rdtscp(&c);
+#  endif
 #else
 	uint64_t a, d;
 	asm volatile("rdtscp" : "=a" (a), "=d" (d), "=c" (c));
