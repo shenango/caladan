@@ -186,11 +186,84 @@ static void update_oldest_tsc(struct kthread *k)
 	}
 }
 
+/* drain up to nr threads from k's runqueue into list l */
+static uint32_t drain_threads(struct kthread *k, struct list_head *l, uint32_t nr, bool update_tail)
+{
+	uint32_t i, rq_head, rq_tail;
+	thread_t *th;
+
+	rq_head = load_acquire(&k->rq_head);
+	rq_tail = k->rq_tail;
+
+	for (i = 0; i < nr; i++) {
+		if (likely(wraps_lt(rq_tail, rq_head))) {
+			th = k->rq[rq_tail++ % RUNTIME_RQ_SIZE];
+		} else {
+			th = list_pop(&k->rq_overflow, thread_t, link);
+			if (!th)
+				break;
+		}
+		list_add_tail(l, &th->link);
+	}
+
+	if (update_tail) {
+		k->rq_tail = rq_tail;
+		ACCESS_ONCE(k->q_ptrs->rq_tail) += i;
+	}
+
+	return i;
+}
+
+static void merge_runqueues(struct kthread *l, uint32_t lsize, struct kthread *r, uint32_t rsize)
+{
+	struct list_head l_ths, r_ths;
+	thread_t *th, *cur_l, *cur_r;
+	uint32_t i;
+
+	assert_preempt_disabled();
+	assert_spin_lock_held(&l->lock);
+	assert_spin_lock_held(&r->lock);
+	assert(myk() == l);
+
+	list_head_init(&r_ths);
+	rsize = drain_threads(r, &r_ths, rsize, true /* update_tail */);
+	update_oldest_tsc(r);
+	spin_unlock(&r->lock);
+
+	list_head_init(&l_ths);
+	lsize = drain_threads(l, &l_ths, lsize, false /* update_tail */);
+
+	/* reset rq_head/tail */
+	l->rq_head = l->rq_tail = 0;
+
+	cur_r = list_pop(&r_ths, thread_t, link);
+	cur_l = list_pop(&l_ths, thread_t, link);
+
+	/* merge together two queues of threads sorted by ready_tsc */
+	for (i = 0; i < lsize + rsize; i++) {
+		if (cur_r && (!cur_l || cur_r->ready_tsc < cur_l->ready_tsc)) {
+			th = cur_r;
+			cur_r = list_pop(&r_ths, thread_t, link);
+		} else {
+			th = cur_l;
+			cur_l = list_pop(&l_ths, thread_t, link);
+		}
+
+		assert(th);
+		if (unlikely(l->rq_head - l->rq_tail >= RUNTIME_RQ_SIZE))
+			list_add_tail(&l->rq_overflow, &th->link);
+		else
+			l->rq[l->rq_head++ % RUNTIME_RQ_SIZE] = th;
+	}
+
+	ACCESS_ONCE(l->q_ptrs->rq_head) += rsize;
+	update_oldest_tsc(l);
+}
+
 static bool steal_work(struct kthread *l, struct kthread *r)
 {
 	uint64_t now_tsc = rdtsc();
-	uint32_t i, lsize, rsize, num_to_steal = 0;
-	thread_t *th;
+	uint32_t lsize, rsize, num_to_steal = 0;
 
 	assert_spin_lock_held(&l->lock);
 	assert(myk() == l);
@@ -212,20 +285,12 @@ static bool steal_work(struct kthread *l, struct kthread *r)
 #endif
 
 	/* first try to steal directly from the runqueue */
-	lsize = l->q_ptrs->rq_head - l->rq_tail;
-	rsize = ACCESS_ONCE(r->q_ptrs->rq_head) - r->rq_tail;
+	lsize = l->q_ptrs->rq_head - l->q_ptrs->rq_tail;
+	rsize = ACCESS_ONCE(r->q_ptrs->rq_head) - r->q_ptrs->rq_tail;
 	if (lsize < rsize)
 		num_to_steal = MIN((rsize - lsize) / 2, RUNTIME_RQ_SIZE);
 	if (num_to_steal) {
-		for (i = 0; i < num_to_steal; i++) {
-			th = r->rq[r->rq_tail++ % RUNTIME_RQ_SIZE];
-			thread_ready_head_locked(th);
-		}
-
-		ACCESS_ONCE(r->q_ptrs->rq_tail) += num_to_steal;
-		drain_overflow(r);
-		update_oldest_tsc(r);
-		spin_unlock(&r->lock);
+		merge_runqueues(l, lsize, r, num_to_steal);
 		return true;
 	}
 
@@ -365,7 +430,7 @@ done:
 	/* pop off a thread and run it */
 	assert(l->rq_head != l->rq_tail);
 	th = l->rq[l->rq_tail++ % RUNTIME_RQ_SIZE];
-	ACCESS_ONCE(l->q_ptrs->rq_tail) = l->rq_tail;
+	ACCESS_ONCE(l->q_ptrs->rq_tail)++;
 
 	/* move overflow tasks into the runqueue */
 	if (unlikely(!list_empty(&l->rq_overflow)))
@@ -427,7 +492,7 @@ static __always_inline void enter_schedule(thread_t *curth)
 
 	/* pop the next runnable thread from the queue */
 	th = k->rq[k->rq_tail++ % RUNTIME_RQ_SIZE];
-	ACCESS_ONCE(k->q_ptrs->rq_tail) = k->rq_tail;
+	ACCESS_ONCE(k->q_ptrs->rq_tail)++;
 
 	/* move overflow tasks into the runqueue */
 	if (unlikely(!list_empty(&k->rq_overflow)))
@@ -520,6 +585,10 @@ void thread_ready_locked(thread_t *th)
 	assert_preempt_disabled();
 	assert_spin_lock_held(&k->lock);
 
+	/* ensure new thread lands after older threads */
+	if (unlikely(!list_empty(&k->rq_overflow)))
+		drain_overflow(k);
+
 	thread_ready_prepare(k, th);
 	if (unlikely(k->rq_head - k->rq_tail >= RUNTIME_RQ_SIZE)) {
 		assert(k->rq_head - k->rq_tail == RUNTIME_RQ_SIZE);
@@ -580,10 +649,12 @@ void thread_ready(thread_t *th)
 	k = getk();
 	thread_ready_prepare(k, th);
 	rq_tail = load_acquire(&k->rq_tail);
-	if (unlikely(k->rq_head - rq_tail >= RUNTIME_RQ_SIZE)) {
-		assert(k->rq_head - rq_tail == RUNTIME_RQ_SIZE);
+	if (unlikely(k->rq_head - rq_tail >= RUNTIME_RQ_SIZE ||
+	             !list_empty_volatile(&k->rq_overflow))) {
+		assert(k->rq_head - rq_tail <= RUNTIME_RQ_SIZE);
 		spin_lock(&k->lock);
 		list_add_tail(&k->rq_overflow, &th->link);
+		drain_overflow(k);
 		spin_unlock(&k->lock);
 		ACCESS_ONCE(k->q_ptrs->rq_head)++;
 		putk();
