@@ -150,15 +150,17 @@ static unsigned int simple_choose_core(struct proc *p)
 	unsigned int core, tmp;
 
 	/* first try to find a matching active hyperthread */
-	sched_for_each_allowed_core(core, tmp) {
-		unsigned int sib = sched_siblings[core];
-		if (cores[core] != sd)
-			continue;
-		if (cores[sib] == sd || (cores[sib] != NULL &&
-		    !simple_proc_is_preemptible(cores[sib], sd)))
-			continue;
-		if (bitmap_test(sched_allowed_cores, sib))
-			return sib;
+	if (!cfg.noht) {
+		sched_for_each_allowed_core(core, tmp) {
+			unsigned int sib = sched_siblings[core];
+			if (cores[core] != sd)
+				continue;
+			if (cores[sib] == sd || (cores[sib] != NULL &&
+			    !simple_proc_is_preemptible(cores[sib], sd)))
+				continue;
+			if (bitmap_test(sched_allowed_cores, sib))
+				return sib;
+		}
 	}
 
 	/* then try to find a previously used core (to improve locality) */
@@ -170,6 +172,9 @@ static unsigned int simple_choose_core(struct proc *p)
 		    simple_proc_is_preemptible(cores[core], sd))) {
 			return core;
 		}
+
+		if (cfg.noht)
+			continue;
 
 		/* sibling core has equally good locality */
 		core = sched_siblings[th->core];
@@ -259,15 +264,20 @@ static struct simple_data *simple_choose_kthread(unsigned int core)
 	int i;
 
 	/* first try to run the same process as the sibling */
-	sd = cores[sched_siblings[core]];
-	if (sd && sd->is_congested && sched_threads_avail(sd->p))
-		return sd;
+	if (!cfg.noht) {
+		sd = cores[sched_siblings[core]];
+		if (sd && sd->is_congested && sched_threads_avail(sd->p))
+			return sd;
+	}
 
 	/* then try to find a congested process that ran on this core last */
 	for (i = 0; i < NHIST; i++) {
 		sd = hist[core][i];
 		if (sd && sd->is_congested && sched_threads_avail(sd->p))
 			return sd;
+
+		if (cfg.noht)
+			continue;
 
 		/* the hyperthread sibling has equally good locality */
 		sd = hist[sched_siblings[core]][i];

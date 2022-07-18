@@ -178,6 +178,10 @@ static inline unsigned int numa_choose_core_in_subset(struct numa_data *sd,
 						numa_proc_is_preemptible(cores[core], sd)))
 			return core;
 
+
+		if (cfg.noht)
+			continue;
+
 		/* sibling core has equally good locality */
 		core = sched_siblings[core];
 		if (!bitmap_test(core_subset, core))
@@ -304,16 +308,21 @@ static struct numa_data *numa_choose_kthread(unsigned int core)
 	struct numa_data *sd;
 	int i;
 
-	/* first try to run the same process as the sibling */
-	sd = cores[sched_siblings[core]];
-	if (sd && sd->is_congested)
-		return sd;
+	if (!cfg.noht) {
+		/* first try to run the same process as the sibling */
+		sd = cores[sched_siblings[core]];
+		if (sd && sd->is_congested)
+			return sd;
+	}
 
 	/* then try to find a congested process that ran on this core last */
 	for (i = 0; i < NHIST; i++) {
 		sd = hist[core][i];
 		if (sd && sd->is_congested)
 			return sd;
+
+		if (cfg.noht)
+			continue;
 
 		/* the hyperthread sibling has equally good locality */
 		sd = hist[sched_siblings[core]][i];

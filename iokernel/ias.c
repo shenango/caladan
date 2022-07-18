@@ -261,11 +261,11 @@ static float ias_locality_score(struct ias_data *sd, unsigned int core)
 	unsigned int sib = sched_siblings[core];
 
 	/* if the sibling is already running the process, locality is perfect */
-	if (cores[sib] == sd)
+	if (!cfg.noht && cores[sib] == sd)
 		return 1.0f;
 
 	delta_us = now_us - MAX(sd->loc_last_us[core],
-				sd->loc_last_us[sib]);
+				cfg.noht ? 0 : sd->loc_last_us[sib]);
 	if (delta_us >= IAS_LOC_EVICTED_US)
 		return 0.0f;
 	return (float)(IAS_LOC_EVICTED_US - delta_us) / IAS_LOC_EVICTED_US;
@@ -274,13 +274,17 @@ static float ias_locality_score(struct ias_data *sd, unsigned int core)
 static float ias_core_score(struct ias_data *sd, unsigned int core)
 {
 	float score;
-	struct ias_data *sib_task = cores[sched_siblings[core]];
+	struct ias_data *sib_task;
 
 	score = ias_locality_score(sd, core);
 
 	if (bitmap_test(sd->reserved_cores, core))
 		score += 7.0f;
 
+	if (cfg.noht)
+		return score;
+
+	sib_task = cores[sched_siblings[core]];
 	if (!cfg.ias_prefer_selfpair && sib_task != sd) {
 		score += 3.0f;
 		if (sib_task == NULL && cores[core] == NULL)
@@ -328,7 +332,7 @@ bool ias_can_add_kthread(struct ias_data *sd, bool ignore_ht_punish_cores)
 	sched_for_each_allowed_core(core, tmp) {
 		if (!ias_can_preempt_core(sd, core))
 			continue;
-		if (ignore_ht_punish_cores &&
+		if (!cfg.noht && ignore_ht_punish_cores &&
 		    ias_ht_budget_used(sched_siblings[core]) >= 1.0f)
 			continue;
 		return true;
@@ -343,16 +347,19 @@ int ias_add_kthread(struct ias_data *sd)
 
 	/* check if we're constrained by the thread limit */
 	if (sd->threads_active >= sd->threads_limit) {
-		core = ias_ht_relinquish_core(sd);
-		if (core != NCPU)
-			goto done;
+		if (!cfg.noht) {
+			core = ias_ht_relinquish_core(sd);
+			if (core != NCPU)
+				goto done;
+		}
 		return -ENOENT;
 	}
 
 	/* choose the best core to run the process on */
 	core = ias_choose_core(sd);
 	if (core == NCPU) {
-		core = ias_ht_relinquish_core(sd);
+		if (!cfg.noht)
+			core = ias_ht_relinquish_core(sd);
 		if (core == NCPU)
 			return -ENOENT;
 	}
@@ -484,9 +491,15 @@ static void ias_print_debug_info(void)
 			continue;
 		}
 		sib = sched_siblings[core];
-		printed[core] = printed[sib] = true;
 		int pid0 = cores[core] ? cores[core]->p->pid : -1;
-		int pid1 = cores[sib] ? cores[sib]->p->pid : -1;
+		printed[core] = true;
+		int pid1 = -1;
+
+		if (!cfg.noht) {
+			pid1 = cores[sib] ? cores[sib]->p->pid : -1;
+			printed[sib] = true;
+		}
+
 		log_info("core %d, %d (owner: %d): pid %d, %d", core, sib,
 			 owners[core], pid0, pid1);
 	}

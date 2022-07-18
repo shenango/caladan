@@ -106,19 +106,11 @@ static inline int sched_threads_avail(struct proc *p)
 
 extern unsigned int sched_cores_tbl[NCPU];
 extern int sched_cores_nr;
-extern unsigned int sched_siblings_tbl[NCPU];
-extern int sched_siblings_nr;
 
 #define sched_for_each_allowed_core(core, tmp)			\
 	for ((core) = sched_cores_tbl[0], (tmp) = 0;		\
 	     (tmp) < sched_cores_nr &&				\
 	     ({(core) = sched_cores_tbl[(tmp)]; true;});	\
-	     (tmp)++)
-
-#define sched_for_each_allowed_sibling(core, tmp)		\
-	for ((core) = sched_siblings_tbl[0], (tmp) = 0;		\
-	     (tmp) < sched_siblings_nr &&			\
-	     ({(core) = sched_siblings_tbl[(tmp)]; true;});	\
 	     (tmp)++)
 
 
