@@ -49,6 +49,8 @@
 #define RX_RING_SIZE 256
 #define TX_RING_SIZE 256
 
+#define IOKERNEL_MTU 1500
+
 #define MLX5_RX_RING_SIZE 2048
 #define MLX5_TX_RING_SIZE 2048
 
@@ -60,18 +62,18 @@ int dpdk_argc;
 
 static const struct rte_eth_conf port_conf_default = {
 	.rxmode = {
-		.max_rx_pkt_len = ETH_MAX_LEN,
-		.offloads = DEV_RX_OFFLOAD_IPV4_CKSUM,
-		.mq_mode = ETH_MQ_RX_RSS | ETH_MQ_RX_RSS_FLAG,
+		.mtu = IOKERNEL_MTU,
+		.offloads = RTE_ETH_RX_OFFLOAD_IPV4_CKSUM,
+		.mq_mode = RTE_ETH_MQ_RX_RSS | RTE_ETH_MQ_RX_RSS_FLAG,
 	},
 	.rx_adv_conf = {
 		.rss_conf = {
 			.rss_key = NULL,
-			.rss_hf = ETH_RSS_NONFRAG_IPV4_TCP | ETH_RSS_NONFRAG_IPV4_UDP,
+			.rss_hf = RTE_ETH_RSS_NONFRAG_IPV4_TCP | RTE_ETH_RSS_NONFRAG_IPV4_UDP,
 		},
 	},
 	.txmode = {
-		.offloads = DEV_TX_OFFLOAD_IPV4_CKSUM | DEV_TX_OFFLOAD_UDP_CKSUM | DEV_TX_OFFLOAD_TCP_CKSUM,
+		.offloads = RTE_ETH_TX_OFFLOAD_IPV4_CKSUM | RTE_ETH_TX_OFFLOAD_UDP_CKSUM | RTE_ETH_TX_OFFLOAD_TCP_CKSUM,
 	},
 };
 
@@ -99,6 +101,7 @@ static inline int dpdk_port_init(uint8_t port, struct rte_mempool *mbuf_pool)
 
 	/* Get default device configuration */
 	rte_eth_dev_info_get(port, &dev_info);
+	dp.device = dev_info.device;
 	rxconf = &dev_info.default_rxconf;
 	rxconf->rx_free_thresh = 64;
 
@@ -106,9 +109,6 @@ static inline int dpdk_port_init(uint8_t port, struct rte_mempool *mbuf_pool)
 	       !strncmp(dev_info.driver_name, "mlx5_pci",
 	                strlen("mlx5_pci")) ||
 	       !strncmp(dev_info.driver_name, "net_mlx5", strlen("net_mlx5"));
-
-	dp.is_mlx = is_mlx5 || !strncmp(dev_info.driver_name, "net_mlx4",
-	                                strlen("net_mlx4"));
 
 	if (is_mlx5) {
 		nb_rxd = MLX5_RX_RING_SIZE;

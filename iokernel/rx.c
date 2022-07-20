@@ -35,8 +35,8 @@ static struct rx_net_hdr *rx_prepend_rx_preamble(struct rte_mbuf *buf)
 	net_hdr->completion_data = (unsigned long)buf;
 	net_hdr->len = rte_pktmbuf_pkt_len(buf) - sizeof(*net_hdr);
 	net_hdr->rss_hash = buf->hash.rss;
-	masked_ol_flags = buf->ol_flags & PKT_RX_IP_CKSUM_MASK;
-	if (masked_ol_flags == PKT_RX_IP_CKSUM_GOOD)
+	masked_ol_flags = buf->ol_flags & RTE_MBUF_F_RX_IP_CKSUM_MASK;
+	if (masked_ol_flags == RTE_MBUF_F_RX_IP_CKSUM_GOOD)
 		net_hdr->csum_type = CHECKSUM_TYPE_UNNECESSARY;
 	else
 		net_hdr->csum_type = CHECKSUM_TYPE_NEEDED;
@@ -96,7 +96,7 @@ static void rx_one_pkt(struct rte_mbuf *buf)
 	int i, ret;
 
 	ptr_mac_hdr = rte_pktmbuf_mtod(buf, struct rte_ether_hdr *);
-	ptr_dst_addr = &ptr_mac_hdr->d_addr;
+	ptr_dst_addr = &ptr_mac_hdr->dst_addr;
 	log_debug("rx: rx packet with MAC %02" PRIx8 " %02" PRIx8 " %02"
 		  PRIx8 " %02" PRIx8 " %02" PRIx8 " %02" PRIx8,
 		  ptr_dst_addr->addr_bytes[0], ptr_dst_addr->addr_bytes[1],

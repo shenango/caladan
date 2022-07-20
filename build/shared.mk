@@ -53,6 +53,7 @@ ifeq ($(CONFIG_MLX5),y)
 FLAGS += -DMLX5
 else
 ifeq ($(CONFIG_MLX4),y)
+$(error mlx4 support is not available currently)
 FLAGS += -DMLX4
 endif
 endif

@@ -1,8 +1,8 @@
 diff --git a/include/spdk/nvme.h b/include/spdk/nvme.h
-index 45b9f94e1..59837b7ad 100644
+index 4157292da..d6a374ef1 100644
 --- a/include/spdk/nvme.h
 +++ b/include/spdk/nvme.h
-@@ -1147,6 +1147,20 @@ void spdk_nvme_ctrlr_register_aer_callback(struct spdk_nvme_ctrlr *ctrlr,
+@@ -1398,6 +1398,20 @@ void spdk_nvme_ctrlr_register_aer_callback(struct spdk_nvme_ctrlr *ctrlr,
   */
  struct spdk_nvme_qpair;
  
@@ -24,25 +24,23 @@ index 45b9f94e1..59837b7ad 100644
   * Signature for the callback function invoked when a timeout is detected on a
   * request.
 diff --git a/lib/env_dpdk/env.mk b/lib/env_dpdk/env.mk
-index 6dae04e30..35dcc8c7c 100644
+index d3d46af73..f73446e02 100644
 --- a/lib/env_dpdk/env.mk
 +++ b/lib/env_dpdk/env.mk
-@@ -119,8 +119,8 @@ DPDK_LIB_LIST += rte_rcu
- endif
+@@ -45,7 +45,7 @@ export DPDK_ABS_DIR = $(abspath $(DPDK_DIR))
+ ifneq ($(CONFIG_DPDK_LIB_DIR),)
+ DPDK_LIB_DIR = $(CONFIG_DPDK_LIB_DIR)
+ else
+-DPDK_LIB_DIR = $(DPDK_ABS_DIR)/lib
++DPDK_LIB_DIR = $(DPDK_ABS_DIR)/lib/x86_64-linux-gnu
  endif
  
--DPDK_SHARED_LIB = $(DPDK_LIB_LIST:%=$(DPDK_ABS_DIR)/lib/lib%.so)
--DPDK_STATIC_LIB = $(DPDK_LIB_LIST:%=$(DPDK_ABS_DIR)/lib/lib%.a)
-+DPDK_SHARED_LIB = $(DPDK_LIB_LIST:%=$(DPDK_ABS_DIR)/lib/x86_64-linux-gnu/lib%.so)
-+DPDK_STATIC_LIB = $(DPDK_LIB_LIST:%=$(DPDK_ABS_DIR)/lib/x86_64-linux-gnu/lib%.a)
- DPDK_SHARED_LIB_LINKER_ARGS = $(call add_no_as_needed,$(DPDK_SHARED_LIB))
- DPDK_STATIC_LIB_LINKER_ARGS = $(call add_whole_archive,$(DPDK_STATIC_LIB))
- 
+ ifneq ($(CONFIG_DPDK_INC_DIR),)
 diff --git a/lib/nvme/nvme_pcie.c b/lib/nvme/nvme_pcie.c
-index 27fc6bbdd..f4716b281 100644
+index 14f563532..f2487b84c 100644
 --- a/lib/nvme/nvme_pcie.c
 +++ b/lib/nvme/nvme_pcie.c
-@@ -1302,6 +1302,15 @@ static struct spdk_pci_id nvme_pci_driver_id[] = {
+@@ -1122,6 +1122,15 @@ static struct spdk_pci_id nvme_pci_driver_id[] = {
  SPDK_PCI_DRIVER_REGISTER(nvme, nvme_pci_driver_id,
  			 SPDK_PCI_DRIVER_NEED_MAPPING | SPDK_PCI_DRIVER_WC_ACTIVATE);
  
@@ -59,10 +57,10 @@ index 27fc6bbdd..f4716b281 100644
  	.name = "PCIE",
  	.type = SPDK_NVME_TRANSPORT_PCIE,
 diff --git a/lib/nvme/nvme_pcie_common.c b/lib/nvme/nvme_pcie_common.c
-index 0ef56cb9e..81dc993dd 100644
+index a63f1df65..863c147fe 100644
 --- a/lib/nvme/nvme_pcie_common.c
 +++ b/lib/nvme/nvme_pcie_common.c
-@@ -61,6 +61,8 @@ nvme_pcie_qpair_reset(struct spdk_nvme_qpair *qpair)
+@@ -71,6 +71,8 @@ nvme_pcie_qpair_reset(struct spdk_nvme_qpair *qpair)
  
  	/* all head/tail vals are set to 0 */
  	pqpair->last_sq_tail = pqpair->sq_tail = pqpair->sq_head = pqpair->cq_head = 0;
@@ -71,7 +69,7 @@ index 0ef56cb9e..81dc993dd 100644
  
  	/*
  	 * First time through the completion queue, HW will set phase
-@@ -241,6 +243,10 @@ nvme_pcie_qpair_construct(struct spdk_nvme_qpair *qpair,
+@@ -251,6 +253,10 @@ nvme_pcie_qpair_construct(struct spdk_nvme_qpair *qpair,
  		TAILQ_INSERT_HEAD(&pqpair->free_tr, tr, tq_list);
  	}
  
@@ -82,7 +80,7 @@ index 0ef56cb9e..81dc993dd 100644
  	nvme_pcie_qpair_reset(qpair);
  
  	return 0;
-@@ -837,6 +843,10 @@ nvme_pcie_qpair_process_completions(struct spdk_nvme_qpair *qpair, uint32_t max_
+@@ -968,6 +974,10 @@ nvme_pcie_qpair_process_completions(struct spdk_nvme_qpair *qpair, uint32_t max_
  		}
  	}
  
@@ -91,13 +89,13 @@ index 0ef56cb9e..81dc993dd 100644
 +	*pqpair->shadow_head = pqpair->cq_head_nowrap;
 +
  	if (num_completions > 0) {
+ 		pqpair->stat->completions += num_completions;
  		nvme_pcie_qpair_ring_cq_doorbell(qpair);
- 	}
 diff --git a/lib/nvme/nvme_pcie_internal.h b/lib/nvme/nvme_pcie_internal.h
-index 215cd02df..48b86f59f 100644
+index 0849aaae9..440d590aa 100644
 --- a/lib/nvme/nvme_pcie_internal.h
 +++ b/lib/nvme/nvme_pcie_internal.h
-@@ -180,6 +180,9 @@ struct nvme_pcie_qpair {
+@@ -213,6 +213,9 @@ struct nvme_pcie_qpair {
  		volatile uint32_t *cq_eventidx;
  	} shadow_doorbell;
  
@@ -108,10 +106,10 @@ index 215cd02df..48b86f59f 100644
  	 * Fields below this point should not be touched on the normal I/O path.
  	 */
 diff --git a/scripts/setup.sh b/scripts/setup.sh
-index 1c5024af6..757d4442d 100755
+index 26414087a..4f8354cf6 100755
 --- a/scripts/setup.sh
 +++ b/scripts/setup.sh
-@@ -779,7 +779,7 @@ if [[ $os == Linux ]]; then
+@@ -849,7 +849,7 @@ if [[ $os == Linux ]]; then
  	: ${NRHUGE=$(((HUGEMEM + HUGEPGSZ_MB - 1) / HUGEPGSZ_MB))}
  
  	if [ "$mode" == "config" ]; then
@@ -119,4 +117,4 @@ index 1c5024af6..757d4442d 100755
 +		configure_linux_pci
  	elif [ "$mode" == "cleanup" ]; then
  		cleanup_linux
- 	elif [ "$mode" == "reset" ]; then
+ 		clear_hugepages

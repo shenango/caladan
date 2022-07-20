@@ -64,13 +64,13 @@ static void tx_prepare_tx_mbuf(struct rte_mbuf *buf,
 	buf->ol_flags = 0;
 	if (net_hdr->olflags != 0) {
 		if (net_hdr->olflags & OLFLAG_IP_CHKSUM)
-			buf->ol_flags |= PKT_TX_IP_CKSUM;
+			buf->ol_flags |= RTE_MBUF_F_TX_IP_CKSUM;
 		if (net_hdr->olflags & OLFLAG_TCP_CHKSUM)
-			buf->ol_flags |= PKT_TX_TCP_CKSUM;
+			buf->ol_flags |= RTE_MBUF_F_TX_TCP_CKSUM;
 		if (net_hdr->olflags & OLFLAG_IPV4)
-			buf->ol_flags |= PKT_TX_IPV4;
+			buf->ol_flags |= RTE_MBUF_F_TX_IPV4;
 		if (net_hdr->olflags & OLFLAG_IPV6)
-			buf->ol_flags |= PKT_TX_IPV6;
+			buf->ol_flags |= RTE_MBUF_F_TX_IPV6;
 
 		buf->l4_len = sizeof(struct rte_tcp_hdr);
 		buf->l3_len = sizeof(struct rte_ipv4_hdr);

@@ -92,4 +92,4 @@ static const struct rte_mempool_ops ops_completion = {
 	.get_count = completion_get_count,
 };
 
-MEMPOOL_REGISTER_OPS(ops_completion);
+RTE_MEMPOOL_REGISTER_OPS(ops_completion);

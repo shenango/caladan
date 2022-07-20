@@ -20,6 +20,8 @@
 static struct lrpc_chan_out lrpc_data_to_control;
 static struct lrpc_chan_in lrpc_control_to_data;
 
+static void dp_clients_remove_client(struct proc *p);
+
 /*
  * Add a new client.
  */
@@ -42,15 +44,29 @@ static void dp_clients_add_client(struct proc *p)
 		if (ret < 0)
 			log_err("dp_clients: failed to add MAC to hash table in add_client");
 
-#ifdef MLX
-		if (dp.is_mlx) {
-			p->mr = mlx_reg_mem(dp.port, p->region.base, p->region.len, &p->lkey);
-			if (!p->mr)
-				log_err("dp_clients: failed to register memory with MLX nic");
+		ret = rte_extmem_register(p->region.base, p->region.len, NULL, 0, PGSIZE_2MB);
+		if (ret < 0) {
+			log_err("dp_clients: failed to register extmem for client");
+			goto fail;
 		}
-#endif
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+		ret = rte_dev_dma_map(dp.device, p->region.base, 0, p->region.len);
+		if (ret < 0) {
+			log_err("dp_clients: failed to map DMA memory for client");
+			goto fail_extmem;
+		}
+#pragma GCC diagnostic pop
 	}
 
+	return;
+
+fail_extmem:
+	rte_extmem_unregister(p->region.base, p->region.len);
+fail:
+	p->attach_fail = true;
+	dp_clients_remove_client(p);
 }
 
 void proc_release(struct ref *r)
@@ -86,16 +102,24 @@ static void dp_clients_remove_client(struct proc *p)
 	dp.clients[i] = dp.clients[dp.nr_clients - 1];
 	dp.nr_clients--;
 
-
 	if (!p->has_directpath) {
 		ret = rte_hash_del_key(dp.mac_to_proc, &p->mac.addr[0]);
 		if (ret < 0)
 			log_err("dp_clients: failed to remove MAC from hash table in remove "
 					"client");
-#ifdef MLX
-		if (dp.is_mlx)
-			mlx_dereg_mem(p->mr);
-#endif
+
+		if (!p->attach_fail) {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+			ret = rte_dev_dma_unmap(dp.device, p->region.base, 0, p->region.len);
+			if (ret < 0)
+				log_err("dp_clients: failed to unmap DMA memory for client");
+#pragma GCC diagnostic pop
+			ret = rte_extmem_unregister(p->region.base, p->region.len);
+			if (ret < 0)
+				log_err("dp_clients: failed to unregister extmem for client");
+		}
+
 	}
 
 	/* TODO: free queued packets/commands? */

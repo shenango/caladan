@@ -15,7 +15,6 @@
 #include <iokernel/control.h>
 #include <net/ethernet.h>
 
-#include "mlx.h"
 #include "ref.h"
 
 /* #define STATS 1 */
@@ -156,12 +155,6 @@ struct proc {
 	/* network data */
 	struct eth_addr		mac;
 
-	/* Unique identifier -- never recycled across runtimes*/
-#ifdef MLX
-	uint32_t		lkey;
-	void			*mr;
-#endif
-
 	/* Overfloq queue for completion data */
 	size_t max_overflows;
 	size_t nr_overflows;
@@ -262,13 +255,13 @@ enum {
  */
 struct dataplane {
 	uint8_t			port;
-	bool			is_mlx;
 	struct rte_mempool	*rx_mbuf_pool;
 	struct shm_region	ingress_mbuf_region;
 
 	struct proc		*clients[IOKERNEL_MAX_PROC];
 	int			nr_clients;
 	struct rte_hash		*mac_to_proc;
+	struct rte_device	*device;
 };
 
 extern struct dataplane dp;

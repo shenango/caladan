@@ -1,6 +1,6 @@
-From 5def348ef07bb27384fdc8e516a1ad37c948308f Mon Sep 17 00:00:00 2001
+From 8a61e14c7f8826faf956ae3397c29f5bd3bfb79c Mon Sep 17 00:00:00 2001
 From: Josh Fried <joshuafried@gmail.com>
-Date: Wed, 1 Jun 2022 21:51:14 -0400
+Date: Mon, 12 Sep 2022 16:09:21 -0400
 Subject: [PATCH] MLX4 support for the iokernel datapath
 
 ---
@@ -14,11 +14,11 @@ Subject: [PATCH] MLX4 support for the iokernel datapath
  create mode 100644 drivers/net/mlx4/mlx4_custom.h
 
 diff --git a/drivers/net/mlx4/meson.build b/drivers/net/mlx4/meson.build
-index 0cf9938a88..db115ee49c 100644
+index a038c1ec1b..253ca99852 100644
 --- a/drivers/net/mlx4/meson.build
 +++ b/drivers/net/mlx4/meson.build
 @@ -8,6 +8,8 @@ if not is_linux
- 	subdir_done()
+     subdir_done()
  endif
  
 +headers = files('mlx4_custom.h')
@@ -41,10 +41,10 @@ index 0000000000..93520da225
 +
 +#endif /* RTE_PMD_MLX4_CUSTOM_H */
 diff --git a/drivers/net/mlx4/mlx4_mr.c b/drivers/net/mlx4/mlx4_mr.c
-index 6b2f0cf187..fbb389d76b 100644
+index e95f45aa3e..c831bad90a 100644
 --- a/drivers/net/mlx4/mlx4_mr.c
 +++ b/drivers/net/mlx4/mlx4_mr.c
-@@ -1460,3 +1460,20 @@ mlx4_mr_release(struct rte_eth_dev *dev)
+@@ -1454,3 +1454,20 @@ mlx4_mr_release(struct rte_eth_dev *dev)
  	/* Free all remaining MRs. */
  	mlx4_mr_garbage_collect(dev);
  }
@@ -66,10 +66,10 @@ index 6b2f0cf187..fbb389d76b 100644
 +	 mlx4_glue->dereg_mr(ibv_mr);
 +}
 diff --git a/drivers/net/mlx4/mlx4_rxtx.c b/drivers/net/mlx4/mlx4_rxtx.c
-index adc1c9bf81..f40d594250 100644
+index 059e432a63..144ad64793 100644
 --- a/drivers/net/mlx4/mlx4_rxtx.c
 +++ b/drivers/net/mlx4/mlx4_rxtx.c
-@@ -949,7 +949,7 @@ mlx4_tx_burst(void *dpdk_txq, struct rte_mbuf **pkts, uint16_t pkts_n)
+@@ -945,7 +945,7 @@ mlx4_tx_burst(void *dpdk_txq, struct rte_mbuf **pkts, uint16_t pkts_n)
  				elt->buf = NULL;
  				break;
  			}
@@ -79,7 +79,7 @@ index adc1c9bf81..f40d594250 100644
  				/* MR does not exist. */
  				DEBUG("%p: unable to get MP <-> MR association",
 diff --git a/drivers/net/mlx4/mlx4_rxtx.h b/drivers/net/mlx4/mlx4_rxtx.h
-index 9de6c59411..0b48ef68c8 100644
+index 70f3cd8680..2e869d6f73 100644
 --- a/drivers/net/mlx4/mlx4_rxtx.h
 +++ b/drivers/net/mlx4/mlx4_rxtx.h
 @@ -26,6 +26,7 @@
@@ -90,7 +90,7 @@ index 9de6c59411..0b48ef68c8 100644
  
  /** Rx queue counters. */
  struct mlx4_rxq_stats {
-@@ -170,6 +171,9 @@ uint32_t mlx4_rx_addr2mr_bh(struct rxq *rxq, uintptr_t addr);
+@@ -167,6 +168,9 @@ uint32_t mlx4_rx_addr2mr_bh(struct rxq *rxq, uintptr_t addr);
  uint32_t mlx4_tx_mb2mr_bh(struct txq *txq, struct rte_mbuf *mb);
  uint32_t mlx4_tx_update_ext_mp(struct txq *txq, uintptr_t addr,
  			       struct rte_mempool *mp);
@@ -100,7 +100,7 @@ index 9de6c59411..0b48ef68c8 100644
  
  /**
   * Get Memory Pool (MP) from mbuf. If mbuf is indirect, the pool from which the
-@@ -248,4 +252,12 @@ mlx4_tx_mb2mr(struct txq *txq, struct rte_mbuf *mb)
+@@ -245,4 +249,12 @@ mlx4_tx_mb2mr(struct txq *txq, struct rte_mbuf *mb)
  	return mlx4_tx_mb2mr_bh(txq, mb);
  }
  
@@ -114,11 +114,11 @@ index 9de6c59411..0b48ef68c8 100644
 +
  #endif /* MLX4_RXTX_H_ */
 diff --git a/drivers/net/mlx4/version.map b/drivers/net/mlx4/version.map
-index 4a76d1d52d..9242af155d 100644
+index c2e0723b4c..dfa2bf71dd 100644
 --- a/drivers/net/mlx4/version.map
 +++ b/drivers/net/mlx4/version.map
 @@ -1,3 +1,8 @@
- DPDK_21 {
+ DPDK_22 {
 +	global:
 +
 +	mlx4_manual_reg_mr;
@@ -127,5 +127,5 @@ index 4a76d1d52d..9242af155d 100644
  	local: *;
  };
 -- 
-2.25.1
+2.34.1
 
