@@ -5,6 +5,7 @@
 #include <base/lock.h>
 #include <base/log.h>
 #include <runtime/thread.h>
+#include <runtime/timer.h>
 #include <runtime/sync.h>
 
 #include "defs.h"
@@ -204,6 +205,77 @@ void rwmutex_unlock(rwmutex_t *m)
 /*
  * Condition variable support
  */
+
+struct condvar_timeout_args {
+	condvar_t *cv;
+	thread_t *th;
+	bool timed_out;
+};
+
+static void condvar_timeout(unsigned long arg)
+{
+	struct condvar_timeout_args *args = (struct condvar_timeout_args *)arg;
+	condvar_t *cv = args->cv;
+	thread_t *th = NULL;
+
+	spin_lock_np(&cv->waiter_lock);
+	list_for_each(&cv->waiters, th, link) {
+		if (th == args->th) {
+			list_del_from(&cv->waiters, &th->link);
+			args->timed_out = true;
+			break;
+		}
+	}
+	spin_unlock_np(&cv->waiter_lock);
+
+	if (th == args->th)
+		thread_ready(th);
+}
+
+/**
+ * condvar_wait_timed- waits for a condition variable to be signalled
+ * or times out
+ *
+ * @cv: the condition variable to wait for
+ * @m: the currently held mutex that projects the condition
+ * @micros: the number of microseconds to wait before timing out
+ *
+ * Returns false if the wait timed out, true otherwise.
+ */
+bool condvar_wait_timed(condvar_t *cv, mutex_t *m, uint64_t micros)
+{
+	struct timer_entry e;
+	struct condvar_timeout_args args;
+
+	thread_t *myth = thread_self();
+
+	args.cv = cv;
+	args.th = myth;
+	args.timed_out = false;
+
+	timer_init(&e, condvar_timeout, (unsigned long)&args);
+	assert_mutex_held(m);
+	timer_start(&e, microtime() + micros);
+
+	spin_lock_np(&cv->waiter_lock);
+
+	if (unlikely(args.timed_out)) {
+		spin_unlock_np(&cv->waiter_lock);
+		return false;
+	}
+
+	mutex_unlock(m);
+	list_add_tail(&cv->waiters, &myth->link);
+	thread_park_and_unlock_np(&cv->waiter_lock);
+
+	if (likely(!args.timed_out))
+		timer_cancel(&e);
+
+	mutex_lock(m);
+
+	return !args.timed_out;
+}
+
 
 /**
  * condvar_wait - waits for a condition variable to be signalled
