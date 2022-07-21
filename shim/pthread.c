@@ -1,11 +1,10 @@
-
-#include <dlfcn.h>
-
 #include <pthread.h>
 
 #include <base/lock.h>
 #include <runtime/sync.h>
 #include <runtime/thread.h>
+
+#include "common.h"
 
 BUILD_ASSERT(sizeof(pthread_t) >= sizeof(uintptr_t));
 
@@ -94,51 +93,26 @@ static int thread_join(struct join_handle *j, void **retval)
 int pthread_create(pthread_t *thread, const pthread_attr_t *attr,
 		   void *(*start_routine)(void *), void *arg)
 {
-	static int (*fn)(pthread_t *, const pthread_attr_t *, void *(*)(void *),
-			 void *);
-	if (unlikely(!__self)) {
-		if (!fn)
-			fn = dlsym(RTLD_NEXT, "pthread_create");
-		return fn(thread, attr, start_routine, arg);
-	}
-
+	NOTSELF_4ARG(int, __func__, thread, attr, start_routine, arg);
 	return thread_spawn_joinable((struct join_handle **)thread,
 				     start_routine, arg);
 }
 
 int pthread_detach(pthread_t thread)
 {
-	static int (*fn)(pthread_t);
-	if (unlikely(!__self)) {
-		if (!fn)
-			fn = dlsym(RTLD_NEXT, "pthread_detach");
-		return fn(thread);
-	}
-
+	NOTSELF_1ARG(int, __func__, thread);
 	return thread_detach((struct join_handle *)thread);
 }
 
 int pthread_join(pthread_t thread, void **retval)
 {
-	static int (*fn)(pthread_t, void **);
-	if (unlikely(!__self)) {
-		if (!fn)
-			fn = dlsym(RTLD_NEXT, "pthread_join");
-		return fn(thread, retval);
-	}
-
+	NOTSELF_2ARG(int, __func__, thread, retval);
 	return thread_join((struct join_handle *)thread, retval);
 }
 
 int pthread_yield(void)
 {
-	static int (*fn)(void);
-	if (unlikely(!__self)) {
-		if (!fn)
-			fn = dlsym(RTLD_NEXT, "pthread_yield");
-		return fn();
-	}
-
+	NOTSELF_NOARG(int, __func__);
 	thread_yield();
 	return 0;
 }

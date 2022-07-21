@@ -13,7 +13,7 @@ static void runtime_entry(void *arg)
 	main_ret = __real_main(main_argc, main_argv);
 }
 
-int __wrap_main(int argc, char **argv)
+int __weak __wrap_main(int argc, char **argv)
 {
 	int ret;
 
