@@ -37,7 +37,6 @@ struct lrpc_params lrpc_data_to_control_params;
 int data_to_control_efd;
 static struct lrpc_chan_out lrpc_control_to_data;
 static struct lrpc_chan_in lrpc_data_to_control;
-static int nr_guaranteed;
 
 #if 0
 struct iokernel_info *iok_info;
@@ -126,12 +125,6 @@ static struct proc *control_create_proc(mem_key_t key, size_t len,
 	if (hdr.thread_count > NCPU || hdr.thread_count == 0)
 		goto fail;
 
-	if (hdr.sched_cfg.guaranteed_cores + nr_guaranteed >
-	    bitmap_popcount(sched_allowed_cores, NCPU)) {
-		log_err("guaranteed cores exceeds total core count");
-		goto fail;
-	}
-
 	/* copy arrays of threads, timers, and hwq specs */
 	threads = copy_shm_data(&reg, hdr.thread_specs, hdr.thread_count * sizeof(*threads));
 	if (!threads)
@@ -217,8 +210,6 @@ static struct proc *control_create_proc(mem_key_t key, size_t len,
 	if (overflow_queue == NULL)
 		goto fail;
 
-	nr_guaranteed += hdr.sched_cfg.guaranteed_cores;
-
 	/* free temporary allocations */
 	free(threads);
 
@@ -237,7 +228,6 @@ fail:
 
 static void control_destroy_proc(struct proc *p)
 {
-	nr_guaranteed -= p->sched_cfg.guaranteed_cores;
 	mem_unmap_shm(p->region.base);
 	free(p->overflow_queue);
 	free(p);
