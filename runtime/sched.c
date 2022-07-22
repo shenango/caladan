@@ -288,7 +288,7 @@ static bool steal_work(struct kthread *l, struct kthread *r)
 	lsize = l->q_ptrs->rq_head - l->q_ptrs->rq_tail;
 	rsize = ACCESS_ONCE(r->q_ptrs->rq_head) - r->q_ptrs->rq_tail;
 	if (lsize < rsize)
-		num_to_steal = MIN((rsize - lsize) / 2, RUNTIME_RQ_SIZE);
+		num_to_steal = MIN(div_up(rsize - lsize, 2), RUNTIME_RQ_SIZE);
 	if (num_to_steal) {
 		merge_runqueues(l, lsize, r, num_to_steal);
 		return true;
