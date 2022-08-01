@@ -31,6 +31,8 @@
 static DEFINE_SPINLOCK(rcu_lock);
 /* The head of the list of objects waiting to be freed */
 static struct rcu_head *rcu_head;
+/* rcu worker thread - NULL when running */
+static thread_t *rcu_worker_th;
 
 #ifdef DEBUG
 __thread int rcu_read_count;
@@ -47,8 +49,8 @@ static void rcu_worker(void *arg)
 		/* check if any RCU objects are waiting to be freed */
 		spin_lock_np(&rcu_lock);
 		if (!rcu_head) {
-			spin_unlock_np(&rcu_lock);
-			timer_sleep(RCU_SLEEP_PERIOD);
+			rcu_worker_th = thread_self();
+			thread_park_and_unlock_np(&rcu_lock);
 			continue;
 		}
 		head = rcu_head;
@@ -95,12 +97,18 @@ static void rcu_worker(void *arg)
  */
 void rcu_free(struct rcu_head *head, rcu_callback_t func)
 {
+	thread_t *th = NULL;
+
 	head->func = func;
 
 	spin_lock_np(&rcu_lock);
+	swapvars(th, rcu_worker_th);
 	head->next = rcu_head;
 	rcu_head = head;
 	spin_unlock_np(&rcu_lock);
+
+	if (th)
+		thread_ready(th);
 }
 
 struct sync_arg {
@@ -129,6 +137,12 @@ void synchronize_rcu(void)
 	spin_lock_np(&rcu_lock);
 	tmp.rcu.next = rcu_head;
 	rcu_head = &tmp.rcu;
+
+	if (rcu_worker_th) {
+		thread_ready(rcu_worker_th);
+		rcu_worker_th = NULL;
+	}
+
 	thread_park_and_unlock_np(&rcu_lock);
 }
 

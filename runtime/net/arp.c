@@ -49,6 +49,8 @@ struct arp_entry {
 };
 
 static DEFINE_SPINLOCK(arp_lock);
+static size_t nr_dynamic_entries;
+static thread_t *arp_worker_th;
 static struct rcu_hlist_head arp_tbl[ARP_TABLE_CAPACITY];
 
 static inline int hash_ip(uint32_t ip)
@@ -87,13 +89,23 @@ static void delete_entry(struct arp_entry *e)
 		mbuf_free(m);
 	}
 
+	assert(e->state != ARP_STATE_STATIC);
+	nr_dynamic_entries--;
+
 	rcu_free(&e->rcuh, release_entry);
 }
 
 static void insert_entry(struct arp_entry *e, int idx)
 {
 	rcu_hlist_add_head(&arp_tbl[idx], &e->link);
-
+	if (e->state != ARP_STATE_STATIC) {
+		if (++nr_dynamic_entries == 1) {
+			if (arp_worker_th) {
+				thread_ready(arp_worker_th);
+				arp_worker_th = NULL;
+			}
+		}
+	}
 }
 
 static struct arp_entry *create_entry(uint32_t daddr)
@@ -180,17 +192,27 @@ static void arp_worker(void *arg)
 	while (true) {
 		now_us = microtime();
 
+		spin_lock_np(&arp_lock);
+
 		for (i = 0; i < ARP_TABLE_CAPACITY; i++) {
-			spin_lock_np(&arp_lock);
 			rcu_hlist_for_each(&arp_tbl[i], node, true) {
 				e = rcu_hlist_entry(node,
 						    struct arp_entry, link);
 				arp_age_entry(now_us, e);
 			}
-			spin_unlock_np(&arp_lock);
+			if (unlikely(preempt_needed())) {
+				spin_unlock_np(&arp_lock);
+				spin_lock_np(&arp_lock);
+			}
 		}
 
-		timer_sleep(ONE_SECOND);
+		if (!nr_dynamic_entries) {
+			arp_worker_th = thread_self();
+			thread_park_and_unlock_np(&arp_lock);
+		} else {
+			spin_unlock_np(&arp_lock);
+			timer_sleep(ONE_SECOND);
+		}
 	}
 }
 
@@ -385,5 +407,9 @@ int arp_init_late(void)
 
 	spin_unlock_np(&arp_lock);
 
-	return thread_spawn(arp_worker, NULL);
+	arp_worker_th = thread_create(arp_worker, NULL);
+	if (!arp_worker_th)
+		return -ENOMEM;
+
+	return 0;
 }

@@ -19,6 +19,8 @@ static DEFINE_SPINLOCK(tcp_lock);
 /* a list of all TCP connections */
 static LIST_HEAD(tcp_conns);
 
+static thread_t *tcp_worker_th;
+
 static void tcp_retransmit(void *arg);
 
 void tcp_timer_update(tcpconn_t *c)
@@ -124,6 +126,14 @@ static void tcp_worker(void *arg)
 		now = microtime();
 
 		spin_lock_np(&tcp_lock);
+
+		if (unlikely(list_empty(&tcp_conns))) {
+			tcp_worker_th = thread_self();
+			thread_park_and_unlock_np(&tcp_lock);
+			continue;
+		}
+
+
 		list_for_each(&tcp_conns, c, global_link) {
 			if (preempt_needed()) {
 				again = true;
@@ -300,6 +310,7 @@ tcpconn_t *tcp_conn_alloc(void)
 int tcp_conn_attach(tcpconn_t *c, struct netaddr laddr, struct netaddr raddr)
 {
 	int ret;
+	thread_t *th = NULL;
 
 	if (laddr.ip == 0)
 		 laddr.ip = netcfg.addr;
@@ -315,8 +326,12 @@ int tcp_conn_attach(tcpconn_t *c, struct netaddr laddr, struct netaddr raddr)
 		return ret;
 
 	spin_lock_np(&tcp_lock);
+	swapvars(th, tcp_worker_th);
 	list_add_tail(&tcp_conns, &c->global_link);
 	spin_unlock_np(&tcp_lock);
+
+	if (th)
+		thread_ready(th);
 
 	c->attach_ts = microtime();
 
