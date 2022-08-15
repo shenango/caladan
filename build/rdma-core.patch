@@ -24,18 +24,21 @@ index 5e172d09..61aa29f2 100644
  	if (dr_domain_caps_init(ctx, dmn)) {
  		dr_dbg(dmn, "Failed init domain, no caps\n");
 diff --git a/providers/mlx5/dr_rule.c b/providers/mlx5/dr_rule.c
-index 9239fe5d..8082ab58 100644
+index 9239fe5d..70f5fcac 100644
 --- a/providers/mlx5/dr_rule.c
 +++ b/providers/mlx5/dr_rule.c
-@@ -32,6 +32,7 @@
+@@ -32,8 +32,9 @@
  
  #include <stdlib.h>
  #include <ccan/minmax.h>
 +#include "mlx5dv.h"
  #include "mlx5dv_dr.h"
- 
+-
++#include "dr_ste.h"
  #define DR_RULE_MAX_STE_CHAIN (DR_RULE_MAX_STES + DR_ACTION_MAX_STES)
-@@ -1341,6 +1342,41 @@ struct mlx5dv_dr_rule *mlx5dv_dr_rule_create(struct mlx5dv_dr_matcher *matcher,
+ 
+ static int dr_rule_append_to_miss_list(struct dr_ste_ctx *ste_ctx,
+@@ -1341,6 +1342,36 @@ struct mlx5dv_dr_rule *mlx5dv_dr_rule_create(struct mlx5dv_dr_matcher *matcher,
  	return rule;
  }
  
@@ -44,7 +47,7 @@ index 9239fe5d..8082ab58 100644
 +	struct mlx5dv_dr_domain *dmn,
 +	struct ibv_qp *nqp, struct ibv_qp *pqp)
 +{
-+	uint64_t old_qp_index, new_qp_index;
++	uint64_t old_qp_index;
 +	struct dr_ste *ste = &rule->rx.nic_matcher->s_htbl->ste_arr[0];
 +	struct mlx5_qp *next_qp = to_mqp(nqp);
 +	struct mlx5_qp *prev_qp = to_mqp(pqp);
@@ -54,15 +57,10 @@ index 9239fe5d..8082ab58 100644
 +
 +	assert(ste->htbl->chunk->num_of_entries == 1);
 +
-+	old_qp_index = DEVX_GET(ste_general, ste->hw_ste, next_table_base_39_32_size) << 27;
-+	old_qp_index |= DEVX_GET(ste_general, ste->hw_ste, next_table_base_31_5_size);
-+	old_qp_index &= ~0x1;
-+
++	old_qp_index = dmn->ste_ctx->get_miss_addr(ste->hw_ste) & ~0x1;
 +	assert(old_qp_index == ((prev_qp->tir_icm_addr >> 5) & 0xffffffff));
 +
-+	new_qp_index = (next_qp->tir_icm_addr >> 5) | 1;
-+	DEVX_SET(ste_general, ste->hw_ste, next_table_base_39_32_size, new_qp_index >> 27);
-+	DEVX_SET(ste_general, ste->hw_ste, next_table_base_31_5_size, new_qp_index);
++	dr_ste_set_hit_addr(dmn->ste_ctx, ste->hw_ste, next_qp->tir_icm_addr, 1);
 +
 +	send_info.write.addr    = (uintptr_t) ste->hw_ste;
 +	send_info.write.length  = DR_STE_SIZE_REDUCED;
@@ -78,7 +76,7 @@ index 9239fe5d..8082ab58 100644
  {
  	struct mlx5dv_dr_matcher *matcher = rule->matcher;
 diff --git a/providers/mlx5/dr_send.c b/providers/mlx5/dr_send.c
-index cf58c02a..5469e39b 100644
+index cf58c02a..ae27e660 100644
 --- a/providers/mlx5/dr_send.c
 +++ b/providers/mlx5/dr_send.c
 @@ -39,7 +39,7 @@
@@ -86,7 +84,7 @@ index cf58c02a..5469e39b 100644
  #define QUEUE_SIZE		128
  #define SIGNAL_PER_DIV_QUEUE	16
 -#define TH_NUMS_TO_DRAIN	2
-+#define TH_NUMS_TO_DRAIN	3
++#define TH_NUMS_TO_DRAIN	16
  
  enum {
  	CQ_OK = 0,
@@ -131,6 +129,72 @@ index cf58c02a..5469e39b 100644
  static int dr_get_tbl_copy_details(struct mlx5dv_dr_domain *dmn,
  				   struct dr_ste_htbl *htbl,
  				   uint8_t **data,
+diff --git a/providers/mlx5/dr_ste.h b/providers/mlx5/dr_ste.h
+index 88ceef2f..eb3b6696 100644
+--- a/providers/mlx5/dr_ste.h
++++ b/providers/mlx5/dr_ste.h
+@@ -167,6 +167,7 @@ struct dr_ste_ctx {
+ 	void (*set_miss_addr)(uint8_t *hw_ste_p, uint64_t miss_addr);
+ 	uint64_t (*get_miss_addr)(uint8_t *hw_ste_p);
+ 	void (*set_hit_addr)(uint8_t *hw_ste_p, uint64_t icm_addr, uint32_t ht_size);
++	uint64_t (*get_hit_addr)(uint8_t *hw_ste_p);
+ 	void (*set_byte_mask)(uint8_t *hw_ste_p, uint16_t byte_mask);
+ 	uint16_t (*get_byte_mask)(uint8_t *hw_ste_p);
+ 
+diff --git a/providers/mlx5/dr_ste_v0.c b/providers/mlx5/dr_ste_v0.c
+index 75825e31..c79158d9 100644
+--- a/providers/mlx5/dr_ste_v0.c
++++ b/providers/mlx5/dr_ste_v0.c
+@@ -312,6 +312,15 @@ static void dr_ste_v0_set_hit_addr(uint8_t *hw_ste_p, uint64_t icm_addr, uint32_
+ 	DR_STE_SET(general, hw_ste_p, next_table_base_31_5_size, index);
+ }
+ 
++static uint64_t dr_ste_v0_get_hit_addr(uint8_t *hw_ste_p)
++{
++	uint64_t index = DR_STE_GET(general, hw_ste_p, next_table_base_31_5_size) |
++			DR_STE_GET(general, hw_ste_p, next_table_base_39_32_size) << 27;
++
++	return index;
++
++}
++
+ static void dr_ste_v0_init(uint8_t *hw_ste_p, uint16_t lu_type,
+ 			   uint8_t entry_type, uint16_t gvmi)
+ {
+@@ -1516,6 +1525,7 @@ static struct dr_ste_ctx ste_ctx_v0 = {
+ 	.set_miss_addr			= &dr_ste_v0_set_miss_addr,
+ 	.get_miss_addr			= &dr_ste_v0_get_miss_addr,
+ 	.set_hit_addr			= &dr_ste_v0_set_hit_addr,
++	.get_hit_addr			= &dr_ste_v0_get_hit_addr,
+ 	.set_byte_mask			= &dr_ste_v0_set_byte_mask,
+ 	.get_byte_mask			= &dr_ste_v0_get_byte_mask,
+ 	/* Actions */
+diff --git a/providers/mlx5/dr_ste_v1.c b/providers/mlx5/dr_ste_v1.c
+index 68e22c17..4db1391f 100644
+--- a/providers/mlx5/dr_ste_v1.c
++++ b/providers/mlx5/dr_ste_v1.c
+@@ -336,6 +336,13 @@ static void dr_ste_v1_set_hit_addr(uint8_t *hw_ste_p, uint64_t icm_addr, uint32_
+ 	DR_STE_SET(match_bwc_v1, hw_ste_p, next_table_base_31_5_size, index);
+ }
+ 
++static uint64_t dr_ste_v1_get_hit_addr(uint8_t *hw_ste_p)
++{
++	uint64_t index = DR_STE_GET(match_bwc_v1, hw_ste_p, next_table_base_31_5_size) |
++			DR_STE_GET(match_bwc_v1, hw_ste_p, next_table_base_39_32_size) << 27;
++	return index;
++}
++
+ static void dr_ste_v1_init(uint8_t *hw_ste_p, uint16_t lu_type,
+ 			   uint8_t entry_type, uint16_t gvmi)
+ {
+@@ -1564,6 +1571,7 @@ static struct dr_ste_ctx ste_ctx_v1 = {
+ 	.set_miss_addr			= &dr_ste_v1_set_miss_addr,
+ 	.get_miss_addr			= &dr_ste_v1_get_miss_addr,
+ 	.set_hit_addr			= &dr_ste_v1_set_hit_addr,
++	.get_hit_addr 			= &dr_ste_v1_get_hit_addr,
+ 	.set_byte_mask			= &dr_ste_v1_set_byte_mask,
+ 	.get_byte_mask			= &dr_ste_v1_get_byte_mask,
+ 	/* Actions */
 diff --git a/providers/mlx5/libmlx5.map b/providers/mlx5/libmlx5.map
 index 7fd90ec0..5e289e07 100644
 --- a/providers/mlx5/libmlx5.map
@@ -145,24 +209,6 @@ index 7fd90ec0..5e289e07 100644
  } MLX5_1.9;
  
  MLX5_1.11 {
-diff --git a/providers/mlx5/mlx5.c b/providers/mlx5/mlx5.c
-index 0a091f5b..99fc094f 100644
---- a/providers/mlx5/mlx5.c
-+++ b/providers/mlx5/mlx5.c
-@@ -807,6 +807,13 @@ int mlx5dv_query_device(struct ibv_context *ctx_in,
- 		}
- 	}
- 
-+	if (attrs_out->comp_mask & MLX5DV_CONTEXT_MASK_HCA_CORE_CLOCK) {
-+		if (mctx->hca_core_clock) {
-+			attrs_out->hca_core_clock = mctx->hca_core_clock;
-+			comp_mask_out |= MLX5DV_CONTEXT_MASK_HCA_CORE_CLOCK;
-+		}
-+	}
-+
- 	attrs_out->comp_mask = comp_mask_out;
- 
- 	return 0;
 diff --git a/providers/mlx5/mlx5dv.h b/providers/mlx5/mlx5dv.h
 index 07d3c3dc..20e6d7c9 100644
 --- a/providers/mlx5/mlx5dv.h
