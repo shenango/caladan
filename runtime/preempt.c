@@ -13,10 +13,7 @@
 
 /* the current preemption count */
 volatile __thread unsigned int preempt_cnt = PREEMPT_NOT_PENDING;
-/* is a request to cede pending? */
-volatile __thread bool preempt_cede_pending;
-/* is a request to yield pending? */
-volatile __thread bool preempt_yield_pending;
+volatile __thread bool preempt_cede;
 
 /* set a flag to indicate a preemption request is pending */
 static void set_preempt_needed(void)
@@ -43,33 +40,31 @@ static void yield_thread_if_needed(void)
 static void handle_sigusr1(int s, siginfo_t *si, void *c)
 {
 	STAT(PREEMPTIONS)++;
-	/* can only be delivered once, then must wait for cede to finish */
-	BUG_ON(preempt_cede_pending);
+	set_preempt_needed();
+	preempt_cede = true;
 
 	/* resume execution if preemption is disabled */
-	if (!preempt_enabled() || preempt_needed()) {
-		preempt_cede_pending = true;
-		set_preempt_needed();
+	if (!preempt_enabled())
 		return;
-	}
 
 	thread_cede();
 }
 
-/* handles preemptive yield signals from the iokernel */
+/* handles preemption yield signals from the iokernel */
 static void handle_sigusr2(int s, siginfo_t *si, void *c)
 {
 	STAT(PREEMPTIONS)++;
-	/* cannot be delivered while cede is pending */
-	BUG_ON(preempt_cede_pending);
 
-	/* check if the last yield request is still pending */
-	if (unlikely(preempt_yield_pending))
+	/*
+	 * handle the case when SIGUSR1 is delivered while preemption is
+	 * disabled, preemption is reenabled, and a SIGUSR2 is delivered
+	 * before/during a call to preempt
+	 */
+	if (preempt_cede)
 		return;
 
 	/* resume execution if preemption is disabled */
-	if (!preempt_enabled() || preempt_needed()) {
-		preempt_yield_pending = true;
+	if (!preempt_enabled()) {
 		set_preempt_needed();
 		return;
 	}
@@ -77,29 +72,21 @@ static void handle_sigusr2(int s, siginfo_t *si, void *c)
 	yield_thread_if_needed();
 }
 
+
 /**
  * preempt - entry point for preemption
  */
 void preempt(void)
 {
-	volatile bool *cede_pending = &preempt_cede_pending;
-	volatile bool *yield_pending = &preempt_yield_pending;
-
 	assert(preempt_needed());
 	clear_preempt_needed();
-
-	/* after this point, we might end up running on a different core */
-
-	if (*cede_pending) {
-		*cede_pending = false;
+	if (preempt_cede)
 		thread_cede();
-	}
-
-	if (*yield_pending) {
-		*yield_pending = false;
+	else
 		yield_thread_if_needed();
-	}
 }
+
+
 
 /**
  * preempt_init - global initializer for preemption support
@@ -117,17 +104,31 @@ int preempt_init(void)
 		return -errno;
 	}
 
-	act.sa_sigaction = handle_sigusr1;
-	if (sigaction(SIGUSR1, &act, NULL) == -1) {
-		log_err("couldn't register signal handler");
-		return -errno;
-	}
-
 	act.sa_sigaction = handle_sigusr2;
 	if (sigaction(SIGUSR2, &act, NULL) == -1) {
 		log_err("couldn't register signal handler");
 		return -errno;
 	}
 
+	act.sa_sigaction = handle_sigusr1;
+
+	/* block signals during SIGUSR1 */
+	if (sigaddset(&act.sa_mask, SIGUSR2) != 0) {
+		log_err("couldn't set signal handler mask");
+		return -errno;
+	}
+
+	if (sigaddset(&act.sa_mask, SIGUSR1) != 0) {
+		log_err("couldn't set signal handler mask");
+		return -errno;
+	}
+
+	if (sigaction(SIGUSR1, &act, NULL) == -1) {
+		log_err("couldn't register signal handler");
+		return -errno;
+	}
+
 	return 0;
 }
+
+
