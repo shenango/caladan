@@ -4,6 +4,11 @@ set -e
 
 CORES=`getconf _NPROCESSORS_ONLN`
 
+if ! hash meson 2> /dev/null; then
+  echo "Missing meson. Please install meson!"
+  exit 1
+fi
+
 # Initialize submodules
 git submodule init
 git submodule update --init -f --recursive

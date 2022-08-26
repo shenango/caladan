@@ -15,7 +15,7 @@ For any questions about Caladan, please email <caladan@csail.mit.edu>.
 2) Install dependencies.
 
 ```
-sudo apt install make gcc cmake pkg-config libnl-3-dev libnl-route-3-dev libnuma-dev uuid-dev libssl-dev libaio-dev libcunit1-dev libclang-dev libncurses-dev meson
+sudo apt install make gcc cmake pkg-config libnl-3-dev libnl-route-3-dev libnuma-dev uuid-dev libssl-dev libaio-dev libcunit1-dev libclang-dev libncurses-dev meson python3-pyelftools
 ```
 
 3) Set up submodules (e.g., DPDK, SPDK, and rdma-core).
