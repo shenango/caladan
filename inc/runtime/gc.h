@@ -4,7 +4,8 @@
 
 struct kthread;
 
-#define GC 1
+// #define GC 1
+
 #ifdef GC
 
 /* External API */
