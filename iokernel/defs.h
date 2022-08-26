@@ -98,6 +98,7 @@ struct thread {
 	unsigned int		core;
 	unsigned int		at_idx;
 	unsigned int		ts_idx;
+	uint64_t		wake_gen;
 	union {
 		struct {
 			struct hwq	directpath_hwq;

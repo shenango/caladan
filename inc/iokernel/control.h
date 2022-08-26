@@ -33,9 +33,17 @@ struct q_ptrs {
 	uint64_t		oldest_tsc;
 	uint64_t		rcu_gen;
 	uint64_t		run_start_tsc;
+	uint64_t		pad2;
+
+	/* second cache line contains information written by the scheduler */
+	uint64_t		curr_grant_gen;
+	uint64_t		cede_gen;
+	uint64_t		yield_rcu_gen;
+	uint64_t		pad3[5];
 };
 
-BUILD_ASSERT(sizeof(struct q_ptrs) <= CACHE_LINE_SIZE);
+BUILD_ASSERT(sizeof(struct q_ptrs) == 2 * CACHE_LINE_SIZE);
+BUILD_ASSERT(offsetof(struct q_ptrs, curr_grant_gen) % CACHE_LINE_SIZE == 0);
 
 struct congestion_info {
 	float			load;

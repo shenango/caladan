@@ -13,7 +13,6 @@
 
 /* the current preemption count */
 volatile __thread unsigned int preempt_cnt = PREEMPT_NOT_PENDING;
-volatile __thread bool preempt_cede;
 
 /* set a flag to indicate a preemption request is pending */
 static void set_preempt_needed(void)
@@ -21,47 +20,10 @@ static void set_preempt_needed(void)
 	preempt_cnt &= ~PREEMPT_NOT_PENDING;
 }
 
-static void yield_thread_if_needed(void)
-{
-	thread_t *curth = thread_self();
-
-	/*
-	 * If the quantum is not spent fully, don't yield. This catches the
-	 * race condition where the IOKernel requested a yield, but the runtime
-	 * already rescheduled before the signal was delivered.
-	 */
-	if (rdtsc() - curth->run_start_tsc < cycles_per_us * cfg_quantum_us)
-		return;
-
-	thread_yield();
-}
-
 /* handles preemptive cede signals from the iokernel */
 static void handle_sigusr1(int s, siginfo_t *si, void *c)
 {
 	STAT(PREEMPTIONS)++;
-	set_preempt_needed();
-	preempt_cede = true;
-
-	/* resume execution if preemption is disabled */
-	if (!preempt_enabled())
-		return;
-
-	thread_cede();
-}
-
-/* handles preemption yield signals from the iokernel */
-static void handle_sigusr2(int s, siginfo_t *si, void *c)
-{
-	STAT(PREEMPTIONS)++;
-
-	/*
-	 * handle the case when SIGUSR1 is delivered while preemption is
-	 * disabled, preemption is reenabled, and a SIGUSR2 is delivered
-	 * before/during a call to preempt
-	 */
-	if (preempt_cede)
-		return;
 
 	/* resume execution if preemption is disabled */
 	if (!preempt_enabled()) {
@@ -69,24 +31,63 @@ static void handle_sigusr2(int s, siginfo_t *si, void *c)
 		return;
 	}
 
-	yield_thread_if_needed();
+	WARN_ON_ONCE(!preempt_cede_needed(myk()));
+
+	preempt_disable();
+	thread_cede();
 }
 
+/* handles preemptive yield signals from the iokernel */
+static void handle_sigusr2(int s, siginfo_t *si, void *c)
+{
+	STAT(PREEMPTIONS)++;
+
+	/* resume execution if preemption is disabled */
+	if (!preempt_enabled()) {
+		set_preempt_needed();
+		return;
+	}
+
+	/* check if yield request is still relevant */
+	if (!preempt_yield_needed(myk()))
+		return;
+
+	thread_yield();
+}
 
 /**
  * preempt - entry point for preemption
  */
 void preempt(void)
 {
-	assert(preempt_needed());
+	struct kthread *k = getk();
+
+	if (!preempt_needed()) {
+		putk();
+		return;
+	}
+
 	clear_preempt_needed();
-	if (preempt_cede)
+
+	/*
+         * preemption signals may be delivered after kthreads/uthreads
+         * voluntarily park/yield, so the preempt_needed flag may be
+         * set even when there is nothing to do
+         */
+
+	if (preempt_cede_needed(k)) {
 		thread_cede();
-	else
-		yield_thread_if_needed();
+		return;
+	}
+
+	if (preempt_yield_needed(k)) {
+		putk();
+		thread_yield();
+		return;
+	}
+
+	putk();
 }
-
-
 
 /**
  * preempt_init - global initializer for preemption support
@@ -97,10 +98,16 @@ int preempt_init(void)
 {
 	struct sigaction act;
 
-	act.sa_flags = SA_SIGINFO | SA_NODEFER | SA_RESTART;
+	act.sa_flags = SA_SIGINFO | SA_NODEFER;
 
 	if (sigemptyset(&act.sa_mask) != 0) {
 		log_err("couldn't empty the signal handler mask");
+		return -errno;
+	}
+
+	act.sa_sigaction = handle_sigusr1;
+	if (sigaction(SIGUSR1, &act, NULL) == -1) {
+		log_err("couldn't register signal handler");
 		return -errno;
 	}
 
@@ -110,25 +117,5 @@ int preempt_init(void)
 		return -errno;
 	}
 
-	act.sa_sigaction = handle_sigusr1;
-
-	/* block signals during SIGUSR1 */
-	if (sigaddset(&act.sa_mask, SIGUSR2) != 0) {
-		log_err("couldn't set signal handler mask");
-		return -errno;
-	}
-
-	if (sigaddset(&act.sa_mask, SIGUSR1) != 0) {
-		log_err("couldn't set signal handler mask");
-		return -errno;
-	}
-
-	if (sigaction(SIGUSR1, &act, NULL) == -1) {
-		log_err("couldn't register signal handler");
-		return -errno;
-	}
-
 	return 0;
 }
-
-

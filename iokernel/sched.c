@@ -99,6 +99,7 @@ static void sched_enable_kthread(struct thread *th, unsigned int core)
 {
 	struct proc *p = th->p;
 
+	ACCESS_ONCE(th->q_ptrs->curr_grant_gen) = ++th->wake_gen;
 	th->active = true;
 	th->core = core;
 	list_del_from(&p->idle_threads, &th->idle_link);
@@ -158,8 +159,10 @@ __sched_run(struct core_state *s, struct thread *th, unsigned int core)
 	}
 
 	/* check if we need to interrupt the current core */
-	if (!s->idle && s->cur_th != NULL)
+	if (!s->idle && s->cur_th != NULL) {
+		ACCESS_ONCE(s->cur_th->q_ptrs->cede_gen) = s->cur_th->wake_gen;
 		ksched_enqueue_intr(core, KSCHED_INTR_CEDE);
+	}
 
 	/* finally request that the new kthread run on this core */
 	ksched_run(core, th ? th->tid : 0);
@@ -249,6 +252,7 @@ int sched_yield_on_core(unsigned int core)
 
 	/* send the yield signal */
 	th->last_yield_rcu_gen = th->metrics.rcu_gen;
+	ACCESS_ONCE(th->q_ptrs->yield_rcu_gen) = th->metrics.rcu_gen;
 	ksched_enqueue_intr(core, KSCHED_INTR_YIELD);
 	return 0;
 }
@@ -592,6 +596,7 @@ void sched_poll(void)
 
 				s->pending_th = NULL;
 				s->pending = false;
+				ACCESS_ONCE(s->cur_th->q_ptrs->cede_gen) = s->cur_th->wake_gen;
 				ksched_enqueue_intr(core, KSCHED_INTR_CEDE);
 				ksched_run(core, th ? th->tid : 0);
 				s->last_th = s->cur_th;

@@ -463,6 +463,20 @@ static inline void putk(void)
 	preempt_enable();
 }
 
+/* preempt_cede_needed - check if kthread should cede */
+static inline bool preempt_cede_needed(struct kthread *k)
+{
+	return ACCESS_ONCE(k->q_ptrs->curr_grant_gen) ==
+	       ACCESS_ONCE(k->q_ptrs->cede_gen);
+}
+
+/* preempt_yield_needed - check if current uthread should yield */
+static inline bool preempt_yield_needed(struct kthread *k)
+{
+        return ACCESS_ONCE(k->q_ptrs->yield_rcu_gen) == k->rcu_gen;
+}
+
+
 DECLARE_SPINLOCK(klock);
 extern unsigned int spinks;
 extern unsigned int nrks;

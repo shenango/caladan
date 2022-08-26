@@ -262,7 +262,6 @@ static long ksched_park(void)
 	unsigned long gen;
 	pid_t tid;
 	int cpu;
-	sigset_t em;
 
 	cpu = get_cpu();
 	p = this_cpu_ptr(&kp);
@@ -275,10 +274,6 @@ static long ksched_park(void)
 		put_cpu();
 		return -ERESTARTSYS;
 	}
-
-	/* clear blocked signals */
-	sigemptyset(&em);
-	WARN_ON_ONCE(sigprocmask(SIG_SETMASK, &em, NULL));
 
 	/* check if a new request is available yet */
 	gen = smp_load_acquire(&s->gen);

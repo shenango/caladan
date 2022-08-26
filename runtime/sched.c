@@ -405,7 +405,7 @@ again:
 
 	/* keep trying to find work until the polling timeout expires */
 	end_tsc = rdtsc();
-	if (!preempt_cede_needed() &&
+	if (!preempt_cede_needed(l) &&
 	    (++iters < RUNTIME_SCHED_POLL_ITERS ||
 	     end_tsc - start_tsc < cycles_per_us * RUNTIME_SCHED_MIN_POLL_US ||
 	     storage_pending_completions(&l->storage_q))) {
@@ -418,7 +418,7 @@ again:
 	/* did not find anything to run, park this kthread */
 	STAT(SCHED_CYCLES) += end_tsc - start_tsc;
 	/* we may have got a preempt signal before voluntarily yielding */
-	kthread_park(!preempt_cede_needed());
+	kthread_park(!preempt_cede_needed(l));
 	start_tsc = end_tsc;
 	iters = 0;
 
@@ -741,7 +741,7 @@ static void thread_finish_cede(void)
 void thread_cede(void)
 {
 	/* this will switch from the thread stack to the runtime stack */
-	preempt_disable();
+	assert_preempt_disabled();
 	jmp_runtime(thread_finish_cede);
 }
 
