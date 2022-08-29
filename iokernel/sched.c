@@ -38,6 +38,7 @@ int sched_siblings_nr;
 static int nr_guaranteed;
 
 struct core_state {
+	struct thread	*last_th;     /* recently run thread, waiting for preemption to complete */
 	struct thread	*pending_th;  /* a thread waiting run */
 	struct thread	*cur_th;      /* the currently running thread */
 	unsigned int	idle:1;	      /* is the core idle? */
@@ -162,10 +163,8 @@ __sched_run(struct core_state *s, struct thread *th, unsigned int core)
 
 	/* finally request that the new kthread run on this core */
 	ksched_run(core, th ? th->tid : 0);
-	if (s->cur_th) {
-		sched_disable_kthread(s->cur_th);
-		proc_put(s->cur_th->p);
-	}
+
+	s->last_th = s->cur_th;
 	s->cur_th = th;
 	s->wait = true;
 	s->idle = false;
@@ -512,6 +511,9 @@ static int sched_try_fast_rewake(struct thread *th)
 	int i;
 	struct hwq *h;
 
+	if (unlikely(th->p->kill))
+		return -EINVAL;
+
 	/*
 	 * If the kthread has yielded voluntarily but still has pending I/O
 	 * requests in flight, we can just wake it back up directly without
@@ -580,6 +582,11 @@ void sched_poll(void)
 
 		/* check if a pending context switch finished */
 		if (s->wait && ksched_poll_run_done(core)) {
+			if (s->last_th) {
+				sched_disable_kthread(s->last_th);
+				proc_put(s->last_th->p);
+				s->last_th = NULL;
+			}
 			if (s->pending) {
 				struct thread *th = s->pending_th;
 
@@ -587,10 +594,7 @@ void sched_poll(void)
 				s->pending = false;
 				ksched_enqueue_intr(core, KSCHED_INTR_CEDE);
 				ksched_run(core, th ? th->tid : 0);
-				if (s->cur_th) {
-					sched_disable_kthread(s->cur_th);
-					proc_put(s->cur_th->p);
-				}
+				s->last_th = s->cur_th;
 				s->cur_th = th;
 			} else {
 				s->wait = false;
@@ -600,8 +604,7 @@ void sched_poll(void)
 		/* check if a core went idle */
 		if (!s->wait && !s->idle && ksched_poll_idle(core)) {
 			if (s->cur_th) {
-				if (!s->cur_th->p->kill &&
-				    sched_try_fast_rewake(s->cur_th) == 0)
+				if (sched_try_fast_rewake(s->cur_th) == 0)
 					continue;
 				sched_disable_kthread(s->cur_th);
 				proc_put(s->cur_th->p);
