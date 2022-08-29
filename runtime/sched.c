@@ -321,7 +321,7 @@ static __noinline bool do_watchdog(struct kthread *l)
 static __noreturn __noinline void schedule(void)
 {
 	struct kthread *r = NULL, *l = myk();
-	uint64_t start_tsc, end_tsc;
+	uint64_t start_tsc;
 	thread_t *th = NULL;
 	unsigned int start_idx;
 	unsigned int iters = 0;
@@ -404,10 +404,10 @@ again:
 #endif
 
 	/* keep trying to find work until the polling timeout expires */
-	end_tsc = rdtsc();
+	last_tsc = rdtsc();
 	if (!preempt_cede_needed(l) &&
 	    (++iters < RUNTIME_SCHED_POLL_ITERS ||
-	     end_tsc - start_tsc < cycles_per_us * RUNTIME_SCHED_MIN_POLL_US ||
+	     last_tsc - start_tsc < cycles_per_us * RUNTIME_SCHED_MIN_POLL_US ||
 	     storage_pending_completions(&l->storage_q))) {
 		goto again;
 	}
@@ -416,10 +416,10 @@ again:
 	spin_unlock(&l->lock);
 
 	/* did not find anything to run, park this kthread */
-	STAT(SCHED_CYCLES) += end_tsc - start_tsc;
+	STAT(SCHED_CYCLES) += last_tsc - start_tsc;
 	/* we may have got a preempt signal before voluntarily yielding */
 	kthread_park(!preempt_cede_needed(l));
-	start_tsc = end_tsc;
+	start_tsc = rdtsc();
 	iters = 0;
 
 	spin_lock(&l->lock);
@@ -440,16 +440,16 @@ done:
 	spin_unlock(&l->lock);
 
 	/* update exit stat counters */
-	end_tsc = rdtsc();
-	STAT(SCHED_CYCLES) += end_tsc - start_tsc;
+	last_tsc = rdtsc();
+	STAT(SCHED_CYCLES) += last_tsc - start_tsc;
 	if (cores_have_affinity(th->last_cpu, l->curr_cpu))
 		STAT(LOCAL_RUNS)++;
 	else
 		STAT(REMOTE_RUNS)++;
 
 	/* update exported thread run start time */
-	th->run_start_tsc = end_tsc;
-	ACCESS_ONCE(l->q_ptrs->run_start_tsc) = end_tsc;
+	th->run_start_tsc = last_tsc;
+	ACCESS_ONCE(l->q_ptrs->run_start_tsc) = last_tsc;
 
 	/* increment the RCU generation number (odd is in thread) */
 	store_release(&l->rcu_gen, l->rcu_gen + 1);
