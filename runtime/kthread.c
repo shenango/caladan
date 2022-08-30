@@ -91,15 +91,11 @@ static __always_inline void kthread_yield_to_iokernel(void)
 	uint64_t last_core = k->curr_cpu;
 	ssize_t s;
 
-	clear_preempt_needed();
-
 	/* yield to the iokernel */
-	s = ioctl(ksched_fd, KSCHED_IOC_PARK, 0);
-	while (unlikely(s < 0 || preempt_needed())) {
-		/* preempted while yielding, yield again */
+	do {
 		clear_preempt_needed();
 		s = ioctl(ksched_fd, KSCHED_IOC_PARK, 0);
-	}
+	} while (unlikely(s < 0 || preempt_cede_needed(k)));
 
 	k->curr_cpu = s;
 	if (k->curr_cpu != last_core)

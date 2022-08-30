@@ -349,6 +349,17 @@ static __noreturn __noinline void schedule(void)
 	ACCESS_ONCE(l->q_ptrs->rcu_gen) = l->rcu_gen;
 	assert((l->rcu_gen & 0x1) == 0x0);
 
+	/* check for pending preemption */
+	if (unlikely(preempt_cede_needed(l))) {
+		l->parked = true;
+		spin_unlock(&l->lock);
+		kthread_park(false);
+		start_tsc = rdtsc();
+		iters = 0;
+		spin_lock(&l->lock);
+		l->parked = false;
+	}
+
 #ifdef GC
 	if (unlikely(get_gc_gen() != l->local_gc_gen))
 		gc_kthread_report(l);
@@ -476,6 +487,7 @@ static __always_inline void enter_schedule(thread_t *curth)
 
 	/* slow path: switch from the uthread stack to the runtime stack */
 	if (k->rq_head == k->rq_tail ||
+	    preempt_cede_needed(k) ||
 #ifdef GC
 	    get_gc_gen() != k->local_gc_gen ||
 #endif
