@@ -557,6 +557,7 @@ struct net_driver_ops {
 	int (*register_flow)(unsigned int affininty, struct trans_entry *e, void **handle_out);
 	int (*deregister_flow)(struct trans_entry *e, void *handle);
 	uint32_t (*get_flow_affinity)(uint8_t ipproto, uint16_t local_port, struct netaddr remote);
+	int (*rxq_has_work)(struct hardware_q *rxq);
 };
 
 extern struct net_driver_ops net_ops;
@@ -564,11 +565,12 @@ extern struct net_driver_ops net_ops;
 #ifdef DIRECTPATH
 
 extern bool cfg_directpath_enabled;
+extern char directpath_arg[128];
 struct direct_txq {};
 
 static inline bool rx_pending(struct hardware_q *rxq)
 {
-	return cfg_directpath_enabled && hardware_q_pending(rxq);
+	return cfg_directpath_enabled && net_ops.rxq_has_work(rxq);
 }
 
 extern size_t directpath_rx_buf_pool_sz(unsigned int nrqs);

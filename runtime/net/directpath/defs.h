@@ -34,9 +34,11 @@ extern struct mempool directpath_buf_mp;
 extern struct tcache *directpath_buf_tcache;
 extern DEFINE_PERTHREAD(struct tcache_perthread, directpath_buf_pt);
 extern void directpath_rx_completion(struct mbuf *m);
-extern int mlx5_init(struct hardware_q **rxq_out,
+extern int mlx5_init_queue_steering(struct hardware_q **rxq_out,
 	    struct direct_txq **txq_out, unsigned int nr_rxq,
 	    unsigned int nr_txq);
-
+extern int mlx5_init_flow_steering(struct hardware_q **rxq_out,
+	    struct direct_txq **txq_out, unsigned int nr_rxq,
+	    unsigned int nr_txq);
 struct ibv_device;
 extern int ibv_device_to_pci_addr(const struct ibv_device *device, struct pci_addr *pci_addr);

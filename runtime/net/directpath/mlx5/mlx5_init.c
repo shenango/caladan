@@ -26,6 +26,7 @@ static struct mlx5_txq txqs[NCPU];
 
 struct mlx5_rxq rxqs[NCPU];
 struct ibv_context *context;
+struct ibv_device_attr_ex device_attr;
 struct ibv_pd *pd;
 struct ibv_mr *mr_tx;
 struct ibv_mr *mr_rx;
@@ -99,7 +100,6 @@ static void mlx5_init_tx_segment(struct mlx5_txq *v, unsigned int idx)
 	eseg->cs_flags |= MLX5_ETH_WQE_L3_CSUM | MLX5_ETH_WQE_L4_CSUM;
 	eseg->inline_hdr_sz = htobe16(MLX5_ETH_L2_INLINE_HEADER_SIZE);
 
-
 	/* set dpseg */
 	dpseg->lkey = htobe32(mr_tx->lkey);
 }
@@ -119,7 +119,7 @@ static struct mlx5dv_ctx_allocators dv_allocators = {
 	.free = simple_free,
 };
 
-static int mlx5_create_rxq(int index, struct mlx5_rxq *v)
+static int mlx5_create_rxq(int index, struct mlx5_rxq *v, bool use_rss)
 {
 	int i, ret;
 	unsigned char *buf;
@@ -168,32 +168,35 @@ static int mlx5_create_rxq(int index, struct mlx5_rxq *v)
 	if (ret)
 		return -ret;
 
-	struct ibv_wq *ind_tbl[1] = {v->rx_wq};
-	struct ibv_rwq_ind_table_init_attr rwq_attr = {0};
-	rwq_attr.ind_tbl = ind_tbl;
-	v->rwq_ind_table = ibv_create_rwq_ind_table(context, &rwq_attr);
-	if (!v->rwq_ind_table)
-		return -errno;
+	/* Create 1 QP per WQ if not using RSS */
+	if (!use_rss) {
+		struct ibv_wq *ind_tbl[1] = {v->rx_wq};
+		struct ibv_rwq_ind_table_init_attr rwq_attr = {0};
+		rwq_attr.ind_tbl = ind_tbl;
+		v->rwq_ind_table = ibv_create_rwq_ind_table(context, &rwq_attr);
+		if (!v->rwq_ind_table)
+			return -errno;
 
-	static unsigned char rss_key[40];
-	struct ibv_rx_hash_conf rss_cnf = {
-		.rx_hash_function = IBV_RX_HASH_FUNC_TOEPLITZ,
-		.rx_hash_key_len = ARRAY_SIZE(rss_key),
-		.rx_hash_key = rss_key,
-		.rx_hash_fields_mask = IBV_RX_HASH_SRC_IPV4 | IBV_RX_HASH_DST_IPV4 | IBV_RX_HASH_SRC_PORT_TCP | IBV_RX_HASH_DST_PORT_TCP,
-	};
+		static unsigned char null_rss[40];
+		struct ibv_rx_hash_conf rss_cnf = {
+				.rx_hash_function = IBV_RX_HASH_FUNC_TOEPLITZ,
+				.rx_hash_key_len = ARRAY_SIZE(null_rss),
+				.rx_hash_key = null_rss,
+				.rx_hash_fields_mask = IBV_RX_HASH_SRC_IPV4 | IBV_RX_HASH_DST_IPV4 | IBV_RX_HASH_SRC_PORT_TCP | IBV_RX_HASH_DST_PORT_TCP,
+			};
 
-	struct ibv_qp_init_attr_ex qp_ex_attr = {
-		.qp_type = IBV_QPT_RAW_PACKET,
-		.comp_mask = IBV_QP_INIT_ATTR_RX_HASH | IBV_QP_INIT_ATTR_IND_TABLE | IBV_QP_INIT_ATTR_PD,
-		.pd = pd,
-		.rwq_ind_tbl = v->rwq_ind_table,
-		.rx_hash_conf = rss_cnf,
-	};
+		struct ibv_qp_init_attr_ex qp_ex_attr = {
+			.qp_type = IBV_QPT_RAW_PACKET,
+			.comp_mask = IBV_QP_INIT_ATTR_RX_HASH | IBV_QP_INIT_ATTR_IND_TABLE | IBV_QP_INIT_ATTR_PD,
+			.pd = pd,
+			.rwq_ind_tbl = v->rwq_ind_table,
+			.rx_hash_conf = rss_cnf,
+		};
 
-	v->qp = ibv_create_qp_ex(context, &qp_ex_attr);
-	if (!v->qp)
-		return -errno;
+		v->qp = ibv_create_qp_ex(context, &qp_ex_attr);
+		if (!v->qp)
+			return -errno;
+	}
 
 	/* expose direct verbs objects */
 	struct mlx5dv_obj obj = {
@@ -350,20 +353,11 @@ static int mlx5_init_txq(int index, struct mlx5_txq *v)
 	return 0;
 }
 
-static struct net_driver_ops mlx5_net_ops = {
-	.rx_batch = mlx5_gather_rx,
-	.tx_single = mlx5_transmit_one,
-	.steer_flows = mlx5_steer_flows,
-	.register_flow = mlx5_register_flow,
-	.deregister_flow = mlx5_deregister_flow,
-	.get_flow_affinity = mlx5_get_flow_affinity,
-};
-
 /*
  * mlx5_init - intialize all TX/RX queues
  */
-int mlx5_init(struct hardware_q **rxq_out, struct direct_txq **txq_out,
-	             unsigned int nr_rxq, unsigned int nr_txq)
+int mlx5_common_init(struct hardware_q **rxq_out, struct direct_txq **txq_out,
+	             unsigned int nr_rxq, unsigned int nr_txq, bool use_rss)
 {
 	int i, ret;
 
@@ -404,7 +398,7 @@ int mlx5_init(struct hardware_q **rxq_out, struct direct_txq **txq_out,
 		return -1;
 	}
 
-	attr.flags = MLX5DV_CONTEXT_FLAGS_DEVX;
+	attr.flags = use_rss ? 0 : MLX5DV_CONTEXT_FLAGS_DEVX;
 	context = mlx5dv_open_device(dev_list[i], &attr);
 	if (!context) {
 		log_err("mlx5_init: Couldn't get context for %s (errno %d)",
@@ -427,6 +421,12 @@ int mlx5_init(struct hardware_q **rxq_out, struct direct_txq **txq_out,
 		return -1;
 	}
 
+	ret = ibv_query_device_ex(context, NULL, &device_attr);
+	if (ret) {
+		log_err("mlx5_init: failed to query device attributes");
+		return -1;
+	}
+
 	/* Register memory for TX buffers */
 	mr_tx = ibv_reg_mr(pd, net_tx_buf_mp.buf, net_tx_buf_mp.len, IBV_ACCESS_LOCAL_WRITE);
 	if (!mr_tx) {
@@ -441,16 +441,12 @@ int mlx5_init(struct hardware_q **rxq_out, struct direct_txq **txq_out,
 	}
 
 	for (i = 0; i < nr_rxq; i++) {
-		ret = mlx5_create_rxq(i, &rxqs[i]);
+		ret = mlx5_create_rxq(i, &rxqs[i], use_rss);
 		if (ret)
 			return ret;
 
 		rxq_out[i] = &rxqs[i].rxq;
 	}
-
-	ret = mlx5_init_flows(nr_rxq);
-	if (ret)
-		return ret;
 
 	for (i = 0; i < nr_txq; i++) {
 		ret = mlx5_init_txq(i, &txqs[i]);
@@ -459,8 +455,6 @@ int mlx5_init(struct hardware_q **rxq_out, struct direct_txq **txq_out,
 
 		txq_out[i] = &txqs[i].txq;
 	}
-
-	net_ops = mlx5_net_ops;
 
 	return 0;
 }

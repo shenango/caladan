@@ -14,6 +14,14 @@ static struct direct_txq *txq_out[NCPU];
 struct pci_addr nic_pci_addr;
 bool cfg_pci_addr_specified;
 bool cfg_directpath_enabled;
+char directpath_arg[128];
+
+enum {
+	RX_MODE_FLOW_STEERING = 0,
+	RX_MODE_QUEUE_STEERING,
+};
+
+int directpath_mode;
 
 struct mempool directpath_buf_mp;
 struct tcache *directpath_buf_tcache;
@@ -111,12 +119,27 @@ int directpath_init(void)
 		return ret;
 
 	/* initialize mlx5 */
-	ret = mlx5_init(rxq_out, txq_out, maxks, maxks);
-	if (ret)
-		return ret;
+	if (strncmp("qs", directpath_arg, 2) != 0) {
+		directpath_mode = RX_MODE_FLOW_STEERING;
+		ret = mlx5_init_flow_steering(rxq_out, txq_out, maxks, maxks);
+		if (ret == 0) {
+			log_err("directpath_init: selected flow steering mode");
+			return 0;
+		}
+	}
 
-	return 0;
+	if (strncmp("fs", directpath_arg, 2) != 0) {
+		directpath_mode = RX_MODE_QUEUE_STEERING;
+		ret = mlx5_init_queue_steering(rxq_out, txq_out, maxks, maxks);
+		if (ret == 0) {
+			log_err("directpath_init: selected queue steering mode");
+			return 0;
+		}
+	}
 
+	log_err("Could not initialize directpath, ret = %d", ret);
+
+	return ret ? ret : -EINVAL;
 }
 
 int directpath_init_thread(void)
@@ -143,7 +166,7 @@ int directpath_init_thread(void)
 		rxq->descriptor_table, (1 << hs->descriptor_log_size) * hs->nr_descriptors);
 	hs->parity_byte_offset = rxq->parity_byte_offset;
 	hs->parity_bit_mask = rxq->parity_bit_mask;
-	hs->hwq_type = HWQ_MLX5;
+	hs->hwq_type = (directpath_mode == RX_MODE_FLOW_STEERING) ? HWQ_MLX5 : HWQ_MLX5_QSTEERING;
 	hs->consumer_idx = ptr_to_shmptr(&netcfg.tx_region, rxq->shadow_tail, sizeof(uint32_t));
 
 	k->directpath_rxq = rxq;

@@ -17,6 +17,11 @@ struct mlx5_rxq {
 	/* handle for runtime */
 	struct hardware_q rxq;
 
+	/* queue steering mode */
+	struct rcu_hlist_head head;
+	struct rcu_hlist_node link;
+	spinlock_t lock;
+
 	uint32_t consumer_idx;
 
 	struct mlx5dv_cq rx_cq_dv;
@@ -58,14 +63,14 @@ struct mlx5_txq {
 
 extern struct mlx5_rxq rxqs[NCPU];
 extern struct ibv_context *context;
+extern struct ibv_device_attr_ex device_attr;
+extern struct ibv_pd *pd;
 
 extern int mlx5_transmit_one(struct mbuf *m);
 extern int mlx5_gather_rx(struct hardware_q *rxq, struct mbuf **ms, unsigned int budget);
-extern int mlx5_steer_flows(unsigned int *new_fg_assignment);
-extern int mlx5_register_flow(unsigned int affinity, struct trans_entry *e, void **handle_out);
-extern int mlx5_deregister_flow(struct trans_entry *e, void *handle);
-extern uint32_t mlx5_get_flow_affinity(uint8_t ipproto,
-			 uint16_t local_port, struct netaddr remote);
+extern int mlx5_common_init(struct hardware_q **rxq_out, struct direct_txq **txq_out,
+			unsigned int nr_rxq, unsigned int nr_txq, bool use_rss);
+
 
 static inline unsigned int nr_inflight_tx(struct mlx5_txq *v)
 {
@@ -111,7 +116,3 @@ static inline uint32_t mlx5_get_rss_result(struct mlx5_cqe64 *cqe)
 {
 	return ntoh32(*((uint32_t *)cqe + 3));
 }
-
-extern struct net_driver_ops mlx5_ops;
-
-int mlx5_init_flows(int nr_rxq);

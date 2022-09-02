@@ -277,7 +277,7 @@ static int mlx5_init_root_table(void)
 	return 0;
 }
 
-int mlx5_register_flow(unsigned int affinity, struct trans_entry *e, void **handle_out)
+static int mlx5_register_flow(unsigned int affinity, struct trans_entry *e, void **handle_out)
 {
 	union match key = {0};
 
@@ -330,7 +330,7 @@ int mlx5_register_flow(unsigned int affinity, struct trans_entry *e, void **hand
 	return 0;
 }
 
-int mlx5_deregister_flow(struct trans_entry *e, void *handle)
+static int mlx5_deregister_flow(struct trans_entry *e, void *handle)
 {
 	int ret;
 
@@ -348,7 +348,7 @@ int mlx5_deregister_flow(struct trans_entry *e, void *handle)
 	return ret;
 }
 
-int mlx5_steer_flows(unsigned int *new_fg_assignment)
+static int mlx5_steer_flows(unsigned int *new_fg_assignment)
 {
 	int i, ret = 0;
 	struct tbl *tbl;
@@ -379,7 +379,7 @@ int mlx5_steer_flows(unsigned int *new_fg_assignment)
 
 }
 
-uint32_t mlx5_get_flow_affinity(uint8_t ipproto, uint16_t local_port, struct netaddr remote)
+static uint32_t mlx5_get_flow_affinity(uint8_t ipproto, uint16_t local_port, struct netaddr remote)
 {
 	bitmap_ptr_t map = ipproto == IPPROTO_TCP ? tcp_listen_ports :
 			  udp_listen_ports;
@@ -390,7 +390,7 @@ uint32_t mlx5_get_flow_affinity(uint8_t ipproto, uint16_t local_port, struct net
 		return (local_port & PORT_MASK) % maxks;
 }
 
-int mlx5_init_flows(int rxq_count)
+static int mlx5_init_flows(int rxq_count)
 {
 	int ret;
 
@@ -429,6 +429,41 @@ int mlx5_init_flows(int rxq_count)
 
 	return 0;
 
+}
+
+
+static int mlx5_fs_have_work(struct hardware_q *rxq)
+{
+	return hardware_q_pending(rxq);
+}
+
+static struct net_driver_ops mlx5_net_ops_flow_steering = {
+	.rx_batch = mlx5_gather_rx,
+	.tx_single = mlx5_transmit_one,
+	.steer_flows = mlx5_steer_flows,
+	.register_flow = mlx5_register_flow,
+	.deregister_flow = mlx5_deregister_flow,
+	.get_flow_affinity = mlx5_get_flow_affinity,
+	.rxq_has_work = mlx5_fs_have_work,
+};
+
+
+int mlx5_init_flow_steering(struct hardware_q **rxq_out,struct direct_txq **txq_out,
+	             unsigned int nr_rxq, unsigned int nr_txq)
+{
+	int ret;
+
+	ret = mlx5_common_init(rxq_out, txq_out, nr_rxq, nr_txq, false);
+	if (ret)
+		return ret;
+
+	ret = mlx5_init_flows(nr_rxq);
+	if (ret)
+		return ret;
+
+	net_ops = mlx5_net_ops_flow_steering;
+
+	return 0;
 }
 
 #endif

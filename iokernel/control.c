@@ -76,6 +76,7 @@ static int control_init_hwq(struct shm_region *r,
 	h->parity_bit_mask = hs->parity_bit_mask;
 	h->hwq_type = hs->hwq_type;
 	h->enabled = true;
+	h->queue_steering = h->hwq_type == HWQ_MLX5_QSTEERING;
 
 	if (!h->descriptor_table || !h->consumer_idx)
 		return -EINVAL;
