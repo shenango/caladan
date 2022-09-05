@@ -55,6 +55,9 @@
 char *nic_pci_addr_str;
 struct pci_addr nic_pci_addr;
 
+char **dpdk_argv;
+int dpdk_argc;
+
 static const struct rte_eth_conf port_conf_default = {
 	.rxmode = {
 		.max_rx_pkt_len = ETH_MAX_LEN,
@@ -204,25 +207,33 @@ void dpdk_print_eth_stats(void)
  */
 int dpdk_init(void)
 {
-	char *argv[nic_pci_addr_str ? 6 : 5];
+	char *argv[4 + (nic_pci_addr_str ? 2 : 1) + dpdk_argc];
 	char buf[10];
 
+	int i, argc = 0;
+
 	/* init args */
-	argv[0] = "./iokerneld";
-	argv[1] = "-l";
+	argv[argc++] = "./iokerneld";
+	argv[argc++] = "-l";
 	/* use our assigned core */
 	sprintf(buf, "%d", sched_dp_core);
-	argv[2] = buf;
-	argv[3] = "--socket-mem=128";
+	argv[argc++] = buf;
+	argv[argc++] = "--socket-mem=128";
 	if (nic_pci_addr_str) {
-		argv[4] = "--allow";
-		argv[5] = nic_pci_addr_str;
+		argv[argc++] = "--allow";
+		argv[argc++] = nic_pci_addr_str;
 	} else {
-		argv[4] = "--vdev=net_tap0";
+		argv[argc++] = "--vdev=net_tap0";
 	}
 
+	/* include any user-supplied arguments */
+	for (i = 0; i < dpdk_argc; i++)
+		argv[argc++] = dpdk_argv[i];
+
+	BUG_ON(argc != ARRAY_SIZE(argv));
+
 	/* initialize the Environment Abstraction Layer (EAL) */
-	int ret = rte_eal_init(ARRAY_SIZE(argv), argv);
+	int ret = rte_eal_init(argc, argv);
 	if (ret < 0) {
 		log_err("dpdk: error with EAL initialization");
 		return -1;

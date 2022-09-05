@@ -353,6 +353,8 @@ extern char *nic_pci_addr_str;
 extern struct pci_addr nic_pci_addr;
 extern bool allowed_cores_supplied;
 extern DEFINE_BITMAP(input_allowed_cores, NCPU);
+extern char **dpdk_argv;
+extern int dpdk_argc;
 
 /*
  * dataplane RX/TX functions

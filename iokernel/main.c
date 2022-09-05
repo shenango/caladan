@@ -191,6 +191,10 @@ int main(int argc, char *argv[])
 			}
 		} else if (!strcmp(argv[i], "noidlefastwake")) {
 			cfg.noidlefastwake = true;
+		} else if (!strcmp(argv[i], "--")) {
+			dpdk_argv = &argv[i+1];
+			dpdk_argc = argc - i - 1;
+			break;
 		} else if (string_to_bitmap(argv[i], input_allowed_cores, NCPU)) {
 			fprintf(stderr, "invalid cpu list: %s\n", argv[i]);
 			fprintf(stderr, "example list: 0-24,26-48:2,49-255\n");
