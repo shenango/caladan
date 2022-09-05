@@ -175,10 +175,14 @@ static void ioqueue_alloc(struct queue_spec *q, size_t msg_count,
  */
 int ioqueues_init(void)
 {
+	bool has_mac = false;
 	int i, ret;
 	struct thread_spec *ts;
 
-	if (!netcfg.mac.addr[0]) {
+	for (i = 0; i < ARRAY_SIZE(netcfg.mac.addr); i++)
+		has_mac |= netcfg.mac.addr[i] != 0;
+
+	if (!has_mac) {
 		ret = generate_random_mac(&netcfg.mac);
 		if (ret < 0)
 			return ret;
