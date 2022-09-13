@@ -25,7 +25,7 @@ struct pci_addr {
 	uint8_t bus;
 	uint8_t slot;
 	uint8_t func;
-};
+} __packed;
 
 extern int pci_str_to_addr(const char *str, struct pci_addr *addr);
 

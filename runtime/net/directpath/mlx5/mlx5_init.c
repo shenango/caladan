@@ -403,6 +403,7 @@ int mlx5_common_init(struct hardware_q **rxq_out, struct direct_txq **txq_out,
 	if (!context) {
 		log_err("mlx5_init: Couldn't get context for %s (errno %d)",
 			ibv_get_device_name(dev_list[i]), errno);
+		ibv_free_device_list(dev_list);
 		return -1;
 	}
 
