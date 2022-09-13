@@ -25,6 +25,7 @@
 #include <base/thread.h>
 #include <iokernel/control.h>
 
+#include "hw_timestamp.h"
 #include "defs.h"
 #include "sched.h"
 
@@ -229,8 +230,13 @@ fail:
 
 static void control_destroy_proc(struct proc *p)
 {
+	int ret;
+
 	mem_unmap_shm(p->region.base);
 	free(p->overflow_queue);
+	ret = nl_remove_mac_address(&p->mac);
+	if (unlikely(ret))
+		log_warn("control: got ret %d when removing mac address", ret);
 	free(p);
 }
 
@@ -279,6 +285,12 @@ static void control_add_client(void)
 	if (!p) {
 		log_err("control: failed to create process '%d'", ucred.pid);
 		goto fail;
+	}
+
+	ret = nl_register_mac_address(&p->mac);
+	if (ret) {
+		log_err("control: failed to register mac address with netlink");
+		goto fail_destroy_proc;
 	}
 
 	if (!lrpc_send(&lrpc_control_to_data, DATAPLANE_ADD_CLIENT,

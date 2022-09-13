@@ -25,6 +25,8 @@ void *hca_core_clock;
 
 static struct ibv_context *context;
 
+char device_name[DEVICE_NAME_MAX];
+
 /* borrowed from DPDK */
 static int ibv_device_to_pci_addr(const struct ibv_device *device,
 			    struct pci_addr *pci_addr)
@@ -106,6 +108,9 @@ int hw_timestamp_init(void)
 		return -1;
 	}
 
+	/* grab a copy of the device name */
+	strncpy(device_name, dev_list[i]->name, DEVICE_NAME_MAX);
+
 	context = mlx5dv_open_device(dev_list[i], &mlx5_context_attr);
 	if (!context) {
 		log_err("hw_timestamp_init: Couldn't get context for %s (errno %d)",
@@ -137,6 +142,13 @@ int hw_timestamp_init(void)
 	}
 
 	hca_core_clock = mlx5_ctx.hca_core_clock;
+
+	ret = nl_init();
+	if (ret) {
+		log_err("failed to initialize netlink sockets");
+		return ret;
+	}
+
 	return 0;
 }
 

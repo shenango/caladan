@@ -9,6 +9,13 @@
 
 #include "defs.h"
 
+#define DEVICE_NAME_MAX 64
+extern char device_name[DEVICE_NAME_MAX];
+
+extern int nl_register_mac_address(struct eth_addr *mac);
+extern int nl_remove_mac_address(struct eth_addr *mac);
+extern int nl_init(void);
+
 extern double device_us_per_cycle;
 extern uint32_t curr_hw_time;
 extern void *hca_core_clock;
@@ -52,4 +59,16 @@ static inline uint64_t hw_timestamp_delay_us(struct mlx5_cqe64 *cqe)
 {
 	return 0;
 }
+
+static inline int nl_register_mac_address(struct eth_addr *mac)
+{
+	return 0;
+}
+
+static inline int nl_remove_mac_address(struct eth_addr *mac)
+{
+	return 0;
+}
+
+
 #endif
