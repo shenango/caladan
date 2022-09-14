@@ -24,6 +24,15 @@ static inline void cpu_serialize(void)
 		     "cpuid" : : : "%rax", "%rbx", "%rcx", "%rdx");
 }
 
+struct cpuid_info {
+	unsigned int eax, ebx, ecx, edx;
+};
+
+static inline void cpuid(int leaf, struct cpuid_info *regs)
+{
+	asm volatile("cpuid" : "=a" (regs->eax), "=b" (regs->ebx), "=c" (regs->ecx), "=d" (regs->edx) : "a" (leaf));
+}
+
 static inline uint64_t rdtsc(void)
 {
 #if __GNUC_PREREQ(10, 0)

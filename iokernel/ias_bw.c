@@ -253,9 +253,31 @@ int ias_bw_init(void)
 {
 	int ret;
 	unsigned int nr_channels;
+	struct cpuid_info regs;
+	const char *intel_cpu_str = "GenuineIntel";
+	int namebytes[3];
 
 	if (cfg.nobw)
 		return 0;
+
+	cpuid(0, &regs);
+	namebytes[0] = regs.ebx;
+	namebytes[1] = regs.edx;
+	namebytes[2] = regs.ecx;
+
+	if (memcmp(namebytes, intel_cpu_str, strlen(intel_cpu_str))) {
+		log_warn("Detected non-Intel CPU. Disabling memory bandwidth monitoring!");
+		cfg.nobw = true;
+		return 0;
+	}
+
+	cpuid(1, &regs);
+	if (regs.ecx & (1UL << 31UL)) {
+		log_warn("Detected CPU virtualization. Disabling memory bandwidth monitoring!");
+		cfg.nobw = true;
+		return 0;
+	}
+
 
 	ret = pcm_caladan_init(0);
 	if (ret)
