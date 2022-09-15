@@ -26,7 +26,7 @@ static int udp_send_raw(struct mbuf *m, size_t len,
 	struct udp_hdr *udphdr;
 
 	/* rewrite loopback address */
-	if (raddr.ip == ((127 << 24) | 1))
+	if (raddr.ip == MAKE_IP_ADDR(127, 0, 0, 1))
 		raddr.ip = netcfg.addr;
 
 	/* write UDP header */
@@ -181,7 +181,7 @@ int udp_dial(struct netaddr laddr, struct netaddr raddr, udpconn_t **c_out)
 		return -EINVAL;
 
 	/* rewrite loopback address */
-	if (raddr.ip == ((127 << 24) | 1))
+	if (raddr.ip == MAKE_IP_ADDR(127, 0, 0, 1))
 		raddr.ip = netcfg.addr;
 
 	c = smalloc(sizeof(*c));
@@ -393,7 +393,7 @@ ssize_t udp_write_to(udpconn_t *c, const void *buf, size_t len,
 	} else {
 		addr = *raddr;
 		/* rewrite loopback address */
-		if (addr.ip == ((127 << 24) | 1))
+		if (addr.ip == MAKE_IP_ADDR(127, 0, 0, 1))
 			addr.ip = netcfg.addr;
 	}
 
@@ -678,7 +678,7 @@ ssize_t udp_send(const void *buf, size_t len,
 		return -EINVAL;
 
 	/* rewrite loopback address */
-	if (raddr.ip == ((127 << 24) | 1))
+	if (raddr.ip == MAKE_IP_ADDR(127, 0, 0, 1))
 		raddr.ip = netcfg.addr;
 
 	m = net_tx_alloc_mbuf();
@@ -713,7 +713,7 @@ ssize_t udp_sendv(const struct iovec *iov, int iovcnt,
 		return -EINVAL;
 
 	/* rewrite loopback address */
-	if (raddr.ip == ((127 << 24) | 1))
+	if (raddr.ip == MAKE_IP_ADDR(127, 0, 0, 1))
 		raddr.ip = netcfg.addr;
 
 	m = net_tx_alloc_mbuf();
