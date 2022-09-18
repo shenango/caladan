@@ -24,7 +24,7 @@ index 5e172d09..61aa29f2 100644
  	if (dr_domain_caps_init(ctx, dmn)) {
  		dr_dbg(dmn, "Failed init domain, no caps\n");
 diff --git a/providers/mlx5/dr_rule.c b/providers/mlx5/dr_rule.c
-index 9239fe5d..70f5fcac 100644
+index 9239fe5d..4889670d 100644
 --- a/providers/mlx5/dr_rule.c
 +++ b/providers/mlx5/dr_rule.c
 @@ -32,8 +32,9 @@
@@ -57,7 +57,7 @@ index 9239fe5d..70f5fcac 100644
 +
 +	assert(ste->htbl->chunk->num_of_entries == 1);
 +
-+	old_qp_index = dmn->ste_ctx->get_miss_addr(ste->hw_ste) & ~0x1;
++	old_qp_index = dmn->ste_ctx->get_hit_addr(ste->hw_ste) & ~0x1;
 +	assert(old_qp_index == ((prev_qp->tir_icm_addr >> 5) & 0xffffffff));
 +
 +	dr_ste_set_hit_addr(dmn->ste_ctx, ste->hw_ste, next_qp->tir_icm_addr, 1);
