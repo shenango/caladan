@@ -28,6 +28,7 @@ unsigned int sched_ctrl_core;	/* used for the iokernel's controlplane */
 
 /* keeps track of which cores are in each NUMA socket */
 struct socket socket_state[NNUMA];
+int managed_numa_node;
 
 /* arrays of core numbers for fast polling */
 unsigned int sched_cores_tbl[NCPU];
@@ -756,7 +757,7 @@ int sched_init(void)
 	 */
 
 	for (i = 0; i < cpu_count; i++) {
-		if (cpu_info_tbl[i].package != 0 && sched_ops != &numa_ops)
+		if (cpu_info_tbl[i].package != managed_numa_node && sched_ops != &numa_ops)
 			continue;
 
 		if (allowed_cores_supplied &&

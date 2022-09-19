@@ -349,6 +349,7 @@ extern bool allowed_cores_supplied;
 extern DEFINE_BITMAP(input_allowed_cores, NCPU);
 extern char **dpdk_argv;
 extern int dpdk_argc;
+extern int managed_numa_node;
 
 /*
  * dataplane RX/TX functions

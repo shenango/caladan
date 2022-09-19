@@ -189,6 +189,16 @@ int main(int argc, char *argv[])
 				log_err("invalid pci address: %s", nic_pci_addr_str);
 				return -EINVAL;
 			}
+		} else if (!strcmp(argv[i], "numanode")) {
+			if (sched_ops == &numa_ops) {
+				fprintf(stderr, "Can't combine numanode argument with numa scheduler");
+				return -EINVAL;
+			}
+			if (i == argc - 1) {
+				fprintf(stderr, "missing numanode argument\n");
+				return -EINVAL;
+			}
+			managed_numa_node = atoi(argv[++i]);
 		} else if (!strcmp(argv[i], "noidlefastwake")) {
 			cfg.noidlefastwake = true;
 		} else if (!strcmp(argv[i], "--")) {
