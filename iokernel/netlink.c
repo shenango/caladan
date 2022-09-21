@@ -452,7 +452,7 @@ int nl_init(void)
 
 int nl_remove_mac_address(struct eth_addr *mac)
 {
-	if (cfg.no_hw_qdel)
+	if (cfg.no_hw_qdel || nl_route_fd < 0)
 		return 0;
 
 	return mlx5_nl_mac_addr_modify(nl_route_fd, iface_idx, mac, 0);
@@ -463,7 +463,7 @@ int nl_register_mac_address(struct eth_addr *mac)
 	int ret;
 
 	/* functionality is currently associated with hw_timestamp */
-	if (cfg.no_hw_qdel)
+	if (cfg.no_hw_qdel || nl_route_fd < 0)
 		return 0;
 
 	ret = mlx5_nl_mac_addr_modify(nl_route_fd, iface_idx, mac, 1);

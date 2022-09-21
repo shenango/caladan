@@ -26,6 +26,8 @@ struct init_entry {
 	int (*init)(void);
 };
 
+pthread_barrier_t init_barrier;
+
 #define IOK_INITIALIZER(name) \
 	{__cstr(name), &name ## _init}
 
@@ -50,6 +52,7 @@ static const struct init_entry iok_init_handlers[] = {
 	IOK_INITIALIZER(tx),
 	IOK_INITIALIZER(dp_clients),
 	IOK_INITIALIZER(dpdk_late),
+	IOK_INITIALIZER(directpath),
 	IOK_INITIALIZER(hw_timestamp),
 
 };
@@ -114,6 +117,9 @@ void dataplane_loop(void)
 		/* process a batch of commands from runtimes */
 		work_done |= commands_rx();
 
+		if (cfg.vfio_directpath)
+			work_done |= directpath_poll();
+
 		/* handle control messages */
 		if (!work_done)
 			dp_clients_rx_control_lrpcs();
@@ -171,6 +177,12 @@ int main(int argc, char *argv[])
 			cfg.no_hw_qdel = true;
 		} else if (!strcmp(argv[i], "selfpair")) {
 			cfg.ias_prefer_selfpair = true;
+		} else if (!strcmp(argv[i], "vfio")) {
+#ifndef DIRECTPATH
+			log_err("please recompile with CONFIG_DIRECTPATH=y");
+			return -EINVAL;
+#endif
+			cfg.vfio_directpath = true;
 		} else if (!strcmp(argv[i], "bwlimit")) {
 			if (i == argc - 1) {
 				fprintf(stderr, "missing bwlimit argument\n");
@@ -201,6 +213,10 @@ int main(int argc, char *argv[])
 			managed_numa_node = atoi(argv[++i]);
 		} else if (!strcmp(argv[i], "noidlefastwake")) {
 			cfg.noidlefastwake = true;
+		} else if (!strcmp(argv[i], "globalrxdelay")) {
+			cfg.no_perthread_rxdelay = true;
+		} else if (!strcmp(argv[i], "nodpactiverss")) {
+			cfg.no_directpath_active_rss = true;
 		} else if (!strcmp(argv[i], "--")) {
 			dpdk_argv = &argv[i+1];
 			dpdk_argc = argc - i - 1;
@@ -214,10 +230,14 @@ int main(int argc, char *argv[])
 		}
 	}
 
+	pthread_barrier_init(&init_barrier, NULL, 2);
+
 	ret = run_init_handlers("iokernel", iok_init_handlers,
 			ARRAY_SIZE(iok_init_handlers));
 	if (ret)
 		return ret;
+
+	pthread_barrier_wait(&init_barrier);
 
 	dataplane_loop();
 	return 0;

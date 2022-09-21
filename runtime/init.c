@@ -131,6 +131,7 @@ static void *pthread_entry(void *data)
 	BUG_ON(ret);
 
 	pthread_barrier_wait(&init_barrier);
+	pthread_barrier_wait(&init_barrier);
 	sched_start();
 
 	/* never reached unless things are broken */
@@ -208,6 +209,8 @@ int runtime_init(const char *cfgpath, thread_fn_t main_fn, void *arg)
 		log_err("couldn't register with iokernel, ret = %d", ret);
 		return ret;
 	}
+
+	pthread_barrier_wait(&init_barrier);
 
 	/* point of no return starts here */
 

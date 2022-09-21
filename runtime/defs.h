@@ -227,11 +227,14 @@ struct iokernel_control {
 	const struct iokernel_info *iok_info;
 	void *tx_buf;
 	size_t tx_len;
+
+	void *rx_buf;
+	size_t rx_len;
 };
 
 extern struct iokernel_control iok;
 extern void *iok_shm_alloc(size_t size, size_t alignment, shmptr_t *shm_out);
-
+extern struct runtime_info *runtime_info;
 
 /*
  * Direct hardware queue support
@@ -418,7 +421,7 @@ struct kthread {
 	struct storage_q	storage_q;
 
 	/* 10th cache-line, direct path queues */
-	struct hardware_q	*directpath_rxq;
+	struct direct_rxq	*directpath_rxq;
 	struct direct_txq	*directpath_txq;
 	unsigned long		pad3[6];
 
@@ -469,7 +472,7 @@ static inline void putk(void)
 /* preempt_cede_needed - check if kthread should cede */
 static inline bool preempt_cede_needed(struct kthread *k)
 {
-	return ACCESS_ONCE(k->q_ptrs->curr_grant_gen) ==
+	return k->q_ptrs->curr_grant_gen ==
 	       ACCESS_ONCE(k->q_ptrs->cede_gen);
 }
 
@@ -479,6 +482,13 @@ static inline bool preempt_yield_needed(struct kthread *k)
         return ACCESS_ONCE(k->q_ptrs->yield_rcu_gen) == k->rcu_gen;
 }
 
+/* preempt_park_needed - check if kthread should park itself */
+static inline bool preempt_park_needed(struct kthread *k)
+{
+	return k->q_ptrs->curr_grant_gen ==
+	       ACCESS_ONCE(k->q_ptrs->park_gen);
+}
+
 
 DECLARE_SPINLOCK(klock);
 extern unsigned int spinks;
@@ -486,11 +496,13 @@ extern unsigned int maxks;
 extern unsigned int guaranteedks;
 extern struct kthread *ks[NCPU];
 extern bool cfg_prio_is_lc;
+extern bool cfg_request_hardware_queues;
 extern uint64_t cfg_ht_punish_us;
 extern uint64_t cfg_qdelay_us;
 extern uint64_t cfg_quantum_us;
 
-extern void kthread_park(bool voluntary);
+extern void kthread_park(void);
+extern void kthread_park_now(void);
 extern void kthread_wait_to_attach(void);
 
 struct cpu_record {
@@ -558,24 +570,25 @@ extern int __noinline net_tx_drain_overflow(void);
 
 struct trans_entry;
 struct net_driver_ops {
-	int (*rx_batch)(struct hardware_q *rxq, struct mbuf **ms, unsigned int budget);
+	int (*rx_batch)(struct direct_rxq *rxq, struct mbuf **ms, unsigned int budget);
 	int (*tx_single)(struct mbuf *m);
 	int (*steer_flows)(unsigned int *new_fg_assignment);
 	int (*register_flow)(unsigned int affininty, struct trans_entry *e, void **handle_out);
 	int (*deregister_flow)(struct trans_entry *e, void *handle);
 	uint32_t (*get_flow_affinity)(uint8_t ipproto, uint16_t local_port, struct netaddr remote);
-	int (*rxq_has_work)(struct hardware_q *rxq);
+	int (*rxq_has_work)(struct direct_rxq *rxq);
 };
 
 extern struct net_driver_ops net_ops;
 
 #ifdef DIRECTPATH
 
+extern int directpath_parse_arg(const char *name, const char *val);
 extern bool cfg_directpath_enabled;
-extern char directpath_arg[128];
 struct direct_txq {};
+struct direct_rxq {};
 
-static inline bool rx_pending(struct hardware_q *rxq)
+static inline bool rx_pending(struct direct_rxq *rxq)
 {
 	return cfg_directpath_enabled && net_ops.rxq_has_work(rxq);
 }
@@ -584,7 +597,7 @@ extern size_t directpath_rx_buf_pool_sz(unsigned int nrqs);
 
 #else
 
-static inline bool rx_pending(struct hardware_q *rxq)
+static inline bool rx_pending(struct direct_rxq *rxq)
 {
 	return false;
 }
@@ -669,6 +682,8 @@ extern int stat_init_late(void);
 extern int tcp_init_late(void);
 extern int rcu_init_late(void);
 extern int directpath_init_late(void);
+
+extern int mlx5_init_ext_late(struct directpath_spec *spec, int bar_fd, int mem_fd);
 
 /* configuration loading */
 extern int cfg_load(const char *path);

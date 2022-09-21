@@ -18,7 +18,7 @@ net_src = $(wildcard net/*.c)
 net_obj = $(net_src:.c=.o)
 
 # iokernel - a soft-NIC service
-iokernel_src = $(wildcard iokernel/*.c)
+iokernel_src = $(wildcard iokernel/*.c) $(wildcard iokernel/directpath/*.c)
 iokernel_obj = $(iokernel_src:.c=.o)
 $(iokernel_obj): INC += -I$(DPDK_PATH)/build/include
 

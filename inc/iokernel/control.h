@@ -17,7 +17,7 @@
  * struct control_hdr, please increment the version number!
  */
 
-#define CONTROL_HDR_VERSION 5
+#define CONTROL_HDR_VERSION 6
 
 /* The abstract namespace path for the control socket. */
 #define CONTROL_SOCK_PATH	"\0/control/iokernel.sock"
@@ -30,7 +30,7 @@ struct q_ptrs {
 	uint32_t		directpath_rx_tail;
 	uint64_t		next_timer_tsc;
 	uint32_t		storage_tail;
-	uint32_t		q_assign_idx;
+	uint32_t		pad1;
 	uint64_t		oldest_tsc;
 	uint64_t		rcu_gen;
 	uint64_t		run_start_tsc;
@@ -40,7 +40,8 @@ struct q_ptrs {
 	uint64_t		curr_grant_gen;
 	uint64_t		cede_gen;
 	uint64_t		yield_rcu_gen;
-	uint64_t		pad3[5];
+	uint64_t		park_gen;
+	uint64_t		pad3[4];
 };
 
 BUILD_ASSERT(sizeof(struct q_ptrs) == 2 * CACHE_LINE_SIZE);
@@ -51,11 +52,15 @@ struct congestion_info {
 	uint64_t		delay_us;
 };
 
+struct runtime_info {
+	struct congestion_info congestion;
+	unsigned int flow_tbl[NCPU];
+};
+
 enum {
 	HWQ_INVALID = 0,
 	HWQ_MLX5,
 	HWQ_SPDK_NVME,
-	HWQ_MLX5_QSTEERING,
 	NR_HWQ,
 };
 
@@ -94,6 +99,36 @@ enum {
 	SCHED_PRIO_BE,     /* low priority, best-effort task */
 };
 
+
+struct directpath_ring_q_spec {
+	shmptr_t buf;
+	shmptr_t dbrec;
+	uint32_t nr_entries;
+	uint32_t stride;
+};
+
+struct directpath_queue_spec {
+	uint32_t sqn;
+	uint32_t uarn;
+	uint32_t uar_offset;
+	struct directpath_ring_q_spec rx_wq;
+	struct directpath_ring_q_spec rx_cq;
+	struct directpath_ring_q_spec tx_wq;
+	struct directpath_ring_q_spec tx_cq;
+};
+
+struct directpath_spec {
+	uint32_t mr;
+	size_t va_base;
+	size_t memfd_region_size;
+
+	/* bar map */
+	off_t offs;
+	size_t bar_map_size;
+
+	struct directpath_queue_spec qs[];
+};
+
 /* describes scheduler options */
 struct sched_spec {
 	unsigned int		priority;
@@ -112,8 +147,9 @@ struct control_hdr {
 	unsigned int		version_no;
 	unsigned int		magic;
 	unsigned int		thread_count;
+	unsigned int		request_directpath_queues;
 	unsigned long		egress_buf_count;
-	shmptr_t		congestion_info;
+	shmptr_t		runtime_info;
 	struct eth_addr		mac;
 	struct sched_spec	sched_cfg;
 	shmptr_t		thread_specs;

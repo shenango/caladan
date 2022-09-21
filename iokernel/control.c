@@ -58,6 +58,81 @@ static void *copy_shm_data(struct shm_region *r, shmptr_t ptr, size_t len)
 	return out;
 }
 
+static int send_fd(int controlfd, int shared_fd)
+{
+	struct msghdr msg;
+	char buf[CMSG_SPACE(sizeof(int))];
+	struct iovec iov[1];
+	char iobuf[1];
+	struct cmsghdr *cmptr;
+
+	/* init message header, iovec is necessary even though it's unused */
+	msg.msg_name = NULL;
+	msg.msg_namelen = 0;
+	msg.msg_control = buf;
+	msg.msg_controllen = sizeof(buf);
+	iov[0].iov_base = iobuf;
+	iov[0].iov_len = sizeof(iobuf);
+	msg.msg_iov = iov;
+	msg.msg_iovlen = 1;
+
+	/* init control message */
+	cmptr = CMSG_FIRSTHDR(&msg);
+	cmptr->cmsg_len = CMSG_LEN(sizeof(int));
+	cmptr->cmsg_level = SOL_SOCKET;
+	cmptr->cmsg_type = SCM_RIGHTS;
+	*(int *)CMSG_DATA(cmptr) = shared_fd;
+
+	if (sendmsg(controlfd, &msg, 0) != sizeof(iobuf)) {
+		log_err("failed to send cmsg");
+		return -1;
+	}
+
+	return 0;
+}
+
+static int control_setup_directpath(struct proc *p, int controlfd)
+{
+	int memfd, barfd, ret;
+	size_t specsz;
+	ssize_t wret;
+	struct directpath_queue_spec *qspec;
+	struct directpath_spec *spec;
+
+	specsz = sizeof(*spec) + sizeof(*qspec) * p->thread_count;
+	spec = malloc(specsz);
+	if (!spec)
+		return -ENOMEM;
+
+	ret = alloc_directpath_ctx(p, spec, &memfd, &barfd);
+	if (ret) {
+		log_err("control: failed to allocate context");
+		goto err;
+	}
+
+	ret = send_fd(controlfd, memfd);
+	if (ret)
+		goto err;
+
+	ret = send_fd(controlfd, barfd);
+	if (ret)
+		goto err;
+
+	wret = write(controlfd, spec, specsz);
+	if (wret != specsz) {
+		ret = -1;
+		goto err;
+	}
+
+	free(spec);
+	return 0;
+
+err:
+	free_ctx(p);
+	free(spec);
+	return ret;
+}
+
 static int control_init_hwq(struct shm_region *r,
 	  struct hardware_queue_spec *hs, struct hwq *h)
 {
@@ -145,11 +220,12 @@ static struct proc *control_create_proc(mem_key_t key, size_t len,
 	if (eth_addr_is_multicast(&hdr.mac) || eth_addr_is_zero(&hdr.mac))
 		goto fail;
 	p->mac = hdr.mac;
-	p->congestion_info = shmptr_to_ptr(&reg, hdr.congestion_info,
-					   sizeof(*p->congestion_info));
-	if (!p->congestion_info)
+	p->runtime_info = shmptr_to_ptr(&reg, hdr.runtime_info,
+					   sizeof(*p->runtime_info));
+	if (!p->runtime_info)
 		goto fail;
-	memset(p->congestion_info, 0, sizeof(*p->congestion_info));
+	memset(&p->runtime_info->congestion, 0, sizeof(p->runtime_info->congestion));
+	p->has_vfio_directpath = p->has_directpath = hdr.request_directpath_queues;
 
 	/* initialize the threads */
 	for (i = 0; i < hdr.thread_count; i++) {
@@ -229,11 +305,16 @@ static void control_destroy_proc(struct proc *p)
 {
 	int ret;
 
+	if (p->has_vfio_directpath) {
+		free_ctx(p);
+	} else if (!cfg.vfio_directpath) {
+		ret = nl_remove_mac_address(&p->mac);
+		if (unlikely(ret))
+			log_warn("control: got ret %d when removing mac address", ret);
+	}
+
 	mem_unmap_shm(p->region.base);
 	free(p->overflow_queue);
-	ret = nl_remove_mac_address(&p->mac);
-	if (unlikely(ret))
-		log_warn("control: got ret %d when removing mac address", ret);
 	free(p);
 }
 
@@ -284,11 +365,20 @@ static void control_add_client(void)
 		goto fail;
 	}
 
-	ret = nl_register_mac_address(&p->mac);
-	if (ret) {
-		log_err("control: failed to register mac address with netlink");
-		goto fail_destroy_proc;
+	if (p->has_vfio_directpath) {
+		ret = control_setup_directpath(p, fd);
+		if (ret) {
+			log_err("control: failed to setup directpath queues");
+			goto fail_destroy_proc;
+		}
+	} else if (!cfg.vfio_directpath) {
+		ret = nl_register_mac_address(&p->mac);
+		if (ret) {
+			log_err("control: failed to register mac address with netlink");
+			goto fail_destroy_proc;
+		}
 	}
+
 
 	if (!lrpc_send(&lrpc_control_to_data, DATAPLANE_ADD_CLIENT,
 			(unsigned long) p)) {
@@ -361,6 +451,8 @@ static void control_loop(void)
 	uint64_t cmd, efdval;
 	unsigned long payload;
 	struct proc *p;
+
+	pthread_barrier_wait(&init_barrier);
 
 	while (1) {
 		maxfd = MAX(controlfd, data_to_control_efd);

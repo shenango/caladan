@@ -12,6 +12,7 @@
 #include <stdio.h>
 
 #include <infiniband/mlx5dv.h>
+#include "../runtime/net/directpath/mlx5/mlx5_ifc.h"
 
 #include "defs.h"
 #include "hw_timestamp.h"
@@ -79,9 +80,22 @@ int hw_timestamp_init(void)
 	struct ibv_device_attr_ex ib_dev_attr;
 	struct mlx5dv_context mlx5_ctx = {0};
 	struct pci_addr pci_addr;
+	unsigned int freq_khz;
 
 	if (cfg.no_hw_qdel)
 		return 0;
+
+	if (cfg.vfio_directpath) {
+		ret = directpath_get_clock(&freq_khz, &hca_core_clock);
+		if (ret) {
+			log_err("Error getting clock");
+			return ret;
+		}
+
+		device_us_per_cycle = 1000.0 / (double)freq_khz;
+		log_info("mlx5: device cycles / us: %.4f", 1.0 / device_us_per_cycle);
+		return 0;
+	}
 
 	dev_list = ibv_get_device_list(NULL);
 	if (!dev_list) {
@@ -147,10 +161,8 @@ int hw_timestamp_init(void)
 	hca_core_clock = mlx5_ctx.hca_core_clock;
 
 	ret = nl_init();
-	if (ret) {
-		log_err("failed to initialize netlink sockets");
-		return ret;
-	}
+	if (ret)
+		log_warn("failed to initialize netlink sockets");
 
 	return 0;
 }

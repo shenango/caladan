@@ -91,7 +91,7 @@ static void ias_ht_relax(struct ias_data *sd, unsigned int core)
 	WARN_ON(ias_idle_on_core(sib));
 }
 
-static float ias_ht_poll_one(unsigned int core, uint64_t cur_tsc)
+static float ias_ht_poll_one(unsigned int core)
 {
 	struct ias_ht_data *htd = &ias_ht_percore[core];
 	struct ias_data *sd = cores[core];
@@ -132,11 +132,10 @@ void ias_ht_poll(void)
 {
 	struct tarr arr[NCPU];
 	unsigned int core, tmp, num = 0;
-	uint64_t now_tsc = rdtsc();
 
 	/* loop over cores to update service times */
 	sched_for_each_allowed_core(core, tmp) {
-		arr[num].budget_used = ias_ht_poll_one(core, now_tsc);
+		arr[num].budget_used = ias_ht_poll_one(core);
 		arr[num++].core = core;
 	}
 

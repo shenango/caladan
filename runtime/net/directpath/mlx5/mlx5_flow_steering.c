@@ -10,7 +10,6 @@
 #define PORT_MASK ((1 << PORT_MATCH_BITS) - 1)
 
 static struct mlx5dv_dr_domain		*dmn;
-static unsigned int		nr_rxq;
 static DEFINE_SPINLOCK(direct_rule_lock);
 
 struct tbl {
@@ -143,7 +142,7 @@ static struct port_matcher_tbl *alloc_port_matcher(uint8_t ipproto,
 
 	for (i = 0; i < nrules; i++) {
 		_devx_set(mask.buf, i, t->match_bit_off, t->match_bit_sz);
-		action[0] = fg_tbl[pos++ % nr_rxq].ingress_action;
+		action[0] = fg_tbl[pos++ % maxks].ingress_action;
 		t->rules[i] = mlx5dv_dr_rule_create(t->match, &mask.params, 1, action);
 		if (!t->rules[i])
 				return NULL;
@@ -152,14 +151,13 @@ static struct port_matcher_tbl *alloc_port_matcher(uint8_t ipproto,
 	return t;
 }
 
-
 static int mlx5_init_fg_tables(void)
 {
 	int i, ret;
 
-	for (i = 0; i < nr_rxq; i++) {
+	for (i = 0; i < maxks; i++) {
 		/* forward to qp 0 */
-		fg_fwd_action[i] = mlx5dv_dr_action_create_dest_ibv_qp(rxqs[0].qp);
+		fg_fwd_action[i] = mlx5dv_dr_action_create_dest_ibv_qp(rx_qps[0]);
 		if (!fg_fwd_action[i])
 			return -errno;
 
@@ -168,6 +166,7 @@ static int mlx5_init_fg_tables(void)
 			return ret;
 
 		fg_qp_assignment[i] = 0;
+		ACCESS_ONCE(runtime_info->flow_tbl[i]) = i;
 	}
 
 	return 0;
@@ -357,13 +356,13 @@ static int mlx5_steer_flows(unsigned int *new_fg_assignment)
 
 	postsend_lock(dmn);
 
-	for (i = 0; i < nr_rxq; i++) {
+	for (i = 0; i < maxks; i++) {
 		if (new_fg_assignment[i] == fg_qp_assignment[i])
 			continue;
 
 		tbl = &fg_tbl[i];
-		new_qp = rxqs[new_fg_assignment[i]].qp;
-		old_qp = rxqs[fg_qp_assignment[i]].qp;
+		new_qp = rx_qps[new_fg_assignment[i]];
+		old_qp = rx_qps[fg_qp_assignment[i]];
 
 		ret = switch_qp_action(tbl->default_egress_rule, dmn,
 			    new_qp, old_qp);
@@ -390,12 +389,11 @@ static uint32_t mlx5_get_flow_affinity(uint8_t ipproto, uint16_t local_port, str
 		return (local_port & PORT_MASK) % maxks;
 }
 
-static int mlx5_init_flows(int rxq_count)
+static int mlx5_init_flows(void)
 {
 	int ret;
 
 	spin_lock_init(&direct_rule_lock);
-	nr_rxq = rxq_count;
 
 	dmn = mlx5dv_dr_domain_create(context,
 		MLX5DV_DR_DOMAIN_TYPE_NIC_RX);
@@ -431,37 +429,20 @@ static int mlx5_init_flows(int rxq_count)
 
 }
 
-
-static int mlx5_fs_have_work(struct hardware_q *rxq)
-{
-	return hardware_q_pending(rxq);
-}
-
-static struct net_driver_ops mlx5_net_ops_flow_steering = {
-	.rx_batch = mlx5_gather_rx,
-	.tx_single = mlx5_transmit_one,
-	.steer_flows = mlx5_steer_flows,
-	.register_flow = mlx5_register_flow,
-	.deregister_flow = mlx5_deregister_flow,
-	.get_flow_affinity = mlx5_get_flow_affinity,
-	.rxq_has_work = mlx5_fs_have_work,
-};
-
-
-int mlx5_init_flow_steering(struct hardware_q **rxq_out,struct direct_txq **txq_out,
-	             unsigned int nr_rxq, unsigned int nr_txq)
+int mlx5_init_flow_steering(void)
 {
 	int ret;
 
-	ret = mlx5_common_init(rxq_out, txq_out, nr_rxq, nr_txq, false);
-	if (ret)
+	ret = mlx5_init_flows();
+	if (ret) {
+		log_err("Failed to setup mlx5 hardware steering: ret %d", ret);
 		return ret;
+	}
 
-	ret = mlx5_init_flows(nr_rxq);
-	if (ret)
-		return ret;
-
-	net_ops = mlx5_net_ops_flow_steering;
+	net_ops.steer_flows = mlx5_steer_flows;
+	net_ops.register_flow = mlx5_register_flow;
+	net_ops.deregister_flow = mlx5_deregister_flow;
+	net_ops.get_flow_affinity = mlx5_get_flow_affinity;
 
 	return 0;
 }

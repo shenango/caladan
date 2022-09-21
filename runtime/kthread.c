@@ -170,7 +170,7 @@ done:
 
 static void flows_notify_waking(void)
 {
-	if (!cfg_directpath_enabled)
+	if (!net_ops.steer_flows)
 		return;
 
 	bitmap_atomic_set(kthread_awake, myk()->kthread_idx);
@@ -180,13 +180,12 @@ static void flows_notify_waking(void)
 
 static void flows_notify_parking(bool voluntary)
 {
-
-	if (!cfg_directpath_enabled)
+	if (!net_ops.steer_flows)
 		return;
 
 	bitmap_atomic_clear(kthread_awake, myk()->kthread_idx);
 	atomic64_inc(&kthread_gen);
-	if (voluntary || cfg_prio_is_lc)
+	if (voluntary)
 		flows_update();
 }
 
@@ -195,16 +194,43 @@ static inline void flows_notify_waking(void) {}
 static inline void flows_notify_parking(bool voluntary) {}
 #endif
 
+/*
+ * kthread_park_now - block this kthread until the iokernel wakes it up.
+ *
+ * This variant must be called without the local kthread lock held.
+ */
+void kthread_park_now(void)
+{
+	assert_preempt_disabled();
+
+	atomic_sub_and_fetch(&runningks, 1);
+
+	flows_notify_parking(false);
+
+	STAT(PARKS)++;
+
+	/* perform the actual parking */
+	kthread_yield_to_iokernel();
+
+	/* iokernel has unparked us */
+	atomic_inc(&runningks);
+
+	flows_notify_waking();
+}
+
 
 /*
  * kthread_park - block this kthread until the iokernel wakes it up.
- * @voluntary: true if this kthread parked because it had no work left
  *
- * This variant must be called with the local kthread lock held. It is intended
- * for use by the scheduler and for use by signal handlers.
+ * This variant must be called with the local kthread lock held.
  */
-void kthread_park(bool voluntary)
+void kthread_park(void)
 {
+	struct kthread *k = myk();
+	bool voluntary;
+
+	voluntary = !preempt_cede_needed(k) & !preempt_park_needed(k);
+
 	assert_preempt_disabled();
 
 	/* atomically verify we have at least @spinks kthreads running */
@@ -216,7 +242,10 @@ void kthread_park(bool voluntary)
 		return;
 	}
 
-	flows_notify_parking(voluntary);
+	// Drop lock
+	spin_unlock(&k->lock);
+
+	flows_notify_parking(!preempt_cede_needed(k));
 
 	STAT(PARKS)++;
 
@@ -227,6 +256,8 @@ void kthread_park(bool voluntary)
 	atomic_inc(&runningks);
 
 	flows_notify_waking();
+
+	spin_lock(&k->lock);
 }
 
 /**

@@ -207,6 +207,7 @@ static void net_rx_one(struct mbuf *m)
 	return;
 
 drop:
+	log_warn_ratelimited("dropping");
 	mbuf_drop(m);
 }
 
@@ -650,11 +651,6 @@ static void net_dump_config(void)
 	log_info("  mtu:\t\t%d", net_get_mtu());
 }
 
-static int steer_flows_iokernel(unsigned int *new_fg_assignment)
-{
-	return 0;
-}
-
 static int
 register_flow_iokernel(unsigned int affininty, struct trans_entry *e,
 		       void **handle_out)
@@ -669,7 +665,7 @@ static int deregister_flow_iokernel(struct trans_entry *e, void *handle)
 
 static struct net_driver_ops iokernel_ops = {
 	.tx_single = net_tx_iokernel,
-	.steer_flows = steer_flows_iokernel,
+	.steer_flows = NULL,
 	.register_flow =  register_flow_iokernel,
 	.deregister_flow = deregister_flow_iokernel,
 	.get_flow_affinity = compute_flow_affinity,

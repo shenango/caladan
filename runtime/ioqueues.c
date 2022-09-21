@@ -6,6 +6,7 @@
 #include <pthread.h>
 #include <string.h>
 #include <sys/ipc.h>
+#include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/un.h>
@@ -40,6 +41,7 @@ static size_t calculate_egress_pool_size(void)
 
 struct iokernel_control iok;
 bool cfg_prio_is_lc;
+bool cfg_request_hardware_queues;
 uint64_t cfg_ht_punish_us;
 uint64_t cfg_qdelay_us = 10;
 uint64_t cfg_quantum_us = 100;
@@ -105,8 +107,11 @@ static size_t estimate_shm_space(void)
 
 #ifdef DIRECTPATH
 	// mlx5 directpath
-	if (cfg_directpath_enabled)
+	if (cfg_directpath_enabled) {
 		ret += PGSIZE_2MB * 4;
+
+		ret += align_up(directpath_rx_buf_pool_sz(maxks), PGSIZE_2MB);
+	}
 #endif
 
 #ifdef DIRECT_STORAGE
@@ -214,8 +219,8 @@ int ioqueues_init(void)
 	/* set up queues in shared memory */
 	iok.hdr = iok_shm_alloc(sizeof(*iok.hdr), 0, NULL);
 	iok.threads = iok_shm_alloc(sizeof(*ts) * maxks, 0, NULL);
-	runtime_congestion = iok_shm_alloc(sizeof(struct congestion_info),
-					   0, &iok.hdr->congestion_info);
+	runtime_info = iok_shm_alloc(sizeof(struct runtime_info),
+	                             0, &iok.hdr->runtime_info);
 
 	for (i = 0; i < maxks; i++) {
 		ts = &iok.threads[i];
@@ -230,6 +235,12 @@ int ioqueues_init(void)
 	iok.tx_len = calculate_egress_pool_size();
 	iok.tx_buf = iok_shm_alloc(iok.tx_len, PGSIZE_2MB, NULL);
 
+#ifdef DIRECTPATH
+	if (cfg_directpath_enabled) {
+		iok.rx_len = directpath_rx_buf_pool_sz(maxks);
+		iok.rx_buf = iok_shm_alloc(iok.rx_len, PGSIZE_2MB, NULL);
+	}
+#endif
 	return 0;
 }
 
@@ -238,6 +249,93 @@ static void ioqueues_shm_cleanup(void)
 	mem_unmap_shm(netcfg.tx_region.base);
 	mem_unmap_shm(netcfg.rx_region.base);
 }
+
+#ifdef DIRECTPATH
+static int recv_fd(int fd, int *fd_out)
+{
+	struct msghdr msg;
+	char buf[CMSG_SPACE(sizeof(int))];
+	struct iovec iov[1];
+	char iobuf[1];
+	ssize_t ret;
+	struct cmsghdr *cmptr;
+
+	/* init message header and buffs for control message and iovec */
+	msg.msg_control = buf;
+	msg.msg_controllen = sizeof(buf);
+	msg.msg_name = NULL;
+	msg.msg_namelen = 0;
+
+	iov[0].iov_base = iobuf;
+	iov[0].iov_len = sizeof(iobuf);
+	msg.msg_iov = iov;
+	msg.msg_iovlen = 1;
+
+	ret = recvmsg(fd, &msg, 0);
+	if (ret < 0) {
+		log_debug("control: error with recvmsg %ld", ret);
+		return ret;
+	}
+
+	/* check validity of control message */
+	cmptr = CMSG_FIRSTHDR(&msg);
+	if (cmptr == NULL) {
+		log_debug("control: no cmsg %p", cmptr);
+		return -1;
+	} else if (cmptr->cmsg_len != CMSG_LEN(sizeof(int))) {
+		log_debug("control: cmsg is too long %ld", cmptr->cmsg_len);
+		return -1;
+	} else if (cmptr->cmsg_level != SOL_SOCKET) {
+		log_debug("control: unrecognized cmsg level %d", cmptr->cmsg_level);
+		return -1;
+	} else if (cmptr->cmsg_type != SCM_RIGHTS) {
+		log_debug("control: unrecognized cmsg type %d", cmptr->cmsg_type);
+		return -1;
+	}
+
+	*fd_out = *(int *)CMSG_DATA(cmptr);
+	return 0;
+}
+
+static int setup_external_directpath(int controlfd)
+{
+	int memfd = -1, ret, barfd = -1;
+	size_t specsz;
+	ssize_t rret;
+	struct directpath_spec *spec;
+	struct directpath_queue_spec *qspec;
+
+	specsz = sizeof(*spec) + sizeof(*qspec) * maxks;
+	spec = malloc(specsz);
+	if (unlikely(!spec))
+		return -ENOMEM;
+
+	ret = recv_fd(controlfd, &memfd);
+	if (unlikely(ret < 0)) {
+		log_err("bad recv");
+		goto done;
+	}
+
+	ret = recv_fd(controlfd, &barfd);
+	if (unlikely(ret < 0)) {
+		log_err("bad recv");
+		goto done;
+	}
+
+	rret = read(controlfd, spec, specsz);
+	if (unlikely(rret != specsz)) {
+		log_err("bad read");
+		ret = -1;
+		goto done;
+	}
+
+	ret = mlx5_init_ext_late(spec, barfd, memfd);
+
+done:
+	free(spec);
+	return ret;
+}
+#endif
 
 /*
  * Register this runtime with the IOKernel. All threads must complete their
@@ -259,6 +357,8 @@ int ioqueues_register_iokernel(void)
 	hdr->egress_buf_count = div_up(iok.tx_len, net_get_mtu() + MBUF_HEAD_LEN);
 	hdr->thread_count = maxks;
 	hdr->mac = netcfg.mac;
+
+	hdr->request_directpath_queues = cfg_request_hardware_queues;
 
 	hdr->sched_cfg.priority = cfg_prio_is_lc ?
 				  SCHED_PRIO_LC : SCHED_PRIO_BE;
@@ -299,6 +399,16 @@ int ioqueues_register_iokernel(void)
 		log_err("register_iokernel: write() failed [%s]", strerror(errno));
 		goto fail_close_fd;
 	}
+
+#ifdef DIRECTPATH
+	if (cfg_request_hardware_queues) {
+		ret = setup_external_directpath(iok.fd);
+		if (ret) {
+			log_err("dp setup error");
+			goto fail_close_fd;
+		}
+	}
+#endif
 
 	return 0;
 

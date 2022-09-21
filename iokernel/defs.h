@@ -30,6 +30,9 @@ struct iokernel_cfg {
 	bool	ias_prefer_selfpair; /* prefer self-pairings */
 	float	ias_bw_limit; /* IAS bw limit, (MB/s) */
 	bool	no_hw_qdel; /* Disable use of hardware timestamps for qdelay */
+	bool	vfio_directpath; /* enable new directpath using vfio */
+	bool	no_perthread_rxdelay; /* RX delays are not accounted to threads */
+	bool	no_directpath_active_rss; /* vfio directpath: keep all qs active */
 };
 
 extern struct iokernel_cfg cfg;
@@ -82,12 +85,11 @@ struct thread_metrics {
 
 struct thread {
 	bool			active;
+	pid_t			tid;
 	struct proc		*p;
 	struct lrpc_chan_out	rxq;
 	struct lrpc_chan_in	txpktq;
 	struct lrpc_chan_in	txcmdq;
-	pid_t			tid;
-	uint32_t		last_yield_rcu_gen;
 	struct q_ptrs		*q_ptrs;
 	uint32_t		last_rq_head;
 	uint32_t		last_rq_tail;
@@ -97,14 +99,12 @@ struct thread {
 	unsigned int		core;
 	unsigned int		at_idx;
 	unsigned int		ts_idx;
+	uint32_t		last_yield_rcu_gen;
 	uint64_t		wake_gen;
-	union {
-		struct {
-			struct hwq	directpath_hwq;
-			struct hwq	storage_hwq;
-		};
-		struct hwq	hwqs[2];
-	};
+	uint64_t		park_tsc;
+
+	struct hwq		directpath_hwq;
+	struct hwq		storage_hwq;
 	struct timer		timer_heap;
 	struct list_node	idle_link;
 
@@ -128,13 +128,16 @@ static inline bool hwq_busy(struct hwq *h, uint32_t cq_idx)
 struct proc {
 	pid_t			pid;
 	struct shm_region	region;
-	bool			removed;
-	bool			has_directpath;
+
+	unsigned int		has_directpath:1;
+	unsigned int		has_vfio_directpath:1;
 	struct ref		ref;
 	unsigned int		kill:1;       /* the proc is being torn down */
 	unsigned int		attach_fail:1;
-	struct congestion_info	*congestion_info;
+	unsigned int 		removed:1;
+	struct runtime_info	*runtime_info;
 	unsigned long		policy_data;
+	unsigned long		directpath_data;
 	float			load;
 
 	/* scheduler data */
@@ -349,6 +352,7 @@ extern DEFINE_BITMAP(input_allowed_cores, NCPU);
 extern char **dpdk_argv;
 extern int dpdk_argc;
 extern int managed_numa_node;
+extern pthread_barrier_t init_barrier;
 
 /*
  * dataplane RX/TX functions
@@ -364,3 +368,43 @@ extern bool tx_drain_completions(void);
 extern void dp_clients_rx_control_lrpcs(void);
 extern bool commands_rx(void);
 extern void dpdk_print_eth_stats(void);
+
+/*
+ * vfio directpath functions
+ */
+extern int directpath_init(void);
+#ifdef DIRECTPATH
+extern int alloc_directpath_ctx(struct proc *p,
+                                struct directpath_spec *spec_out,
+                                int *memfd_out, int *barfd_out);
+extern void free_ctx(struct proc *p);
+extern bool directpath_poll(void);
+extern int directpath_get_clock(unsigned int *frequency_khz, void **core_clock);
+extern void directpath_poll_thread_delay(struct proc *p, struct thread *th,
+                                  uint64_t *delay, uint64_t cur_tsc);
+extern void directpath_poll_proc(struct proc *p, uint64_t cur_tsc);
+extern void directpath_notify_waking(struct proc *p, struct thread *th);
+#else
+
+static inline int alloc_directpath_ctx(struct proc *p, ...)
+{
+	return -1;
+}
+
+static inline void free_ctx(struct proc *p) {}
+
+static inline bool directpath_poll(void)
+{
+	return false;
+}
+
+static inline int directpath_get_clock(unsigned int *f, ...)
+{
+	return -1;
+}
+
+static inline void directpath_poll_thread_delay(struct proc *p, ...) {}
+static inline void directpath_poll_proc(struct proc *p, uint64_t cur_tsc) {}
+static inline void directpath_notify_waking(struct proc *p, struct thread *th) {}
+
+#endif

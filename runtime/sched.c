@@ -26,7 +26,7 @@ static DEFINE_PERTHREAD(void *, runtime_stack);
 bool disable_watchdog;
 
 /* real-time compute congestion signals (shared with the iokernel) */
-struct congestion_info *runtime_congestion;
+struct runtime_info *runtime_info;
 
 /* fast allocation of struct thread */
 static struct slab thread_slab;
@@ -351,7 +351,7 @@ static __noreturn __noinline void schedule(void)
 	if (unlikely(preempt_cede_needed(l))) {
 		l->parked = true;
 		spin_unlock(&l->lock);
-		kthread_park(false);
+		kthread_park_now();
 		start_tsc = rdtsc();
 		iters = 0;
 		spin_lock(&l->lock);
@@ -427,16 +427,14 @@ again:
 	}
 
 	l->parked = true;
-	spin_unlock(&l->lock);
 
 	/* did not find anything to run, park this kthread */
 	STAT(SCHED_CYCLES) += perthread_get_stable(last_tsc) - start_tsc;
 	/* we may have got a preempt signal before voluntarily yielding */
-	kthread_park(!preempt_cede_needed(l));
+	kthread_park();
 	start_tsc = rdtsc();
 	iters = 0;
 
-	spin_lock(&l->lock);
 	l->parked = false;
 	goto again;
 
@@ -736,7 +734,7 @@ static void thread_finish_cede(void)
 
 	/* cede this kthread to the iokernel */
 	ACCESS_ONCE(k->parked) = true; /* deliberately racy */
-	kthread_park(false);
+	kthread_park_now();
 	perthread_get_stable(last_tsc) = tsc;
 
 	/* increment the RCU generation number (odd - back in thread) */
