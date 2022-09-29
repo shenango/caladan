@@ -429,6 +429,13 @@ int cfg_load(const char *path)
 		if (!name)
 			break;
 		val = strtok(NULL, " ");
+
+		if (!val) {
+			log_err("config option with missing value on line %d", line);
+			ret = -EINVAL;
+			goto out;
+		}
+
 		len = strlen(val);
 		if (val[len - 1] == '\n')
 			val[len - 1] = '\0';
@@ -451,6 +458,12 @@ int cfg_load(const char *path)
 				bitmap_set(parsed, i);
 				break;
 			}
+		}
+
+		if (i == handler_cnt) {
+			log_warn("unrecognized config option on line %d", line);
+			ret = -EINVAL;
+			goto out;
 		}
 
 		line++;

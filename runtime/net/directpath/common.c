@@ -137,7 +137,10 @@ int directpath_init(void)
 		}
 	}
 
-	log_err("Could not initialize directpath, ret = %d", ret);
+	if (getuid() != 0)
+		log_err("Could not initialize directpath. Please try again as root.");
+	else
+		log_err("Could not initialize directpath, ret = %d", ret);
 
 	return ret ? ret : -EINVAL;
 }
