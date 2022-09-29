@@ -554,6 +554,8 @@ extern struct cfg_arp_static_entry static_entries[MAX_ARP_STATIC_ENTRIES];
 extern void net_rx_softirq(struct rx_net_hdr **hdrs, unsigned int nr);
 extern void net_rx_softirq_direct(struct mbuf **ms, unsigned int nr);
 
+extern int __noinline net_tx_drain_overflow(void);
+
 struct trans_entry;
 struct net_driver_ops {
 	int (*rx_batch)(struct hardware_q *rxq, struct mbuf **ms, unsigned int budget);

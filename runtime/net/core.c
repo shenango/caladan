@@ -320,7 +320,7 @@ struct mbuf *net_tx_alloc_mbuf(void)
 }
 
 /* drains overflow queues */
-static void __noinline net_tx_drain_overflow(void)
+int __noinline net_tx_drain_overflow(void)
 {
 	struct mbuf *m;
 	struct kthread *k = myk();
@@ -329,13 +329,18 @@ static void __noinline net_tx_drain_overflow(void)
 
 	/* drain TX packets */
 	while (!mbufq_empty(&k->txpktq_overflow)) {
+
+		if (unlikely(preempt_cede_needed(k)))
+			return 1;
+
 		m = mbufq_peak_head(&k->txpktq_overflow);
 		if (net_ops.tx_single(m))
-			break;
+			return 1;
 		mbufq_pop_head(&k->txpktq_overflow);
-		if (unlikely(preempt_cede_needed(k)))
-			return;
 	}
+
+	return 0;
+
 }
 
 static int net_tx_iokernel(struct mbuf *m)
@@ -366,12 +371,20 @@ static void net_tx_raw(struct mbuf *m)
 	unsigned int len = mbuf_length(m);
 
 	k = getk();
-	/* drain pending overflow packets first */
-	if (unlikely(!mbufq_empty(&k->txpktq_overflow)))
-		net_tx_drain_overflow();
 
 	STAT(TX_PACKETS)++;
 	STAT(TX_BYTES) += len;
+
+	/* drain pending overflow packets first */
+	if (unlikely(!mbufq_empty(&k->txpktq_overflow))) {
+                if (net_tx_drain_overflow()) {
+			mbufq_push_tail(&k->txpktq_overflow, m);
+			STAT(TXQ_OVERFLOW)++;
+			putk();
+			return;
+		}
+	}
+
 
 	if (unlikely(net_ops.tx_single(m))) {
 		mbufq_push_tail(&k->txpktq_overflow, m);
