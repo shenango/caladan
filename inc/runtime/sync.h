@@ -65,7 +65,7 @@ static inline void mutex_unlock(mutex_t *m)
  * mutex_held - is the mutex currently held?
  * @m: the mutex to check
  */
-static inline bool mutex_held(mutex_t *m)
+static inline bool mutex_held(const mutex_t *m)
 {
 	return atomic_read(&m->held);
 }

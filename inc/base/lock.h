@@ -26,7 +26,7 @@ static inline void spin_lock_init(spinlock_t *l)
  *
  * Returns true if the lock is held.
  */
-static inline bool spin_lock_held(spinlock_t *l)
+static inline bool spin_lock_held(const spinlock_t *l)
 {
 	return l->locked != 0;
 }
