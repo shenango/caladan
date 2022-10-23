@@ -6,7 +6,7 @@ CC	= gcc
 AR	= ar
 
 ifneq ($(DEBUG),)
-CFLAGS += -DDEBUG -DCCAN_LIST_DEBUG -rdynamic -O0 -ggdb
+CFLAGS += -DDEBUG -rdynamic -O0 -ggdb
 LDFLAGS += -rdynamic
 else
 CFLAGS += -DNDEBUG -O3

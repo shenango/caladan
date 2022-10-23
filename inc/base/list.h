@@ -98,7 +98,7 @@ struct list_head *list_check(const struct list_head *h, const char *abortstr);
 struct list_node *list_check_node(const struct list_node *n,
 				  const char *abortstr);
 
-#ifdef CCAN_LIST_DEBUG
+#ifdef DEBUG
 #define list_debug(h) list_check((h), __func__)
 #define list_debug_node(n) list_check_node((n), __func__)
 #else
@@ -259,7 +259,7 @@ static inline void list_del(struct list_node *n)
 	(void)list_debug_node(n);
 	n->next->prev = n->prev;
 	n->prev->next = n->next;
-#ifdef CCAN_LIST_DEBUG
+#ifdef DEBUG
 	/* Catch use-after-del. */
 	n->next = n->prev = NULL;
 #endif
@@ -281,7 +281,7 @@ static inline void list_del(struct list_node *n)
  */
 static inline void list_del_from(struct list_head *h, struct list_node *n)
 {
-#ifdef CCAN_LIST_DEBUG
+#ifdef DEBUG
 	{
 		/* Thorough check: make sure it was in list! */
 		struct list_node *i;
@@ -289,7 +289,7 @@ static inline void list_del_from(struct list_head *h, struct list_node *n)
 			assert(i != &h->n);
 	}
 	assert(!list_empty(h));
-#endif /* CCAN_LIST_DEBUG */
+#endif /* DEBUG */
 
 	/* Quick test that catches a surprising number of bugs. */
 	list_del(n);
