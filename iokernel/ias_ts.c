@@ -28,6 +28,9 @@ void ias_ts_poll(void)
 		if (!sd || sd->quantum_us == 0)
 			continue;
 		th = sched_get_thread_on_core(core);
+		if (!th)
+			continue;
+
 		m = &th->metrics;
 		if (!m->work_pending || m->uthread_elapsed_us < sd->quantum_us)
 			continue;
