@@ -397,8 +397,8 @@ again:
 
 	/* try to steal from every kthread */
 	start_idx = rand_crc32c((uintptr_t)l);
-	for (i = 0; i < nrks; i++) {
-		int idx = (start_idx + i) % nrks;
+	for (i = 0; i < maxks; i++) {
+		int idx = (start_idx + i) % maxks;
 		if (ks[idx] != l && steal_work(l, ks[idx]))
 			goto done;
 	}

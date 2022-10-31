@@ -20,10 +20,6 @@ extern int runtime_init(const char *cfgpath, thread_fn_t main_fn, void *arg);
 
 extern struct congestion_info *runtime_congestion;
 
-extern unsigned int maxks;
-extern unsigned int guaranteedks;
-extern atomic_t runningks;
-
 /**
  * runtime_queue_us - returns the us of packet queueing delay + runtime queueing
  * delay
@@ -47,6 +43,7 @@ static inline float runtime_load(void)
  */
 static inline int runtime_active_cores(void)
 {
+	extern atomic_t runningks;
 	return atomic_read(&runningks);
 }
 
@@ -57,6 +54,7 @@ static inline int runtime_active_cores(void)
  */
 static inline int runtime_max_cores(void)
 {
+	extern unsigned int maxks;
 	return maxks;
 }
 
@@ -68,5 +66,6 @@ static inline int runtime_max_cores(void)
  */
 static inline int runtime_guaranteed_cores(void)
 {
+	extern unsigned int guaranteedks;
 	return guaranteedks;
 }

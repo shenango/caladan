@@ -25,7 +25,7 @@ DEFINE_SPINLOCK(klock);
 /* the maximum number of kthreads */
 unsigned int maxks;
 /* the total number of attached kthreads (i.e. the size of @ks) */
-unsigned int nrks;
+static unsigned int nrks;
 /* the number of busy spinning kthreads (threads that don't park) */
 unsigned int spinks;
 /* the number of guaranteed kthreads (we can always have this many if we want) */

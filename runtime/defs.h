@@ -479,7 +479,8 @@ static inline bool preempt_yield_needed(struct kthread *k)
 
 DECLARE_SPINLOCK(klock);
 extern unsigned int spinks;
-extern unsigned int nrks;
+extern unsigned int maxks;
+extern unsigned int guaranteedks;
 extern struct kthread *ks[NCPU];
 extern bool cfg_prio_is_lc;
 extern uint64_t cfg_ht_punish_us;
