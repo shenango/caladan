@@ -108,6 +108,8 @@ static int mlx5_qs_init_flows(void)
 		},
 	};
 	memcpy(&flow_attr.spec_eth.val.dst_mac, netcfg.mac.addr, 6);
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Waddress-of-packed-member"
 	eth_flow = ibv_create_flow(tcp_qp, &flow_attr.attr);
 	if (!eth_flow)
 		return -errno;
@@ -121,6 +123,7 @@ static int mlx5_qs_init_flows(void)
 	/* Route broadcst packets to our set of RX work queues */
 	memset(&flow_attr.spec_eth.val.dst_mac, 0xff, 6);
 	eth_flow = ibv_create_flow(other_qp, &flow_attr.attr);
+#pragma GCC diagnostic pop
 	if (!eth_flow)
 		return -errno;
 
