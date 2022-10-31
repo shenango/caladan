@@ -30,8 +30,6 @@ extern atomic_t runningks;
  */
 static inline uint64_t runtime_queue_us(void)
 {
-	if ((unsigned int)atomic_read(&runningks) < maxks)
-		return 0;
 	return ACCESS_ONCE(runtime_congestion->delay_us);
 }
 
