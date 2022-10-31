@@ -12,6 +12,7 @@ struct kthread;
 
 struct timer_entry {
 	bool		armed;
+	bool		executing;
 	unsigned int	idx;
 	timer_fn_t	fn;
 	unsigned long	arg;
