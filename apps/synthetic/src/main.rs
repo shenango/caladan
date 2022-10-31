@@ -14,6 +14,10 @@ extern crate rand;
 extern crate shenango;
 extern crate test;
 
+extern crate arrayvec;
+
+use arrayvec::ArrayVec;
+
 use std::collections::BTreeMap;
 use std::f32::INFINITY;
 use std::io;
@@ -214,10 +218,13 @@ fn run_spawner_server(addr: SocketAddrV4, workerspec: &str) {
     extern "C" fn echo(d: *mut shenango::ffi::udp_spawn_data) {
         unsafe {
             let buf = slice::from_raw_parts((*d).buf as *mut u8, (*d).len as usize);
-            let payload = Payload::deserialize(&mut &buf[..]).unwrap();
+            let mut payload = Payload::deserialize(&mut &buf[..]).unwrap();
             let worker = SPAWNER_WORKER.as_ref().unwrap();
             worker.work(payload.work_iterations, payload.randomness);
-            let _ = UdpSpawner::reply(d, buf);
+            payload.randomness = shenango::rdtsc();
+            let mut array = ArrayVec::<_, PAYLOAD_SIZE>::new();
+            payload.serialize_into(&mut array).unwrap();
+            let _ = UdpSpawner::reply(d, array.as_slice());
             UdpSpawner::release_data(d);
         }
     }
