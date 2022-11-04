@@ -1,7 +1,6 @@
 #![allow(non_upper_case_globals)]
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
-#![feature(asm_sym)]
 #![feature(thread_local)]
 #![feature(new_uninit)]
 #![feature(get_mut_unchecked)]
