@@ -56,7 +56,6 @@ struct ReflexHdr {
   }
 } __packed;
 static_assert(sizeof(ReflexHdr) == 24);
-template class RpcEndpoint<ReflexHdr>;
 
 /* Memcached binary protocol */
 struct MemcachedHdr {
@@ -74,7 +73,6 @@ struct MemcachedHdr {
   size_t get_body_len() { return ntoh32(total_body_length); }
 } __packed;
 static_assert(sizeof(MemcachedHdr) == 24);
-template class RpcEndpoint<MemcachedHdr>;
 
 class SmallocManaged {
  public:

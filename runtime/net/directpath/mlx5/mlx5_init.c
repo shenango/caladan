@@ -57,6 +57,8 @@ ibv_device_to_pci_addr(const struct ibv_device *device,
 					break;
 				line[(len - 1)] = ret;
 			}
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Waddress-of-packed-member"
 		/* Extract information. */
 		if (sscanf(line,
 			   "PCI_SLOT_NAME="
@@ -67,6 +69,7 @@ ibv_device_to_pci_addr(const struct ibv_device *device,
 			   &pci_addr->func) == 4) {
 			break;
 		}
+#pragma GCC diagnostic pop
 	}
 	fclose(file);
 	return 0;

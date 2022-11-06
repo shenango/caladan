@@ -23,7 +23,7 @@ std::string worker_spec;
 
 void MainHandler(void *arg) {
   rt::WaitGroup wg(1);
-  uint64_t cnt[threads] = {};
+  std::vector<uint64_t> cnt(threads);
 
   barrier_init(&barrier, threads);
 

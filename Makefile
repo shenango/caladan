@@ -3,6 +3,7 @@ include $(ROOT_PATH)/build/shared.mk
 
 DPDK_PATH = dpdk
 CHECKFLAGS = -D__CHECKER__ -Waddress-space
+CFLAGS += -MMD
 
 ifneq ($(TCP_RX_STATS),)
 CFLAGS += -DTCP_RX_STATS
@@ -75,14 +76,8 @@ ifneq ($(MAKECMDGOALS),clean)
 -include $(dep)   # include all dep files in the makefile
 endif
 
-# rule to generate a dep file by using the C preprocessor
-# (see man cpp for details on the -MM and -MT options)
-%.d: %.c
-	@$(CC) $(CFLAGS) $< -MM -MT $(@:.d=.o) >$@
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
-%.d: %.S
-	@$(CC) $(CFLAGS) $< -MM -MT $(@:.d=.o) >$@
 %.o: %.S
 	$(CC) $(CFLAGS) -c $< -o $@
 

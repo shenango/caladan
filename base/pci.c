@@ -130,9 +130,12 @@ int pci_str_to_addr(const char *str, struct pci_addr *addr)
 {
 	int ret;
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Waddress-of-packed-member"
 	ret = sscanf(str, "%04hx:%02hhx:%02hhx.%hhd",
 		     &addr->domain, &addr->bus,
 		     &addr->slot, &addr->func);
+#pragma GCC diagnostic pop
 
 	if (ret != 4)
 		return -EINVAL;

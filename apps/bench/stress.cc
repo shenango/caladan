@@ -21,7 +21,7 @@ std::string worker_spec;
 
 void MainHandler(void *arg) {
   rt::WaitGroup wg(1);
-  uint64_t cnt[threads] = {};
+  std::vector<uint64_t> cnt(threads);
 
   for (int i = 0; i < threads; ++i) {
     rt::Spawn([&,i](){

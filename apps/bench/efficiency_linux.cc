@@ -3,7 +3,6 @@ extern "C" {
 #include <unistd.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
-#include <runtime/udp.h>
 #include <string.h>
 }
 
@@ -29,7 +28,8 @@ uint64_t n;
 // the fake work specification.
 std::string worker_spec;
 // the remote UDP address of the server.
-netaddr raddr;
+uint32_t ip;
+uint16_t port;
 // the time in seconds of each measurement.
 int measure_sec;
 // the step size in number of microseconds of fake work.
@@ -95,8 +95,8 @@ void MainHandler(void *arg) {
 
       memset((char *)&addr, 0, sizeof(addr));
       addr.sin_family = AF_INET;
-      addr.sin_addr.s_addr = htonl(raddr.ip);
-      addr.sin_port = htons(raddr.port);
+      addr.sin_addr.s_addr = htonl(ip);
+      addr.sin_port = htons(port);
 
       if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
         printf("connect() failed %d", -errno);
@@ -167,9 +167,9 @@ int main(int argc, char *argv[]) {
   n = std::stoul(argv[3], nullptr, 0);
   worker_spec = std::string(argv[4]);
 
-  ret = StringToAddr(argv[5], &raddr.ip);
+  ret = StringToAddr(argv[5], &ip);
   if (ret) return -EINVAL;
-  raddr.port = kNetperfPort;
+  port = kNetperfPort;
 
   measure_sec = std::stoi(argv[6], nullptr, 0);
   step_us = std::stoi(argv[7], nullptr, 0);
