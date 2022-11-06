@@ -26,7 +26,7 @@ struct key_data {
 
 int pthread_key_create(pthread_key_t* key_out, void (*destructor)(void*))
 {
-	NOTSELF_2ARG(int, __func__, key_out, destructor);
+	NOTSELF(pthread_key_create, key_out, destructor);
 
 	spin_lock_np(&key_lock);
 	if (nr_alloc >= MAX_KEYS) {
@@ -68,7 +68,7 @@ static struct key_data *get_ts_struct(int key)
 
 void* pthread_getspecific(pthread_key_t key)
 {
-	NOTSELF_1ARG(void*, __func__, key);
+	NOTSELF(pthread_getspecific, key);
 
 	if (key >= MAX_KEYS)
 		return NULL;
@@ -79,7 +79,7 @@ void* pthread_getspecific(pthread_key_t key)
 
 int pthread_key_delete(pthread_key_t key)
 {
-	NOTSELF_1ARG(int, __func__, key);
+	NOTSELF(pthread_key_delete, key);
 
 	if (key >= MAX_KEYS)
 		return -EINVAL;
@@ -97,7 +97,7 @@ int pthread_key_delete(pthread_key_t key)
 
 int pthread_setspecific(pthread_key_t key, const void* value)
 {
-	NOTSELF_2ARG(int, __func__, key, value);
+	NOTSELF(pthread_setspecific, key, value);
 
 	if (key >= MAX_KEYS)
 		return -EINVAL;

@@ -20,7 +20,7 @@ unsigned int sleep(unsigned int seconds)
 
 int nanosleep(const struct timespec *req, struct timespec *rem)
 {
-	NOTSELF_2ARG(int, __func__, req, rem);
+	NOTSELF(nanosleep, req, rem);
 
 	timer_sleep(req->tv_sec * ONE_SECOND + req->tv_nsec / 1000);
 

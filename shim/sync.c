@@ -51,7 +51,7 @@ static inline void rwmutex_intialized_check(pthread_rwlock_t *r) {
 int pthread_mutex_init(pthread_mutex_t *mutex,
 		       const pthread_mutexattr_t *mutexattr)
 {
-	NOTSELF_2ARG(int, __func__, mutex, mutexattr);
+	NOTSELF(pthread_mutex_init, mutex, mutexattr);
 	struct mutex_with_attr *m = (struct mutex_with_attr *)mutex;
 	mutex_init(&m->mutex);
 	m->magic = INIT_MAGIC;
@@ -60,7 +60,7 @@ int pthread_mutex_init(pthread_mutex_t *mutex,
 
 int pthread_mutex_lock(pthread_mutex_t *mutex)
 {
-	NOTSELF_1ARG(int, __func__, mutex);
+	NOTSELF(pthread_mutex_lock, mutex);
 	mutex_intialized_check(mutex);
 	mutex_lock((mutex_t *)mutex);
 	return 0;
@@ -68,21 +68,21 @@ int pthread_mutex_lock(pthread_mutex_t *mutex)
 
 int pthread_mutex_trylock(pthread_mutex_t *mutex)
 {
-	NOTSELF_1ARG(int, __func__, mutex);
+	NOTSELF(pthread_mutex_trylock, mutex);
 	mutex_intialized_check(mutex);
 	return mutex_try_lock((mutex_t *)mutex) ? 0 : EBUSY;
 }
 
 int pthread_mutex_unlock(pthread_mutex_t *mutex)
 {
-	NOTSELF_1ARG(int, __func__, mutex);
+	NOTSELF(pthread_mutex_unlock, mutex);
 	mutex_unlock((mutex_t *)mutex);
 	return 0;
 }
 
 int pthread_mutex_destroy(pthread_mutex_t *mutex)
 {
-	NOTSELF_1ARG(int, __func__, mutex);
+	NOTSELF(pthread_mutex_destroy, mutex);
 	return 0;
 }
 
@@ -90,7 +90,7 @@ int pthread_barrier_init(pthread_barrier_t *restrict barrier,
 			 const pthread_barrierattr_t *restrict attr,
 			 unsigned count)
 {
-	NOTSELF_3ARG(int, __func__, barrier, attr, count);
+	NOTSELF(pthread_barrier_init, barrier, attr, count);
 
 	barrier_init((barrier_t *)barrier, count);
 
@@ -99,7 +99,7 @@ int pthread_barrier_init(pthread_barrier_t *restrict barrier,
 
 int pthread_barrier_wait(pthread_barrier_t *barrier)
 {
-	NOTSELF_1ARG(int, __func__, barrier);
+	NOTSELF(pthread_barrier_wait, barrier);
 
 	if (barrier_wait((barrier_t *)barrier))
 		return PTHREAD_BARRIER_SERIAL_THREAD;
@@ -109,39 +109,39 @@ int pthread_barrier_wait(pthread_barrier_t *barrier)
 
 int pthread_barrier_destroy(pthread_barrier_t *barrier)
 {
-	NOTSELF_1ARG(int, __func__, barrier);
+	NOTSELF(pthread_barrier_destroy, barrier);
 	return 0;
 }
 
 int pthread_spin_destroy(pthread_spinlock_t *lock)
 {
-	NOTSELF_1ARG(int, __func__, lock);
+	NOTSELF(pthread_spin_destroy, lock);
 	return 0;
 }
 
 int pthread_spin_init(pthread_spinlock_t *lock, int pshared)
 {
-	NOTSELF_2ARG(int, __func__, lock, pshared);
+	NOTSELF(pthread_spin_init, lock, pshared);
 	spin_lock_init((spinlock_t *)lock);
 	return 0;
 }
 
 int pthread_spin_lock(pthread_spinlock_t *lock)
 {
-	NOTSELF_1ARG(int, __func__, lock);
+	NOTSELF(pthread_spin_lock, lock);
 	spin_lock_np((spinlock_t *)lock);
 	return 0;
 }
 
 int pthread_spin_trylock(pthread_spinlock_t *lock)
 {
-	NOTSELF_1ARG(int, __func__, lock);
+	NOTSELF(pthread_spin_trylock, lock);
 	return spin_try_lock_np((spinlock_t *)lock) ? 0 : EBUSY;
 }
 
 int pthread_spin_unlock(pthread_spinlock_t *lock)
 {
-	NOTSELF_1ARG(int, __func__, lock);
+	NOTSELF(pthread_spin_unlock, lock);
 	spin_unlock_np((spinlock_t *)lock);
 	return 0;
 }
@@ -149,7 +149,7 @@ int pthread_spin_unlock(pthread_spinlock_t *lock)
 int pthread_cond_init(pthread_cond_t *__restrict cond,
 		      const pthread_condattr_t *__restrict cond_attr)
 {
-	NOTSELF_2ARG(int, __func__, cond, cond_attr);
+	NOTSELF(pthread_cond_init, cond, cond_attr);
 	struct condvar_with_attr *cvattr = (struct condvar_with_attr *)cond;
 	condvar_init(&cvattr->cv);
 	cvattr->magic = INIT_MAGIC;
@@ -164,7 +164,7 @@ int pthread_cond_init(pthread_cond_t *__restrict cond,
 
 int pthread_cond_signal(pthread_cond_t *cond)
 {
-	NOTSELF_1ARG(int, __func__, cond);
+	NOTSELF(pthread_cond_signal, cond);
 	cond_intialized_check(cond);
 	condvar_signal((condvar_t *)cond);
 	return 0;
@@ -172,7 +172,7 @@ int pthread_cond_signal(pthread_cond_t *cond)
 
 int pthread_cond_broadcast(pthread_cond_t *cond)
 {
-	NOTSELF_1ARG(int, __func__, cond);
+	NOTSELF(pthread_cond_broadcast, cond);
 	cond_intialized_check(cond);
 	condvar_broadcast((condvar_t *)cond);
 	return 0;
@@ -180,7 +180,7 @@ int pthread_cond_broadcast(pthread_cond_t *cond)
 
 int pthread_cond_wait(pthread_cond_t *cond, pthread_mutex_t *mutex)
 {
-	NOTSELF_2ARG(int, __func__, cond, mutex);
+	NOTSELF(pthread_cond_wait, cond, mutex);
 	cond_intialized_check(cond);
 	condvar_wait((condvar_t *)cond, (mutex_t *)mutex);
 	return 0;
@@ -194,7 +194,7 @@ int pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex,
 	struct condvar_with_attr *cvattr = (struct condvar_with_attr *)cond;
 	struct timespec now_ts;
 
-	NOTSELF_3ARG(int, __func__, cond, mutex, abstime);
+	NOTSELF(pthread_cond_timedwait, cond, mutex, abstime);
 
 	cond_intialized_check(cond);
 
@@ -211,19 +211,19 @@ int pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex,
 
 int pthread_cond_destroy(pthread_cond_t *cond)
 {
-	NOTSELF_1ARG(int, __func__, cond);
+	NOTSELF(pthread_cond_destroy, cond);
 	return 0;
 }
 
 int pthread_rwlock_destroy(pthread_rwlock_t *r)
 {
-	NOTSELF_1ARG(int, __func__, r);
+	NOTSELF(pthread_rwlock_destroy, r);
 	return 0;
 }
 
 int pthread_rwlock_init(pthread_rwlock_t *r, const pthread_rwlockattr_t *attr)
 {
-	NOTSELF_2ARG(int, __func__, r, attr);
+	NOTSELF(pthread_rwlock_init, r, attr);
 	struct rwmutex_with_attr *rwattr = (struct rwmutex_with_attr *)r;
 	rwattr->magic = INIT_MAGIC;
 	rwmutex_init(&rwattr->rwmutex);
@@ -232,7 +232,7 @@ int pthread_rwlock_init(pthread_rwlock_t *r, const pthread_rwlockattr_t *attr)
 
 int pthread_rwlock_rdlock(pthread_rwlock_t *r)
 {
-	NOTSELF_1ARG(int, __func__, r);
+	NOTSELF(pthread_rwlock_rdlock, r);
 	rwmutex_intialized_check(r);
 	rwmutex_rdlock((rwmutex_t *)r);
 	return 0;
@@ -240,21 +240,21 @@ int pthread_rwlock_rdlock(pthread_rwlock_t *r)
 
 int pthread_rwlock_tryrdlock(pthread_rwlock_t *r)
 {
-	NOTSELF_1ARG(int, __func__, r);
+	NOTSELF(pthread_rwlock_tryrdlock, r);
 	rwmutex_intialized_check(r);
 	return rwmutex_try_rdlock((rwmutex_t *)r) ? 0 : EBUSY;
 }
 
 int pthread_rwlock_trywrlock(pthread_rwlock_t *r)
 {
-	NOTSELF_1ARG(int, __func__, r);
+	NOTSELF(pthread_rwlock_trywrlock, r);
 	rwmutex_intialized_check(r);
 	return rwmutex_try_wrlock((rwmutex_t *)r) ? 0 : EBUSY;
 }
 
 int pthread_rwlock_wrlock(pthread_rwlock_t *r)
 {
-	NOTSELF_1ARG(int, __func__, r);
+	NOTSELF(pthread_rwlock_wrlock, r);
 	rwmutex_intialized_check(r);
 	rwmutex_wrlock((rwmutex_t *)r);
 	return 0;
@@ -262,7 +262,7 @@ int pthread_rwlock_wrlock(pthread_rwlock_t *r)
 
 int pthread_rwlock_unlock(pthread_rwlock_t *r)
 {
-	NOTSELF_1ARG(int, __func__, r);
+	NOTSELF(pthread_rwlock_unlock, r);
 	rwmutex_unlock((rwmutex_t *)r);
 	return 0;
 }
