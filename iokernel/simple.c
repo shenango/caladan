@@ -223,15 +223,16 @@ static int simple_notify_core_needed(struct proc *p)
 	return simple_add_kthread(p);
 }
 
-static void simple_notify_congested(struct proc *p, bool busy, uint64_t delay, bool parked_thread_delay)
+static void simple_notify_congested(struct proc *p, struct delay_info *delay)
 {
 	struct simple_data *sd = (struct simple_data *)p->policy_data;
 	int ret;
 	bool congested;
 
 	/* detect congestion */
-	congested = sd->qdelay_us == 0 ? busy : delay >= sd->qdelay_us;
-	congested |= parked_thread_delay;
+	congested = sd->qdelay_us == 0 ?
+		        delay->standing_queue : delay->max_delay_us >= sd->qdelay_us;
+	congested |= delay->parked_thread_busy;
 
 	/* do nothing if we woke up a core during the last interval */
 	if (sd->waking) {

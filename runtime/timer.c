@@ -96,7 +96,7 @@ static void sift_down(struct timer_idx *heap, int i, int n)
 
 static void update_q_ptrs(struct kthread *k)
 {
-	uint64_t next_tsc = 0;
+	uint64_t next_tsc = UINT64_MAX;
 
 	if (k->timern)
 		next_tsc = k->timers[0].deadline_us * cycles_per_us + start_tsc;
@@ -316,7 +316,7 @@ int timer_init_thread(void)
 		return -ENOMEM;
 
 	k->timer_softirq = th;
-	k->q_ptrs->next_timer_tsc = 0;
+	k->q_ptrs->next_timer_tsc = UINT64_MAX;
 	ts->next_tsc = ptr_to_shmptr(&netcfg.tx_region,
 			    &k->q_ptrs->next_timer_tsc, sizeof(uint64_t));
 	ts->timer_resolution = cycles_per_us;

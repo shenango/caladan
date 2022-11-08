@@ -29,7 +29,7 @@ struct q_ptrs {
 	uint32_t		directpath_rx_tail;
 	uint64_t		next_timer_tsc;
 	uint32_t		storage_tail;
-	uint32_t		pad;
+	uint32_t		q_assign_idx;
 	uint64_t		oldest_tsc;
 	uint64_t		rcu_gen;
 	uint64_t		run_start_tsc;

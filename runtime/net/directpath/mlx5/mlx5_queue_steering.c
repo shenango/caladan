@@ -169,7 +169,8 @@ static inline void assign_q(unsigned int qidx, unsigned int kidx)
 
 	rcu_hlist_del(&rxqs[qidx].link);
 	rcu_hlist_add_head(&rxqs[kidx].head, &rxqs[qidx].link);
-	queue_assignments[qidx] = kidx;
+	ACCESS_ONCE(queue_assignments[qidx]) = kidx;
+	ACCESS_ONCE(ks[qidx]->q_ptrs->q_assign_idx) = kidx;
 }
 
 static int mlx5_qs_init_qs(void)

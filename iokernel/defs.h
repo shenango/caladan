@@ -58,7 +58,6 @@ struct proc;
 
 struct hwq {
 	bool			enabled;
-	bool			queue_steering;
 	void			*descriptor_table;
 	uint32_t		*consumer_idx;
 	uint32_t		descriptor_log_size;

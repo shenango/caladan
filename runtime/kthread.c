@@ -183,7 +183,7 @@ static void flows_notify_parking(bool voluntary)
 
 	bitmap_atomic_clear(kthread_awake, myk()->kthread_idx);
 	atomic64_inc(&kthread_gen);
-	if (voluntary)
+	if (voluntary || cfg_prio_is_lc)
 		flows_update();
 }
 

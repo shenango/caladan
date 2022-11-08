@@ -175,6 +175,9 @@ int directpath_init_thread(void)
 	k->directpath_rxq = rxq;
 	k->directpath_txq = txq_out[k->kthread_idx];
 
+	if (directpath_mode == RX_MODE_FLOW_STEERING)
+		ACCESS_ONCE(k->q_ptrs->q_assign_idx) = k->kthread_idx;
+
 	tcache_init_perthread(directpath_buf_tcache, &perthread_get(directpath_buf_pt));
 
 	return 0;

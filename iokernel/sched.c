@@ -233,6 +233,27 @@ int sched_idle_on_core(uint32_t mwait_hint, unsigned int core)
 	return __sched_run(s, NULL, core);
 }
 
+/*
+ * sched_request_cooperative_cede - request a runtime core cede its allocation
+ * sets a flag that a kthread will eventually see to notify. use sched_run() to
+ * deliver a preemption signal.
+ *
+ * @core: the core number to preempt
+ *
+ * Returns 0 if successful, otherwise fail.
+ */
+int sched_request_cooperative_cede(unsigned int core)
+{
+	struct thread *th;
+
+	th = sched_get_thread_on_core(core);
+	if (!th)
+		return -ENOENT;
+
+	ACCESS_ONCE(th->q_ptrs->cede_gen) = th->wake_gen;
+	return 0;
+}
+
 /**
  * sched_yield_on_core - yields the running uthread on the core
  * @core: the core number to preempt
@@ -300,15 +321,44 @@ static uint64_t sched_measure_mlx5_delay(struct hwq *h)
 	return hw_timestamp_delay_us(cqe) * cycles_per_us;
 }
 
-static bool
-sched_measure_hardware_delay(struct thread *th, struct hwq *h,
-			     bool update_pointers)
+static bool sched_queue_has_hw_timestamp(struct hwq *h)
 {
-	uint32_t cur_tail, cur_head, last_head, last_tail;
-
-	if (!h->enabled)
+	if (!is_hw_timestamp_enabled())
 		return false;
 
+	return h->hwq_type == HWQ_MLX5 ||
+		   h->hwq_type == HWQ_MLX5_QSTEERING;
+}
+
+static void
+sched_measure_hardware_delay(struct thread *th, struct hwq *h,
+			     bool update_pointers, bool *has_work,
+			     bool *standing_queue, uint64_t *delay_cycles)
+{
+	uint32_t cur_tail, cur_head, last_head, last_tail;
+	uint64_t delay;
+
+	if (!h->enabled)
+		return;
+
+	/* fast way to measuring queueing in MLX hardware queues */
+	if (sched_queue_has_hw_timestamp(h)) {
+		delay = sched_measure_mlx5_delay(h);
+
+		if (!delay)
+			return;
+
+		*has_work = true;
+		/* quickly approximate standing queue signal */
+		*standing_queue |= delay >= IOKERNEL_POLL_INTERVAL * cycles_per_us;
+		*delay_cycles = delay;
+		return;
+	}
+
+	/*
+	 * slow path - will use hwq_find_head() to scan the queue
+	 * to find the newest element
+	 */
 	last_head = h->last_head;
 	last_tail = h->last_tail;
 
@@ -323,7 +373,7 @@ sched_measure_hardware_delay(struct thread *th, struct hwq *h,
 	/* check whether hwq is empty */
 	if (cur_head == cur_tail) {
 		h->busy_since = UINT64_MAX;
-		return false;
+		return;
 	}
 
 	/* check whether there was any progress on draining hwq or new packet
@@ -331,8 +381,9 @@ sched_measure_hardware_delay(struct thread *th, struct hwq *h,
 	if (cur_tail != last_tail || h->busy_since == UINT64_MAX)
 		h->busy_since = cur_tsc;
 
-	return th->active || (h->queue_steering && th->p->active_thread_count) ?
-		wraps_lt(cur_tail, last_head) : cur_head != cur_tail;
+	*has_work = true;
+	*standing_queue |= wraps_lt(cur_tail, last_head);
+	*delay_cycles = cur_tsc - h->busy_since;
 }
 
 static uint64_t calc_delay_tsc(uint64_t tsc)
@@ -359,14 +410,12 @@ sched_update_kthread_metrics(struct thread *th, bool work_pending)
 	th->metrics.work_pending = work_pending;
 }
 
-static bool
-sched_measure_kthread_delay(struct thread *th,
-			    uint64_t *rxq_tsc, uint64_t *uthread_tsc,
-			    uint64_t *storage_tsc, uint64_t *timer_tsc)
+static void
+sched_measure_kthread_delay(struct thread *th, uint64_t *thread_delay,
+			    uint64_t *rxq_delay, bool *has_work, bool *standing_queue)
 {
-	uint32_t cur_tail, cur_head, last_head, last_tail;
+	uint32_t cur_tail, cur_head, last_head, last_tail, qidx;
 	uint64_t tmp;
-	bool busy = false;
 
 	/* UTHREAD: measure delay */
 	last_tail = th->last_rq_tail;
@@ -377,17 +426,13 @@ sched_measure_kthread_delay(struct thread *th,
 	th->last_rq_tail = cur_tail;
 
 	/* UTHREAD: update old standing queue signal */
-	if (th->active ? wraps_lt(cur_tail, last_head) :
-			 cur_head != cur_tail) {
-		busy = true;
-	}
+	*has_work |= cur_head != cur_tail;
+	*standing_queue |= wraps_lt(cur_tail, last_head);
 
 	/* UTHREAD: update new queueing delay signal */
 	if (cur_head != cur_tail) {
 		tmp = ACCESS_ONCE(th->q_ptrs->oldest_tsc);
-		*uthread_tsc = calc_delay_tsc(tmp);
-	} else {
-		*uthread_tsc = 0;
+		*thread_delay += calc_delay_tsc(tmp);
 	}
 
 	/* RXQ: measure delay */
@@ -399,10 +444,8 @@ sched_measure_kthread_delay(struct thread *th,
 	th->last_rxq_tail = cur_tail;
 
 	/* RXQ: update old standing queue signal */
-	if (th->active ? wraps_lt(cur_tail, last_head) :
-			 cur_head != cur_tail) {
-		busy = true;
-	}
+	*has_work |= cur_head != cur_tail;
+	*standing_queue |= wraps_lt(cur_tail, last_head);
 
 	/* RXQ: update new queueing delay signal */
 	/* FIXME: this only approximates queueing delay */
@@ -410,35 +453,33 @@ sched_measure_kthread_delay(struct thread *th,
 		th->rxq_busy_since = UINT64_MAX;
 	else if (cur_tail != last_tail || th->rxq_busy_since == UINT64_MAX)
 		th->rxq_busy_since = cur_tsc;
-	 *rxq_tsc = calc_delay_tsc(th->rxq_busy_since);
+	 *thread_delay += calc_delay_tsc(th->rxq_busy_since);
 
 	/* TIMER: measure delay and update signals */
 	tmp = ACCESS_ONCE(*th->timer_heap.next_tsc);
-	if (!tmp)
-		tmp = UINT64_MAX;
-	if (tmp <= cur_tsc)
-		busy = true;
-	*timer_tsc = calc_delay_tsc(tmp);
+	if (tmp <= cur_tsc) {
+		*has_work = true;
+		*standing_queue |= tmp + IOKERNEL_POLL_INTERVAL * cycles_per_us < cur_tsc;
+	}
+	*thread_delay += calc_delay_tsc(tmp);
 
-	/* DIRECTPATH: measure delay and update signals */
-	if (sched_measure_hardware_delay(th, &th->directpath_hwq, true))
-		busy = true;
-
-	// TODO: use sched_measure_mlx5_delay() instead of scanning the descriptor
-	// ring for the producer index
-	if (is_hw_timestamp_enabled() && th->directpath_hwq.enabled &&
-	    th->directpath_hwq.hwq_type == HWQ_MLX5)
-		*rxq_tsc = MAX(*rxq_tsc, sched_measure_mlx5_delay(&th->directpath_hwq));
-	else
-		*rxq_tsc = MAX(*rxq_tsc, calc_delay_tsc(th->directpath_hwq.busy_since));
+	/*
+	 * DIRECTPATH: measure delay and update signals.
+	 * ignore the busy signal here.
+	 */
+	bool a, b;
+	tmp = 0;
+	sched_measure_hardware_delay(th, &th->directpath_hwq, true, &a, &b, &tmp);
+	qidx = ACCESS_ONCE(th->q_ptrs->q_assign_idx);
+	BUG_ON(qidx >= th->p->thread_count);
+	/* assign delay to the thread assigned to poll this queue */
+	rxq_delay[qidx] = MAX(rxq_delay[qidx], tmp);
 
 	/* STORAGE: measure delay and update signals */
-	if (sched_measure_hardware_delay(th, &th->storage_hwq, true))
-		busy = true;
-	*storage_tsc = calc_delay_tsc(th->storage_hwq.busy_since);
-
-	sched_update_kthread_metrics(th, busy);
-	return busy;
+	tmp = 0;
+	sched_measure_hardware_delay(th, &th->storage_hwq, true, has_work,
+		                         standing_queue, &tmp);
+	*thread_delay += tmp;
 }
 
 #define EWMA_WEIGHT     0.1f
@@ -456,34 +497,74 @@ static void sched_report_metrics(struct proc *p, uint64_t delay)
 
 static void sched_measure_delay(struct proc *p)
 {
-	uint64_t hdelay = 0;
-	int i;
-	bool busy = false;
-	bool parked_thread_busy = false;
+	/* per-thread has-work-pending busy signal */
+	bool has_work_pending[p->thread_count];
+	/* per-thread standing queue signal */
+	bool standing_queue[p->thread_count];
+	struct delay_info dl;
+	/* per-thread direcpath delays, max delay among assigned qs */
+	uint64_t rxq_delay[p->thread_count];
+	/* per-thread delays (uthread + lrpc rxq + timer + storage) */
+	uint64_t total_delay[p->thread_count];
+	unsigned int i;
+
+	dl.has_work = false;
+	dl.standing_queue = false;
+	dl.parked_thread_busy = false;
+	dl.max_delay_us = 0;
+	dl.min_delay_us = UINT64_MAX;
+
+	/* zero the rxq delays */
+	memset(rxq_delay, 0, sizeof(uint64_t) * p->thread_count);
 
 	/* detect per-kthread delay */
 	for (i = 0; i < p->thread_count; i++) {
-		uint64_t delay, rxq_tsc, uthread_tsc, storage_tsc, timer_tsc;
+		has_work_pending[i] = standing_queue[i] = false;
+		total_delay[i] = 0;
+		sched_measure_kthread_delay(&p->threads[i],
+				  &total_delay[i], rxq_delay,
+				  &has_work_pending[i], &standing_queue[i]);
+	}
 
-		busy |= sched_measure_kthread_delay(&p->threads[i],
-			&rxq_tsc, &uthread_tsc, &storage_tsc, &timer_tsc);
-		delay = rxq_tsc + uthread_tsc + storage_tsc + timer_tsc;
-		hdelay = MAX(delay, hdelay);
-		parked_thread_busy |= delay > 0 && !p->threads[i].active;
+	for (i = 0; i < p->thread_count; i++) {
+		/* finalize the total delay for this thread */
+		total_delay[i] += rxq_delay[i];
+
+		/* finalize has-work-pending signal by including rxq delays */
+		has_work_pending[i] |= rxq_delay[i] > 0;
+
+		/* finalize standing queue signal by including rxq delays */
+		standing_queue[i] |= rxq_delay[i] >= IOKERNEL_POLL_INTERVAL * cycles_per_us;
+
+		/* update delay metrics */
+		dl.has_work |= has_work_pending[i];
+		dl.parked_thread_busy |= has_work_pending[i] && !p->threads[i].active;
+		dl.standing_queue |= standing_queue[i];
+		dl.max_delay_us = MAX(total_delay[i], dl.max_delay_us);
+		dl.avg_delay_us += total_delay[i];
+
+		if (p->threads[i].active && total_delay[i] < dl.min_delay_us) {
+			dl.min_delay_us = total_delay[i];
+			dl.min_delay_core = p->threads[i].core;
+		}
+
+		sched_update_kthread_metrics(&p->threads[i], standing_queue[i]);
 	}
 
 	/* don't report parked busy if no threads are active */
-	if (sched_threads_active(p) == 0)
-		parked_thread_busy = false;
+	if (cfg.noidlefastwake && sched_threads_active(p) == 0)
+		dl.parked_thread_busy = false;
 
-	/* convert the highest delay experienced by the runtime to us */
-	hdelay /= cycles_per_us;
+	/* convert the delays to us */
+	dl.max_delay_us /= (double)cycles_per_us;
+	dl.min_delay_us /= (double)cycles_per_us;
+	dl.avg_delay_us /= (double)(cycles_per_us * p->thread_count);
 
 	/* report delay back to runtime */
-	sched_report_metrics(p, hdelay);
+	sched_report_metrics(p, dl.max_delay_us);
 
 	/* notify the scheduler policy of the current delay */
-	sched_ops->notify_congested(p, busy, hdelay, parked_thread_busy);
+	sched_ops->notify_congested(p, &dl);
 }
 
 /*
@@ -493,7 +574,9 @@ static void sched_measure_delay(struct proc *p)
 static void sched_detect_io_for_idle_runtime(struct proc *p)
 {
 	struct thread *th;
+	bool busy = false, standing_queue;
 	int i;
+	uint64_t delay;
 
 	if (cfg.noidlefastwake)
 		return;
@@ -501,7 +584,9 @@ static void sched_detect_io_for_idle_runtime(struct proc *p)
 	for (i = 0; i < p->thread_count; i++) {
 		th = &p->threads[i];
 
-		if (sched_measure_hardware_delay(th, &th->directpath_hwq, false)) {
+		sched_measure_hardware_delay(th, &th->directpath_hwq, false, &busy,
+			                         &standing_queue, &delay);
+		if (busy) {
 			sched_add_core(p);
 			return;
 		}
