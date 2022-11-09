@@ -204,7 +204,31 @@ static int mlx5_qs_gather_rx(struct hardware_q *rxq, struct mbuf **ms, unsigned 
 
 	preempt_disable();
 
-	rcu_hlist_for_each(&hrxq->head, node, !preempt_enabled()) {
+	node = hrxq->last_node;
+	/* start at the beginning if the last pass pulled from all queues */
+	if (!hrxq->last_node) {
+		node = hrxq->head.head;
+	} else {
+		mrxq = rcu_hlist_entry(node, struct mlx5_rxq, link);
+		/* queue assignment changed, start at the beginning */
+		if (ACCESS_ONCE(queue_assignments[mrxq - rxqs]) != hrxq - rxqs) {
+			node = hrxq->head.head;
+			hrxq->last_node = NULL;
+		}
+	}
+
+	while (!preempt_cede_needed(myk())) {
+
+		if (!node) {
+			/* if we started in the middle, go back to the beginning */
+			if (hrxq->last_node) {
+				node = hrxq->head.head;
+				hrxq->last_node = NULL;
+				continue;
+			}
+			break;
+		}
+
 		mrxq = rcu_hlist_entry(node, struct mlx5_rxq, link);
 		hq = &mrxq->rxq;
 
@@ -215,10 +239,11 @@ static int mlx5_qs_gather_rx(struct hardware_q *rxq, struct mbuf **ms, unsigned 
 				break;
 		}
 
-		if (unlikely(preempt_cede_needed(myk())))
-			break;
+		node = rcu_dereference_protected(node->next, !preempt_enabled());
 	}
 
+	/* stash the last node we polled so we can start here next time */
+	hrxq->last_node = node;
 	preempt_enable();
 	return pulled;
 }

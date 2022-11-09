@@ -20,6 +20,7 @@ struct mlx5_rxq {
 	/* queue steering mode */
 	struct rcu_hlist_head head;
 	struct rcu_hlist_node link;
+	struct rcu_hlist_node *last_node;
 	spinlock_t lock;
 
 	uint32_t consumer_idx;
