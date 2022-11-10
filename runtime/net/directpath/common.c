@@ -118,6 +118,17 @@ int directpath_init(void)
 	if (ret)
 		return ret;
 
+	if (!cfg_pci_addr_specified) {
+		if (memcmp(&nic_pci_addr, &iok.iok_info->directpath_pci, sizeof(nic_pci_addr))) {
+			memcpy(&nic_pci_addr,  &iok.iok_info->directpath_pci, sizeof(nic_pci_addr));
+			cfg_pci_addr_specified = true;
+			log_info("directpath: using pci address from iokernel: %04hx:%02hhx:%02hhx.%hhd",
+			         nic_pci_addr.domain, nic_pci_addr.bus,
+			         nic_pci_addr.slot, nic_pci_addr.func);
+		}
+	}
+
+
 	/* initialize mlx5 */
 	if (strncmp("qs", directpath_arg, 2) != 0) {
 		directpath_mode = RX_MODE_FLOW_STEERING;

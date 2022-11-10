@@ -39,9 +39,7 @@ int data_to_control_efd;
 static struct lrpc_chan_out lrpc_control_to_data;
 static struct lrpc_chan_in lrpc_data_to_control;
 
-#if 0
 struct iokernel_info *iok_info;
-#endif
 
 static void *copy_shm_data(struct shm_region *r, shmptr_t ptr, size_t len)
 {
@@ -540,11 +538,19 @@ int control_init(void)
 
 	dp.ingress_mbuf_region.base = shbuf;
 	dp.ingress_mbuf_region.len = INGRESS_MBUF_SHM_SIZE;
-#if 0
+
+
+	shbuf = mem_map_shm(IOKERNEL_INFO_KEY, NULL, IOKERNEL_INFO_SIZE, PGSIZE_4KB, true);
+	if (shbuf == MAP_FAILED) {
+		log_err("control: failed to map iokernel control header");
+		return -1;
+	}
+
 	iok_info = (struct iokernel_info *)shbuf;
 	memcpy(iok_info->managed_cores, sched_allowed_cores, sizeof(sched_allowed_cores));
-#endif
 
+	if (nic_pci_addr_str)
+		memcpy(&iok_info->directpath_pci, &nic_pci_addr, sizeof(nic_pci_addr));
 
 	memset(&addr, 0x0, sizeof(struct sockaddr_un));
 	addr.sun_family = AF_UNIX;

@@ -8,6 +8,7 @@
 
 #include <base/bitmap.h>
 #include <base/limits.h>
+#include <base/pci.h>
 #include <iokernel/shm.h>
 #include <net/ethernet.h>
 
@@ -121,5 +122,8 @@ struct control_hdr {
 /* information shared from iokernel to all runtimes */
 struct iokernel_info {
 	DEFINE_BITMAP(managed_cores, NCPU);
-	unsigned char rss_key[40];
+	unsigned char		rss_key[40];
+	struct pci_addr		directpath_pci;
 };
+
+BUILD_ASSERT(sizeof(struct iokernel_info) <= IOKERNEL_INFO_SIZE);

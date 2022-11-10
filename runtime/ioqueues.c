@@ -178,6 +178,7 @@ int ioqueues_init(void)
 	bool has_mac = false;
 	int i, ret;
 	struct thread_spec *ts;
+	void *shbuf;
 
 	for (i = 0; i < ARRAY_SIZE(netcfg.mac.addr); i++)
 		has_mac |= netcfg.mac.addr[i] != 0;
@@ -202,9 +203,13 @@ int ioqueues_init(void)
 		return -1;
 	}
 	netcfg.rx_region.len = INGRESS_MBUF_SHM_SIZE;
-#if 0
-	iok.iok_info = (struct iokernel_info *)netcfg.rx_region.base;
-#endif
+
+	shbuf = mem_map_shm_rdonly(IOKERNEL_INFO_KEY, NULL, IOKERNEL_INFO_SIZE, PGSIZE_4KB);
+	if (shbuf == MAP_FAILED) {
+		log_err("control_setup: failed to map iokernel info region");
+		return -1;
+	}
+	iok.iok_info = (struct iokernel_info *)shbuf;
 
 	/* set up queues in shared memory */
 	iok.hdr = iok_shm_alloc(sizeof(*iok.hdr), 0, NULL);
