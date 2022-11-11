@@ -682,7 +682,9 @@ void sched_poll(void)
 
 				s->pending_th = NULL;
 				s->pending = false;
-				ACCESS_ONCE(s->cur_th->q_ptrs->cede_gen) = s->cur_th->wake_gen;
+				if (s->cur_th)
+					ACCESS_ONCE(s->cur_th->q_ptrs->cede_gen) =
+						s->cur_th->wake_gen;
 				ksched_enqueue_intr(core, KSCHED_INTR_CEDE);
 				ksched_run(core, th ? th->tid : 0);
 				s->last_th = s->cur_th;
