@@ -433,14 +433,14 @@ BUILD_ASSERT(offsetof(struct kthread, storage_q) % CACHE_LINE_SIZE == 0);
 BUILD_ASSERT(offsetof(struct kthread, directpath_rxq) % CACHE_LINE_SIZE == 0);
 BUILD_ASSERT(offsetof(struct kthread, stats) % CACHE_LINE_SIZE == 0);
 
-extern __thread struct kthread *mykthread;
+DECLARE_PERTHREAD(struct kthread *, mykthread);
 
 /**
  * myk - returns the per-kernel-thread data
  */
 static inline struct kthread *myk(void)
 {
-	return mykthread;
+	return perthread_read(mykthread);
 }
 
 /**
@@ -452,7 +452,7 @@ static inline struct kthread *myk(void)
 static inline struct kthread *getk(void)
 {
 	preempt_disable();
-	return mykthread;
+	return perthread_read(mykthread);
 }
 
 /**
@@ -637,6 +637,7 @@ extern int net_init_thread(void);
 extern int smalloc_init_thread(void);
 extern int storage_init_thread(void);
 extern int directpath_init_thread(void);
+extern int preempt_init_thread(void);
 
 /* global initialization */
 extern int kthread_init(void);

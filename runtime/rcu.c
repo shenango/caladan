@@ -35,7 +35,7 @@ static struct rcu_head *rcu_head;
 static thread_t *rcu_worker_th;
 
 #ifdef DEBUG
-__thread int rcu_read_count;
+DEFINE_PERTHREAD(int, rcu_read_count);
 #endif /* DEBUG */
 
 static void rcu_worker(void *arg)

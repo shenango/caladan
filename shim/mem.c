@@ -3,6 +3,7 @@
 #include <stdlib.h>
 
 #include <runtime/preempt.h>
+#include <runtime/thread.h>
 
 #define HOOK3(fnname, retType, argType1, argType2, argType3)                   \
 	retType fnname(argType1 __a1, argType2 __a2, argType3 __a3)            \
@@ -11,9 +12,9 @@
 		if (unlikely(!real_##fnname)) {                                \
 			real_##fnname = dlsym(RTLD_NEXT, #fnname);             \
 		}                                                              \
-		preempt_disable();                                             \
+		if (thread_self()) preempt_disable();                          \
 		retType __t = real_##fnname(__a1, __a2, __a3);                 \
-		preempt_enable();                                              \
+		if (thread_self()) preempt_enable();                           \
 		return __t;                                                    \
 	}
 
@@ -24,9 +25,9 @@
 		if (unlikely(!real_##fnname)) {                                \
 			real_##fnname = dlsym(RTLD_NEXT, #fnname);             \
 		}                                                              \
-		preempt_disable();                                             \
+		if (thread_self()) preempt_disable();                          \
 		retType __t = real_##fnname(__a1, __a2);                       \
-		preempt_enable();                                              \
+		if (thread_self()) preempt_enable();                           \
 		return __t;                                                    \
 	}
 
@@ -37,9 +38,9 @@
 		if (unlikely(!real_##fnname)) {                                \
 			real_##fnname = dlsym(RTLD_NEXT, #fnname);             \
 		}                                                              \
-		preempt_disable();                                             \
+		if (thread_self()) preempt_disable();                          \
 		retType __t = real_##fnname(__a1);                             \
-		preempt_enable();                                              \
+		if (thread_self()) preempt_enable();                           \
 		return __t;                                                    \
 	}
 
@@ -50,9 +51,9 @@
 		if (unlikely(!real_##fnname)) {                                \
 			real_##fnname = dlsym(RTLD_NEXT, #fnname);             \
 		}                                                              \
-		preempt_disable();                                             \
+		if (thread_self()) preempt_disable();                          \
 		real_##fnname(__a1);                                           \
-		preempt_enable();                                              \
+		if (thread_self()) preempt_enable();                           \
 	}
 
 HOOK1(malloc, void *, size_t);
@@ -85,8 +86,8 @@ void *calloc(size_t a, size_t b)
 		barrier();
 		real_calloc = dlsym(RTLD_NEXT, "calloc");
 	}
-	preempt_disable();
+	if (thread_self()) preempt_disable();
 	void *ptr = real_calloc(a, b);
-	preempt_enable();
+	if (thread_self()) preempt_enable();
 	return ptr;
 }

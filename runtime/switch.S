@@ -64,7 +64,7 @@ __jmp_thread:
 	movq    RDI(%rdi), %rdi /* ARG0 */
 
 	/* re-enable preemption */
-	subl	$1, %fs:preempt_cnt@tpoff
+	subl	$1, %gs:__perthread_preempt_cnt(%rip)
 	jz	1f
 
 	/* jump into trap frame */
@@ -131,7 +131,7 @@ __jmp_thread_direct:
 	movq    RDI(%rsi), %rdi /* ARG0 */
 
 	/* re-enable preemption */
-	subl	$1, %fs:preempt_cnt@tpoff
+	subl	$1, %gs:__perthread_preempt_cnt(%rip)
 	jz	1f
 
 	/* jump into trap frame */

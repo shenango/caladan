@@ -12,12 +12,12 @@
 #include "defs.h"
 
 /* the current preemption count */
-volatile __thread unsigned int preempt_cnt = PREEMPT_NOT_PENDING;
+DEFINE_PERTHREAD(unsigned int, preempt_cnt);
 
 /* set a flag to indicate a preemption request is pending */
 static void set_preempt_needed(void)
 {
-	preempt_cnt &= ~PREEMPT_NOT_PENDING;
+	perthread_get(preempt_cnt) &= ~PREEMPT_NOT_PENDING;
 }
 
 /* handles preemptive cede signals from the iokernel */
@@ -87,6 +87,12 @@ void preempt(void)
 	}
 
 	putk();
+}
+
+int preempt_init_thread(void)
+{
+	perthread_get(preempt_cnt) = PREEMPT_NOT_PENDING;
+	return 0;
 }
 
 /**

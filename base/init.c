@@ -137,6 +137,6 @@ int base_init_thread(void)
 	if (ret)
 		return ret;
 
-	thread_init_done = true;
+	perthread_get(thread_init_done) = true;
 	return 0;
 }

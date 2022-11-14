@@ -35,8 +35,8 @@ atomic_t runningks;
 /* an array of attached kthreads (@nrks in total) */
 struct kthread *ks[NCPU];
 /* kernel thread-local data */
-__thread struct kthread *mykthread;
-__thread unsigned int kthread_idx;
+DEFINE_PERTHREAD(struct kthread *, mykthread);
+DEFINE_PERTHREAD(unsigned int, kthread_idx);
 /* Map of cpu to kthread */
 struct cpu_record cpu_map[NCPU] __attribute__((aligned(CACHE_LINE_SIZE)));
 /* the file descriptor for the ksched module */
@@ -67,6 +67,8 @@ static struct kthread *allock(void)
  */
 int kthread_init_thread(void)
 {
+	struct kthread *mykthread;
+
 	mykthread = allock();
 	if (!mykthread)
 		return -ENOMEM;
@@ -77,7 +79,8 @@ int kthread_init_thread(void)
 	assert(nrks <= maxks);
 	spin_unlock_np(&klock);
 
-	kthread_idx = mykthread->kthread_idx;
+	perthread_get(kthread_idx) = mykthread->kthread_idx;
+	perthread_get(mykthread) = mykthread;
 
 	return 0;
 }

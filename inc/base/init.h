@@ -5,6 +5,7 @@
 #pragma once
 
 #include <base/stddef.h>
+#include <base/thread.h>
 
 struct init_handler {
 	const char *name;
@@ -29,4 +30,4 @@ extern int base_init_thread(void);
 extern void init_shutdown(int status) __noreturn;
 
 extern bool base_init_done;
-extern __thread bool thread_init_done;
+DECLARE_PERTHREAD(bool, thread_init_done);

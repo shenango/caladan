@@ -4,7 +4,7 @@
 #include <base/assert.h>
 
 #define NOTSELF(name, ...)                                                     \
-        if (unlikely(!__self)) {                                               \
+        if (unlikely(!thread_self())) {                                        \
                 static typeof(name) *fn;                                       \
                 if (!fn) {                                                     \
                         fn = dlsym(RTLD_NEXT, #name);                          \

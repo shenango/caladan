@@ -21,7 +21,7 @@
 	extern DEFINE_PERTHREAD(type, name)
 
 extern void *perthread_offsets[NTHREAD];
-extern __thread void *perthread_ptr;
+DECLARE_PERTHREAD(void *, perthread_ptr);
 extern unsigned int thread_count;
 extern const char __perthread_start[];
 
@@ -36,10 +36,92 @@ extern const char __perthread_start[];
 	(*((__force typeof(__perthread_##var) *)		\
 	 ((uintptr_t)&__perthread_##var + (uintptr_t)perthread_offsets[thread] - (uintptr_t)__perthread_start)))
 
-static inline void *__perthread_get(void __perthread *key)
-{
-	return (__force void *)((uintptr_t)key + (uintptr_t)perthread_ptr - (uintptr_t)__perthread_start);
-}
+
+#define __perthread_addr_qual(key, qualifier)                     \
+({                                                                \
+	void *__out;                                                  \
+	asm qualifier("add %%gs:__perthread_perthread_ptr(%%rip), %0" \
+	              : "=r"(__out) : "0"(key) : "cc");               \
+	__out;                                                        \
+})
+
+#define __perthread_read_qual(key, qualifier)        \
+({                                                   \
+	typeof(__perthread_##key) __out;                 \
+	BUILD_ASSERT(type_is_native(__perthread_##key)); \
+	asm qualifier(                                   \
+	    "mov %%gs:"                                  \
+	     "__perthread_" #key "(%%rip), %0"           \
+	     : "=r"(__out));                             \
+	__out;                                           \
+})
+
+/**
+ * perthread_store - stores a new value into a
+ * native-type perthread variable.
+ * @var: the perthread variable
+ * @val: the value to store
+ *
+ */
+#define perthread_store(key, val)                    \
+({                                                   \
+	BUILD_ASSERT(type_is_native(__perthread_##key)); \
+	typeof(__perthread_##key) __in = (val);          \
+	asm volatile(                                    \
+	    "mov %0, %%gs:"                              \
+	     "__perthread_" #key "(%%rip)"               \
+	     : : "r"(__in) : "memory");                  \
+})
+
+
+/**
+ * perthread_incr - increments a native-type perthread
+ * variable.
+ * @var: the perthread variable
+ *
+ */
+#define perthread_incr(key)        \
+({                                                   \
+	BUILD_ASSERT(type_is_native(__perthread_##key)); \
+	asm volatile(                                    \
+	    "add $1, %%gs:"                              \
+	     "__perthread_" #key "(%%rip)"               \
+	     : : : "memory", "cc");                      \
+})
+
+/**
+ * perthread_read - read the value stored at
+ * a native-type perthread variable.
+ * @var: the perthread variable
+ *
+ * Returns the value stored at @var
+ *
+ */
+#define perthread_read(key) __perthread_read_qual(key, volatile)
+
+/**
+ * perthread_read_stable - read the value stored at
+ * a native-type perthread variable. The result
+ * may be cached by the compiler.
+ * @var: the perthread variable
+ *
+ * Returns the value stored at @var
+ *
+ */
+#define perthread_read_stable(key) __perthread_read_qual(key, /* */)
+
+
+/**
+ * perthread_get_stable - get the local perthread variable
+ * result may be cached by compiler.
+ * @var: the perthread variable
+ *
+ * Returns a perthread variable.
+ */
+#define perthread_get_stable(var)    \
+	(*((typeof(__perthread_##var) *) \
+	  (__perthread_addr_qual(&__perthread_##var, /* */))))
+
 
 /**
  * perthread_get - get the local perthread variable
@@ -47,8 +129,9 @@ static inline void *__perthread_get(void __perthread *key)
  *
  * Returns a perthread variable.
  */
-#define perthread_get(var)					\
-	(*((typeof(__perthread_##var) *)(__perthread_get(&__perthread_##var))))
+#define perthread_get(var)           \
+	(*((typeof(__perthread_##var) *) \
+	  (__perthread_addr_qual(&__perthread_##var, volatile))))
 
 /**
  * thread_is_active - is the thread initialized?
@@ -77,7 +160,17 @@ static inline int __thread_next_active(int thread)
 	for ((thread) = -1; (thread) = __thread_next_active(thread),	\
 			    (thread) < thread_count;)
 
-extern __thread unsigned int thread_id;
-extern __thread unsigned int thread_numa_node;
+DECLARE_PERTHREAD(unsigned int, thread_id);
+DECLARE_PERTHREAD(unsigned int, thread_numa_node);
+
+static inline unsigned int this_thread_id(void)
+{
+	return perthread_read(thread_id);
+}
+
+static inline unsigned int this_numa_node(void)
+{
+	return perthread_read(thread_numa_node);
+}
 
 extern pid_t thread_gettid(void);

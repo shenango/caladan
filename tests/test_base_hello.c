@@ -22,7 +22,7 @@ int main(int argc, char *argv[])
 		log_err("base_init_thread() failed, ret = %d", ret);
 		return 1;
 	}
-	BUG_ON(!thread_init_done);
+	BUG_ON(!perthread_read(thread_init_done));
 
 	log_info("hello world!");
 	return 0;

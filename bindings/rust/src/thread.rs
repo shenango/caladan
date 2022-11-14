@@ -5,14 +5,12 @@ use std::{mem, panic, ptr};
 
 use super::*;
 
-extern "C" {
-    #[link_name = "__self"]
-    #[thread_local]
-    static mut __self: *mut ffi::thread_t;
-}
-
 pub(crate) fn thread_self() -> *mut ffi::thread_t {
-    unsafe { __self }
+    let t: * mut ffi::thread_t;
+    unsafe {
+        asm!("mov {0:r}, QWORD PTR gs:[rip + {1}]", out(reg) t, sym ffi::__perthread___self);
+    }
+    t
 }
 
 pub fn thread_yield() {
