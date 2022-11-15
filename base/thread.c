@@ -44,9 +44,16 @@ static int thread_alloc_perthread(unsigned int thread_id, unsigned int node)
 	if (addr == MAP_FAILED)
 		return -ENOMEM;
 
+	memset(addr, 0, len);
+
+	/**
+	 * perthread addresses will be relative to the perthread section,
+	 * subtracting __perthread_start allows us to directly use the
+	 * variable pointers as offsets from gs
+	 **/
 	gsbase = (unsigned long)addr - (unsigned long)__perthread_start;
 
-	memset(addr, 0, len);
+	/* store a copy of gsbase so we can compute TLS addresses */
 	*(unsigned long *)(gsbase + (uintptr_t)&__perthread_perthread_ptr) = gsbase;
 
 	ret = syscall(SYS_arch_prctl, ARCH_SET_GS, gsbase);
@@ -55,7 +62,7 @@ static int thread_alloc_perthread(unsigned int thread_id, unsigned int node)
 		return ret;
 	}
 
-	perthread_offsets[thread_id] = addr;
+	perthread_offsets[thread_id] = (void *)gsbase;
 	return 0;
 }
 
@@ -94,9 +101,9 @@ int thread_init_perthread(void)
 		return ret;
 
 	/* TODO: figure out how to support NUMA */
-	perthread_get(thread_numa_node) = 0;
+	perthread_store(thread_numa_node, 0);
 
-	perthread_get(thread_id) = thread_id;
+	perthread_store(thread_id, thread_id);
 
 	log_info("thread: created thread %d", thread_id);
 	return 0;

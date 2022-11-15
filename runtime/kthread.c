@@ -79,8 +79,8 @@ int kthread_init_thread(void)
 	assert(nrks <= maxks);
 	spin_unlock_np(&klock);
 
-	perthread_get(kthread_idx) = mykthread->kthread_idx;
-	perthread_get(mykthread) = mykthread;
+	perthread_store(kthread_idx, mykthread->kthread_idx);
+	perthread_store(mykthread, mykthread);
 
 	return 0;
 }

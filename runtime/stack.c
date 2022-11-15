@@ -106,7 +106,7 @@ static const struct tcache_ops stack_tcache_ops = {
  */
 int stack_init_thread(void)
 {
-	tcache_init_perthread(stack_tcache, &perthread_get(stack_pt));
+	tcache_init_perthread(stack_tcache, perthread_ptr(stack_pt));
 	return 0;
 }
 

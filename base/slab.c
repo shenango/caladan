@@ -227,7 +227,7 @@ static void slab_item_check(struct slab_node *n, void *item)
 	else
 		assert(PGOFF_4KB(item) % n->size == 0);
 
-	if (unlikely(!thread_init_done))
+	if (unlikely(!perthread_read(thread_init_done)))
 		return;
 
 	/* NUMA node checks */

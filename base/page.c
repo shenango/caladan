@@ -167,7 +167,7 @@ static struct page *smpage_alloc_on_node(int numa_node)
 
 	if (perthread_read(thread_init_done) && this_numa_node() == numa_node) {
 		/* if on the local node use the fast path */
-		addr = tcache_alloc(&perthread_get(smpage_pt));
+		addr = tcache_alloc(perthread_ptr(smpage_pt));
 	} else {
 		/* otherwise perform a remote slab allocation */
 		addr = slab_alloc_on_node(&smpage_slab, numa_node);
@@ -193,7 +193,7 @@ static void smpage_free(struct page *pg)
 
 	if (perthread_read(thread_init_done) && this_numa_node() == numa_node) {
 		/* if on the local node use the fast path */
-		tcache_free(&perthread_get(smpage_pt), addr);
+		tcache_free(perthread_ptr(smpage_pt), addr);
 	} else {
 		/* otherwise perform a remote slab free */
 		slab_free(&smpage_slab, addr);
@@ -385,6 +385,6 @@ int page_init(void)
  */
 int page_init_thread(void)
 {
-	tcache_init_perthread(smpage_tcache, &perthread_get(smpage_pt));
+	tcache_init_perthread(smpage_tcache, perthread_ptr(smpage_pt));
 	return 0;
 }

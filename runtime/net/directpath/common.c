@@ -58,7 +58,7 @@ size_t directpath_rx_buf_pool_sz(unsigned int nrqs)
 void directpath_rx_completion(struct mbuf *m)
 {
 	preempt_disable();
-	tcache_free(&perthread_get(directpath_buf_pt), (void *)m);
+	tcache_free(perthread_ptr(directpath_buf_pt), (void *)m);
 	preempt_enable();
 }
 
@@ -189,7 +189,7 @@ int directpath_init_thread(void)
 	if (directpath_mode == RX_MODE_FLOW_STEERING)
 		ACCESS_ONCE(k->q_ptrs->q_assign_idx) = k->kthread_idx;
 
-	tcache_init_perthread(directpath_buf_tcache, &perthread_get(directpath_buf_pt));
+	tcache_init_perthread(directpath_buf_tcache, perthread_ptr(directpath_buf_pt));
 
 	return 0;
 }

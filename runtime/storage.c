@@ -113,7 +113,7 @@ int storage_write(const void *payload, uint64_t lba, uint32_t lba_count)
 	q = &k->storage_q;
 
 	if (likely(use_thread_cache)) {
-		spdk_payload = tcache_alloc(&perthread_get(storage_buf_pt));
+		spdk_payload = tcache_alloc(perthread_ptr(storage_buf_pt));
 	} else {
 		spdk_payload =
 			spdk_zmalloc(req_size, 0, NULL, SPDK_ENV_SOCKET_ID_ANY,
@@ -145,7 +145,7 @@ int storage_write(const void *payload, uint64_t lba, uint32_t lba_count)
 
 done_np:
 	if (likely(use_thread_cache))
-		tcache_free(&perthread_get(storage_buf_pt), spdk_payload);
+		tcache_free(perthread_ptr(storage_buf_pt), spdk_payload);
 	else
 		spdk_free(spdk_payload);
 
@@ -177,7 +177,7 @@ int storage_read(void *dest, uint64_t lba, uint32_t lba_count)
 	q = &k->storage_q;
 
 	if (likely(use_thread_cache)) {
-		spdk_payload = tcache_alloc(&perthread_get(storage_buf_pt));
+		spdk_payload = tcache_alloc(perthread_ptr(storage_buf_pt));
 	} else {
 		spdk_payload =
 			spdk_zmalloc(req_size, 0, NULL, SPDK_ENV_SOCKET_ID_ANY,
@@ -207,7 +207,7 @@ int storage_read(void *dest, uint64_t lba, uint32_t lba_count)
 
 done_np:
 	if (likely(use_thread_cache))
-		tcache_free(&perthread_get(storage_buf_pt), spdk_payload);
+		tcache_free(perthread_ptr(storage_buf_pt), spdk_payload);
 	else
 		spdk_free(spdk_payload);
 	preempt_enable();
@@ -335,7 +335,7 @@ int storage_init_thread(void)
 	hs->hwq_type = HWQ_SPDK_NVME;
 
 	tcache_init_perthread(storage_buf_tcache,
-			      &perthread_get(storage_buf_pt));
+			      perthread_ptr(storage_buf_pt));
 
 	return 0;
 }

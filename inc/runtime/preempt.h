@@ -20,7 +20,7 @@ extern void preempt(void);
  */
 static inline void preempt_disable(void)
 {
-	asm volatile("addl $1, %%gs:__perthread_preempt_cnt(%%rip)" : : : "memory", "cc");
+	perthread_incr(preempt_cnt);
 	barrier();
 }
 
@@ -32,7 +32,7 @@ static inline void preempt_disable(void)
 static inline void preempt_enable_nocheck(void)
 {
 	barrier();
-	asm volatile("subl $1, %%gs:__perthread_preempt_cnt(%%rip)" : : : "memory", "cc");
+	perthread_decr(preempt_cnt);
 }
 
 /**
@@ -86,7 +86,6 @@ static inline void assert_preempt_disabled(void)
  */
 static inline void clear_preempt_needed(void)
 {
-    // preempt_cnt |= PREEMPT_NOT_PENDING;
-    BUILD_ASSERT(PREEMPT_NOT_PENDING == 0x80000000);
-    asm volatile("orl $0x80000000, %%gs:__perthread_preempt_cnt(%%rip)" : : : "memory", "cc");
+	BUILD_ASSERT(PREEMPT_NOT_PENDING == 0x80000000);
+	perthread_ori(preempt_cnt, 0x80000000);
 }

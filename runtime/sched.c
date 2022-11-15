@@ -47,14 +47,14 @@ thread_t *thread_self(void);
 
 uint64_t get_uthread_specific(void)
 {
-	BUG_ON(!perthread_get_stable(__self));
-	return perthread_get_stable(__self)->tlsvar;
+	BUG_ON(!perthread_read_stable(__self));
+	return (perthread_read_stable(__self))->tlsvar;
 }
 
 void set_uthread_specific(uint64_t val)
 {
-	BUG_ON(!perthread_get_stable(__self));
-	perthread_get_stable(__self)->tlsvar = val;
+	BUG_ON(!perthread_read_stable(__self));
+	(perthread_read_stable(__self))->tlsvar = val;
 }
 
 /**
@@ -342,7 +342,7 @@ static __noreturn __noinline void schedule(void)
 	/* update entry stat counters */
 	STAT(RESCHEDULES)++;
 	start_tsc = rdtsc();
-	STAT(PROGRAM_CYCLES) += start_tsc - perthread_get_stable(last_tsc);
+	STAT(PROGRAM_CYCLES) += start_tsc - perthread_read_stable(last_tsc);
 
 	/* increment the RCU generation number (even is in scheduler) */
 	store_release(&l->rcu_gen, l->rcu_gen + 1);
@@ -781,7 +781,7 @@ static __always_inline thread_t *__thread_create(void)
 	struct stack *s;
 
 	preempt_disable();
-	th = tcache_alloc(&perthread_get(thread_pt));
+	th = tcache_alloc(perthread_ptr(thread_pt));
 	if (unlikely(!th)) {
 		preempt_enable();
 		return NULL;
@@ -789,7 +789,7 @@ static __always_inline thread_t *__thread_create(void)
 
 	s = stack_alloc();
 	if (unlikely(!s)) {
-		tcache_free(&perthread_get(thread_pt), th);
+		tcache_free(perthread_ptr(thread_pt), th);
 		preempt_enable();
 		return NULL;
 	}
@@ -898,7 +898,7 @@ static void thread_finish_exit(void)
 
 	gc_remove_thread(th);
 	stack_free(th->stack);
-	tcache_free(&perthread_get(thread_pt), th);
+	tcache_free(perthread_ptr(thread_pt), th);
 	perthread_store(__self, NULL);
 
 	/* if the main thread dies, kill the whole program */
@@ -936,7 +936,7 @@ static __noreturn void schedule_start(void)
 		ACCESS_ONCE(k->q_ptrs->oldest_tsc) = UINT64_MAX;
 	ACCESS_ONCE(k->parked) = true;
 	kthread_wait_to_attach();
-	perthread_get(last_tsc) = rdtsc();
+	perthread_store(last_tsc, rdtsc());
 	store_release(&k->rcu_gen, 1);
 	ACCESS_ONCE(k->q_ptrs->rcu_gen) = 1;
 
@@ -968,14 +968,14 @@ int sched_init_thread(void)
 {
 	struct stack *s;
 
-	tcache_init_perthread(thread_tcache, &perthread_get(thread_pt));
+	tcache_init_perthread(thread_tcache, perthread_ptr(thread_pt));
 
 	s = stack_alloc();
 	if (!s)
 		return -ENOMEM;
 
-	perthread_get(runtime_stack_base) = (void *)s;
-	perthread_get(runtime_stack) = (void *)stack_init_to_rsp(s, runtime_top_of_stack);
+	perthread_store(runtime_stack_base, (void *)s);
+	perthread_store(runtime_stack, (void *)stack_init_to_rsp(s, runtime_top_of_stack));
 
 	return 0;
 }

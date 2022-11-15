@@ -287,7 +287,7 @@ static void iokernel_softirq(void *arg)
 void net_tx_release_mbuf(struct mbuf *m)
 {
 	preempt_disable();
-	tcache_free(&perthread_get(net_tx_buf_pt), m);
+	tcache_free(perthread_ptr(net_tx_buf_pt), m);
 	preempt_enable();
 }
 
@@ -302,7 +302,7 @@ struct mbuf *net_tx_alloc_mbuf(void)
 	unsigned char *buf;
 
 	preempt_disable();
-	m = tcache_alloc(&perthread_get(net_tx_buf_pt));
+	m = tcache_alloc(perthread_ptr(net_tx_buf_pt));
 	if (unlikely(!m)) {
 		preempt_enable();
 		log_warn_ratelimited("net: out of tx buffers");
@@ -619,7 +619,7 @@ int net_init_thread(void)
 		return -ENOMEM;
 
 	k->iokernel_softirq = th;
-	tcache_init_perthread(net_tx_buf_tcache, &perthread_get(net_tx_buf_pt));
+	tcache_init_perthread(net_tx_buf_tcache, perthread_ptr(net_tx_buf_pt));
 	return 0;
 }
 

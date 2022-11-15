@@ -140,7 +140,7 @@ DECLARE_PERTHREAD(struct tcache_perthread, stack_pt);
  */
 static inline struct stack *stack_alloc(void)
 {
-	return tcache_alloc(&perthread_get(stack_pt));
+	return tcache_alloc(perthread_ptr(stack_pt));
 }
 
 /**
@@ -149,7 +149,7 @@ static inline struct stack *stack_alloc(void)
  */
 static inline void stack_free(struct stack *s)
 {
-	tcache_free(&perthread_get(stack_pt), (void *)s);
+	tcache_free(perthread_ptr(stack_pt), (void *)s);
 }
 
 #define RSP_ALIGNMENT	16
@@ -508,7 +508,8 @@ extern int preferred_socket;
  *
  * Deliberately could race with preemption.
  */
-#define STAT(counter) (myk()->stats[STAT_ ## counter])
+#define STAT(counter)  \
+	((perthread_read_stable(mykthread))->stats[STAT_ ## counter])
 
 
 /*

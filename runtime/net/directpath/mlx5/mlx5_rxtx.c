@@ -32,7 +32,7 @@ static int mlx5_refill_rxqueue(struct mlx5_rxq *vq, int nrdesc)
 	preempt_disable();
 
 	for (i = 0; i < nrdesc; i++) {
-		buf = tcache_alloc(&perthread_get(directpath_buf_pt));
+		buf = tcache_alloc(perthread_ptr(directpath_buf_pt));
 		if (unlikely(!buf)) {
 			preempt_enable();
 			return -ENOMEM;

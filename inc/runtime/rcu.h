@@ -26,7 +26,7 @@ static inline void rcu_read_lock(void)
 {
 	preempt_disable();
 #ifdef DEBUG
-	perthread_get(rcu_read_count)++;
+	perthread_incr(rcu_read_count);
 #endif /* DEBUG */
 }
 
@@ -34,7 +34,7 @@ static inline void rcu_read_unlock(void)
 {
 #ifdef DEBUG
 	assert(rcu_read_lock_held());
-	perthread_get(rcu_read_count)--;
+	perthread_decr(rcu_read_count);
 #endif /* DEBUG */
 	preempt_enable();
 }
