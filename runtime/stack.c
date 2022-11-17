@@ -13,17 +13,15 @@
 
 #include "defs.h"
 
-#define STACK_BASE_ADDR	0x200000000000UL
-
 static struct tcache *stack_tcache;
 DEFINE_PERTHREAD(struct tcache_perthread, stack_pt);
 
-static struct stack *stack_create(void *base)
+static struct stack *stack_create(void)
 {
 	void *stack_addr;
 	struct stack *s;
 
-	stack_addr = mmap(base, sizeof(struct stack), PROT_READ | PROT_WRITE,
+	stack_addr = mmap(NULL, sizeof(struct stack), PROT_READ | PROT_WRITE,
 			  MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 	if (stack_addr == MAP_FAILED)
 		return NULL;
@@ -48,7 +46,6 @@ static void stack_reclaim(struct stack *s)
 static DEFINE_SPINLOCK(stack_lock);
 static int free_stack_count;
 static struct stack *free_stacks[RUNTIME_MAX_THREADS];
-static atomic64_t stack_pos = ATOMIC_INIT(STACK_BASE_ADDR);
 
 static void stack_tcache_free(struct tcache *tc, int nr, void **items)
 {
@@ -69,7 +66,6 @@ static void stack_tcache_free(struct tcache *tc, int nr, void **items)
 
 static int stack_tcache_alloc(struct tcache *tc, int nr, void **items)
 {
-	void *base;
 	int i = 0;
 
 	spin_lock(&stack_lock);
@@ -80,9 +76,7 @@ static int stack_tcache_alloc(struct tcache *tc, int nr, void **items)
 
 
 	for (; i < nr; i++) {
-		base = (void *)atomic64_fetch_and_and(&stack_pos,
-						      sizeof(struct stack));
-		items[i] = stack_create(base);
+		items[i] = stack_create();
 		if (unlikely(!items[i]))
 			goto fail;
 	}
