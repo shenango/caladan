@@ -14,6 +14,9 @@
 #include <runtime/thread.h>
 #include <runtime/preempt.h>
 
+#include <base/signal.h>
+#include <base/syscall.h>
+
 #include "defs.h"
 
 #define __user
@@ -161,6 +164,7 @@ int preempt_init_thread(void)
 	return 0;
 }
 
+
 /**
  * preempt_init - global initializer for preemption support
  *
@@ -180,15 +184,15 @@ int preempt_init(void)
 	}
 
 	act.sa_sigaction = handle_sigusr1;
-	if (sigaction(SIGUSR1, &act, NULL) == -1) {
+	if (base_sigaction(SIGUSR1, &act, NULL) < 0) {
 		log_err("couldn't register signal handler");
-		return -errno;
+		return -1;
 	}
 
 	act.sa_sigaction = handle_sigusr2;
-	if (sigaction(SIGUSR2, &act, NULL) == -1) {
+	if (base_sigaction(SIGUSR2, &act, NULL) < 0) {
 		log_err("couldn't register signal handler");
-		return -errno;
+		return -1;
 	}
 
 	ret = ioctl(ksched_fd, KSCHED_IOC_UINTR_SETUP_USER, uintr_asm_entry);

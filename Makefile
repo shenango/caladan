@@ -11,7 +11,8 @@ endif
 
 # libbase.a - the base library
 base_src = $(wildcard base/*.c)
-base_obj = $(base_src:.c=.o)
+base_asm = $(wildcard base/*.S)
+base_obj = $(base_src:.c=.o) $(base_asm:.S=.o)
 
 #libnet.a - a packet/networking utility library
 net_src = $(wildcard net/*.c)
@@ -75,7 +76,7 @@ shim:
 
 # general build rules for all targets
 src = $(base_src) $(net_src) $(runtime_src) $(iokernel_src) $(test_src)
-asm = $(runtime_asm)
+asm = $(runtime_asm) $(base_asm)
 obj = $(src:.c=.o) $(asm:.S=.o)
 dep = $(obj:.o=.d)
 

@@ -10,6 +10,7 @@
 #include <base/atomic.h>
 #include <base/limits.h>
 #include <base/log.h>
+#include <base/syscall.h>
 
 #include "defs.h"
 
@@ -21,13 +22,13 @@ static struct stack *stack_create(void)
 	void *stack_addr;
 	struct stack *s;
 
-	stack_addr = mmap(NULL, sizeof(struct stack), PROT_READ | PROT_WRITE,
+	stack_addr = syscall_mmap(NULL, sizeof(struct stack), PROT_READ | PROT_WRITE,
 			  MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 	if (stack_addr == MAP_FAILED)
 		return NULL;
 
 	s = (struct stack *)stack_addr;
-	if (mprotect(s->guard, RUNTIME_GUARD_SIZE, PROT_NONE) == - 1) {
+	if (syscall_mprotect(s->guard, RUNTIME_GUARD_SIZE, PROT_NONE) == - 1) {
 		munmap(stack_addr, sizeof(struct stack));
 		return NULL;
 	}
@@ -39,7 +40,7 @@ static struct stack *stack_create(void)
 static void stack_reclaim(struct stack *s)
 {
 	int ret;
-	ret = madvise(s->usable, RUNTIME_STACK_SIZE, MADV_DONTNEED);
+	ret = syscall_madvise(s->usable, RUNTIME_STACK_SIZE, MADV_DONTNEED);
 	WARN_ON_ONCE(ret);
 }
 

@@ -18,6 +18,7 @@
 #include <base/mem.h>
 #include <base/log.h>
 #include <base/limits.h>
+#include <base/syscall.h>
 
 #if !defined(MAP_HUGE_2MB) || !defined(MAP_HUGE_1GB)
 #warning "Your system does not support specifying MAP_HUGETLB page sizes"
@@ -35,21 +36,8 @@ int shmctl(int shm_id, int cmd, struct shmid_ds* buf);
 int shmdt(const void *addr);
 int shmget(key_t key, size_t size, int flags);
 
-long mbind(void *start, size_t len, int mode,
-	   const unsigned long *nmask, unsigned long maxnode,
-	   unsigned flags)
-{
-	return syscall(__NR_mbind, start, len, mode, nmask, maxnode, flags);
-}
-
-static void sigbus_error(int sig)
-{
-	panic("couldn't map pages");
-}
-
 void touch_mapping(void *base, size_t len, size_t pgsize)
 {
-	__sighandler_t s;
 	char *pos;
 
 	/*
@@ -57,10 +45,8 @@ void touch_mapping(void *base, size_t len, size_t pgsize)
 	 * because of insufficient memory. Therefore, we manually force a write
 	 * on each page to make sure the mapping was successful.
 	 */
-	s = signal(SIGBUS, sigbus_error);
 	for (pos = (char *)base; pos < (char *)base + len; pos += pgsize)
 		ACCESS_ONCE(*pos);
-	signal(SIGBUS, s);
 }
 
 static void *
@@ -98,17 +84,17 @@ __mem_map_anom(void *base, size_t len, size_t pgsize,
 	  return MAP_FAILED;
 	}
 
-	addr = mmap(base, len, PROT_READ | PROT_WRITE, flags, -1, 0);
-	if (addr == MAP_FAILED)
+	addr = syscall_mmap(base, len, PROT_READ | PROT_WRITE, flags, -1, 0);
+	if ((intptr_t)addr < 0)
 		return MAP_FAILED;
 
 	BUILD_ASSERT(sizeof(unsigned long) * 8 >= NNUMA);
-	if (mbind(addr, len, numa_policy, mask ? mask : NULL,
+	if (syscall_mbind(addr, len, numa_policy, mask ? mask : NULL,
 		  mask ? NNUMA + 1 : 0, MPOL_MF_STRICT | MPOL_MF_MOVE))
 		goto fail;
 
 	if (cfg_transparent_hugepages_enabled && (pgsize > PGSIZE_4KB)) {
-	  if (madvise(addr, len, MADV_HUGEPAGE))
+	  if (syscall_madvise(addr, len, MADV_HUGEPAGE))
 	    goto fail;
 	}
 

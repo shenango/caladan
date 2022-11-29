@@ -13,6 +13,7 @@
 #include <base/list.h>
 #include <base/lock.h>
 #include <base/log.h>
+#include <base/syscall.h>
 #include <runtime/sync.h>
 #include <runtime/timer.h>
 
@@ -97,7 +98,7 @@ static __always_inline void kthread_yield_to_iokernel(void)
 	/* yield to the iokernel */
 	do {
 		clear_preempt_needed();
-		s = ioctl(ksched_fd, KSCHED_IOC_PARK, perthread_read(uintr_stack));
+		s = syscall_ioctl(ksched_fd, KSCHED_IOC_PARK, perthread_read(uintr_stack));
 	} while (unlikely(s < 0 || preempt_cede_needed(k)));
 
 	k->curr_cpu = s;
@@ -289,7 +290,7 @@ void kthread_wait_to_attach(void)
 	int s;
 
 	do {
-		s = ioctl(ksched_fd, KSCHED_IOC_START, perthread_read(uintr_stack));
+		s = syscall_ioctl(ksched_fd, KSCHED_IOC_START, perthread_read(uintr_stack));
 	} while (s < 0);
 
 	k->curr_cpu = s;
