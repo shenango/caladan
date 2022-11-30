@@ -89,18 +89,11 @@ static void page_free_check(struct page *pg, size_t pgsize) {;}
 static int lgpage_create(struct page *pg, int numa_node)
 {
 	void *pgaddr = lgpage_to_addr(pg);
-	int ret;
 
 	pgaddr = mem_map_anom(pgaddr, PGSIZE_2MB, PGSIZE_2MB, numa_node);
 	if (pgaddr == MAP_FAILED) {
 		log_err_ratelimited("page: out of 2mb pages\n");
 		return -ENOMEM;
-	}
-
-	ret = mem_lookup_page_phys_addr(pgaddr, PGSIZE_2MB, &pg->paddr);
-	if (ret) {
-		munmap(pgaddr, PGSIZE_2MB);
-		return ret;
 	}
 
 	kref_init(&pg->ref);
@@ -112,7 +105,6 @@ static void lgpage_destroy(struct page *pg)
 {
 	munmap(lgpage_to_addr(pg), PGSIZE_2MB);
 	pg->flags = 0;
-	pg->paddr = 0;
 }
 
 static struct page *lgpage_alloc_on_node(int numa_node)
@@ -179,7 +171,6 @@ static struct page *smpage_alloc_on_node(int numa_node)
 	pg = addr_to_smpage(addr);
 	kref_init(&pg->ref);
 	pg->flags = PAGE_FLAG_IN_USE;
-	pg->paddr = addr_to_pa(addr);
 	return pg;
 }
 

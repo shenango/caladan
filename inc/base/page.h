@@ -19,9 +19,11 @@ struct page {
 	struct list_node	link;
 	struct slab_node 	*snode;
 	off_t			offset;
-	physaddr_t		paddr;
+	long			pad;
 	long			item_count;
 };
+
+BUILD_ASSERT(PGSIZE_2MB % sizeof(struct page) == 0);
 
 #define PAGE_FLAG_LARGE		0x01 /* page is large */
 #define PAGE_FLAG_IN_USE	0x02 /* page is allocated */
@@ -151,18 +153,6 @@ static inline void *page_to_addr(struct page *pg)
 	if (pg->flags & PAGE_FLAG_LARGE)
 		return lgpage_to_addr(pg);
 	return smpage_to_addr(pg);
-}
-
-/**
- * addr_to_pa - gets the physical address of an address in page memory
- * @addr: the address of (or in) the page
- *
- * Returns the physical address, including the offset.
- */
-static inline physaddr_t addr_to_pa(void *addr)
-{
-	struct page *pg = addr_to_lgpage(addr);
-	return pg->paddr + PGOFF_2MB(addr);
 }
 
 /**
