@@ -87,6 +87,15 @@ int thread_init_perthread(void)
 	int ret;
 	unsigned int thread_id;
 
+	/*
+	 * this function may be called multiple times since
+	 * base_init() must initialize perthread internally
+	 */
+	static __thread bool internal_thread_init_done;
+	if (internal_thread_init_done)
+		return 0;
+	internal_thread_init_done = true;
+
 	spin_lock(&thread_lock);
 	if (thread_count >= NTHREAD) {
 		spin_unlock(&thread_lock);

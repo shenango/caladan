@@ -43,6 +43,8 @@ static int init_internal(void)
 }
 
 
+extern int thread_init_perthread(void);
+
 /**
  * base_init - initializes the base library
  *
@@ -53,6 +55,10 @@ int base_init(void)
 {
 	int ret;
 
+	ret = thread_init_perthread();
+	if (ret)
+		return ret;
+
 	ret = init_internal();
 	if (ret)
 		return ret;
@@ -60,8 +66,6 @@ int base_init(void)
 	base_init_done = true;
 	return 0;
 }
-
-extern int thread_init_perthread(void);
 
 static int init_thread_internal(void)
 {
