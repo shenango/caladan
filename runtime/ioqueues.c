@@ -328,7 +328,7 @@ int ioqueues_init_thread(void)
 	BUG_ON(ret);
 
 	myk()->q_ptrs = (struct q_ptrs *) shmptr_to_ptr(r, ts->q_ptrs,
-			sizeof(uint32_t));
+			sizeof(struct q_ptrs));
 	BUG_ON(!myk()->q_ptrs);
 
 	return 0;
