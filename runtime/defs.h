@@ -125,8 +125,8 @@ extern void __jmp_runtime_nosave(runtime_fn_t fn, void *stack) __noreturn;
 #define GUARD_PTR_SIZE	(RUNTIME_GUARD_SIZE / sizeof(uintptr_t))
 
 struct stack {
-	uintptr_t	usable[STACK_PTR_SIZE];
 	uintptr_t	guard[GUARD_PTR_SIZE]; /* unreadable and unwritable */
+	uintptr_t       usable[STACK_PTR_SIZE];
 };
 
 DECLARE_PERTHREAD(struct tcache_perthread, stack_pt);
@@ -140,7 +140,10 @@ DECLARE_PERTHREAD(struct tcache_perthread, stack_pt);
  */
 static inline struct stack *stack_alloc(void)
 {
-	return tcache_alloc(perthread_ptr(stack_pt));
+	void *s = tcache_alloc(perthread_ptr(stack_pt));
+	if (unlikely(!s))
+		return NULL;
+	return container_of(s, struct stack, usable);
 }
 
 /**
@@ -149,7 +152,7 @@ static inline struct stack *stack_alloc(void)
  */
 static inline void stack_free(struct stack *s)
 {
-	tcache_free(perthread_ptr(stack_pt), (void *)s);
+	tcache_free(perthread_ptr(stack_pt), (void *)s->usable);
 }
 
 #define RSP_ALIGNMENT	16
