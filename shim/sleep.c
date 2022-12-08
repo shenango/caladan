@@ -8,12 +8,14 @@
 
 int usleep(useconds_t usec)
 {
+	NOTSELF(usleep, usec);
 	timer_sleep(usec);
 	return 0;
 }
 
 unsigned int sleep(unsigned int seconds)
 {
+	NOTSELF(sleep, seconds);
 	timer_sleep(seconds * ONE_SECOND);
 	return 0;
 }
