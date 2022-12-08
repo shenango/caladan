@@ -42,16 +42,15 @@ echo building DPDK
 
 disable_driver='crypto/*,net/bnxt'
 
-if lspci | grep -q 'ConnectX-[4,5,6]'; then
-  # build against local rdma-core library
-  export EXTRA_CFLAGS=-I$PWD/rdma-core/build/include
-  export EXTRA_LDFLAGS=-L$PWD/rdma-core/build/lib
-  export PKG_CONFIG_PATH=$PWD/rdma-core/build/lib/pkgconfig
-elif lspci | grep -q 'ConnectX-3'; then
-  rm -f dpdk/drivers/net/mlx4/mlx4_custom.h
-  patch -p1 -N -d dpdk/ < build/mlx4_22_03.patch
-  disable_driver="${disable_driver},common/mlx5,net/mlx5"
-fi
+export EXTRA_CFLAGS=-I$PWD/rdma-core/build/include
+export EXTRA_LDFLAGS=-L$PWD/rdma-core/build/lib
+export PKG_CONFIG_PATH=$PWD/rdma-core/build/lib/pkgconfig
+
+#if lspci | grep -q 'ConnectX-3'; then
+#  rm -f dpdk/drivers/net/mlx4/mlx4_custom.h
+#  patch -p1 -N -d dpdk/ < build/mlx4_22_03.patch
+#  disable_driver="${disable_driver},common/mlx5,net/mlx5"
+#fi
 
 
 cd dpdk
