@@ -513,6 +513,7 @@ static void sched_measure_delay(struct proc *p)
 	dl.parked_thread_busy = false;
 	dl.max_delay_us = 0;
 	dl.min_delay_us = UINT64_MAX;
+	dl.avg_delay_us = 0;
 
 	/* zero the rxq delays */
 	memset(rxq_delay, 0, sizeof(uint64_t) * p->thread_count);
