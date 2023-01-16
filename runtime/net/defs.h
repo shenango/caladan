@@ -129,6 +129,7 @@ static inline void trans_init_3tuple(struct trans_entry *e, uint8_t proto,
 	e->proto = proto;
 	e->laddr = laddr;
 	e->ops = ops;
+	memset(&e->raddr, 0, sizeof(e->raddr));
 }
 
 /**
