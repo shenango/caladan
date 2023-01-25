@@ -146,7 +146,10 @@ void RunClient(netaddr raddr, int threads, int samples, size_t buflen,
   double seconds = duration_cast<sec>(finish - start).count();
   size_t mbytes = buflen * samples * threads / 1000 / 1000;
   double mbytes_per_second = static_cast<double>(mbytes) / seconds;
+  double transactions_per_second = static_cast<double>(samples) / seconds;
   std::cout << "transferred " << mbytes_per_second << " MB/s" << std::endl;
+  std::cout << "transactions rate " << transactions_per_second << " transactions/s" << std::endl;
+  std::cout << "request/response size " << buflen << " bytes" << std::endl;
 }
 
 int StringToAddr(const char *str, uint32_t *addr) {
