@@ -1,0 +1,25 @@
+diff --git a/providers/mlx5/dr_send.c b/providers/mlx5/dr_send.c
+index 16d69150..c2da660e 100644
+--- a/providers/mlx5/dr_send.c
++++ b/providers/mlx5/dr_send.c
+@@ -701,7 +701,7 @@ static void dr_fill_write_icm_segs(struct mlx5dv_dr_domain *dmn,
+ 	unsigned int inline_flag;
+ 	uint32_t buff_offset;
+ 
+-	if (send_info->write.length > dmn->info.max_inline_size) {
++	if (send_info->write.length > send_ring->max_inline_size) {
+ 		buff_offset = (send_ring->tx_head & (send_ring->signal_th - 1)) *
+ 			dmn->info.max_send_size;
+ 		/* Copy to ring mr */
+diff --git a/providers/mlx5/mlx5dv_dr.h b/providers/mlx5/mlx5dv_dr.h
+index 7c7d0836..9bd3e08e 100644
+--- a/providers/mlx5/mlx5dv_dr.h
++++ b/providers/mlx5/mlx5dv_dr.h
+@@ -1032,7 +1032,6 @@ struct dr_domain_rx_tx {
+ 
+ struct dr_domain_info {
+ 	bool			supp_sw_steering;
+-	uint32_t		max_inline_size;
+ 	uint32_t		max_log_sw_icm_sz;
+ 	uint32_t		max_log_action_icm_sz;
+ 	uint32_t		max_log_modify_hdr_pattern_icm_sz;
