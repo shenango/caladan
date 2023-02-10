@@ -386,6 +386,9 @@ static void ias_notify_congested(struct proc *p, struct delay_info *delay)
 		        delay->standing_queue : delay->max_delay_us >= sd->qdelay_us;
 	congested |= delay->parked_thread_busy;
 
+	if (sd->is_lc && delay->parked_thread_busy)
+		STAT_INC(PARKED_THREAD_BUSY_WAKE, 1);
+
 	/* stop if there is no congestion */
 	if (!congested) {
 		sd->is_congested = false;

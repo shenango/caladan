@@ -17,7 +17,7 @@
 
 #include "ref.h"
 
-/* #define STATS 1 */
+#define STATS 1
 
 /*
  * configuration parameters
@@ -290,7 +290,9 @@ enum {
 	RX_UNICAST_FAIL,
 	RX_BROADCAST_FAIL,
 	RX_UNHANDLED,
-	RX_JOIN_FAIL,
+
+	PARKED_THREAD_BUSY_WAKE,
+	PARK_FAST_REWAKE,
 
 	TX_COMPLETION_OVERFLOW,
 	TX_COMPLETION_FAIL,
@@ -299,21 +301,20 @@ enum {
 	COMMANDS_PULLED,
 	COMPLETION_DRAINED,
 	COMPLETION_ENQUEUED,
-	BATCH_TOTAL,
+	LOOPS,
 	TX_PULLED,
 	TX_BACKPRESSURE,
 
 	RQ_GRANT,
 	RX_GRANT,
 
-	ADJUSTS,
+	SCHED_RUN,
 
 	NR_STATS,
 
 };
 
 extern uint64_t stats[NR_STATS];
-extern void print_stats(void);
 
 #ifdef STATS
 #define STAT_INC(stat_name, amt) do { stats[stat_name] += amt; } while (0);
@@ -344,6 +345,7 @@ extern int tx_init(void);
 extern int dp_clients_init(void);
 extern int dpdk_late_init(void);
 extern int hw_timestamp_init(void);
+extern int stats_init(void);
 
 extern char *nic_pci_addr_str;
 extern struct pci_addr nic_pci_addr;

@@ -18,6 +18,7 @@
 struct iokernel_cfg cfg;
 struct dataplane dp;
 
+bool stat_logging;
 bool allowed_cores_supplied;
 DEFINE_BITMAP(input_allowed_cores, NCPU);
 
@@ -72,6 +73,12 @@ static int run_init_handlers(const char *phase, const struct init_entry *h,
 		}
 	}
 
+	if (stat_logging) {
+		ret = stats_init();
+		if (ret)
+			return ret;
+	}
+
 	return 0;
 }
 
@@ -81,7 +88,7 @@ static int run_init_handlers(const char *phase, const struct init_entry *h,
 void dataplane_loop(void)
 {
 	bool work_done;
-#ifdef STATS
+#if 0
 	uint64_t next_log_time = microtime();
 #endif
 
@@ -124,11 +131,10 @@ void dataplane_loop(void)
 		if (!work_done)
 			dp_clients_rx_control_lrpcs();
 
-		STAT_INC(BATCH_TOTAL, IOKERNEL_RX_BURST_SIZE);
+		STAT_INC(LOOPS, 1);
 
-#ifdef STATS
+#if 0
 		if (microtime() > next_log_time) {
-			print_stats();
 			dpdk_print_eth_stats();
 			next_log_time += LOG_INTERVAL_US;
 		}
@@ -175,6 +181,8 @@ int main(int argc, char *argv[])
 			cfg.nobw = true;
 		} else if (!strcmp(argv[i], "no_hw_qdel")) {
 			cfg.no_hw_qdel = true;
+		} else if (!strcmp(argv[i], "stats")) {
+			stat_logging = true;
 		} else if (!strcmp(argv[i], "selfpair")) {
 			cfg.ias_prefer_selfpair = true;
 		} else if (!strcmp(argv[i], "vfio")) {

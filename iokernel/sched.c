@@ -662,6 +662,7 @@ static int sched_try_fast_rewake(struct thread *th)
 	return -EINVAL;
 
 rewake:
+	STAT_INC(PARK_FAST_REWAKE, 1);
 	ksched_run(th->core, th->tid);
 	state[th->core].wait = true;
 	return 0;
@@ -687,6 +688,8 @@ void sched_poll(void)
 	now = (cur_tsc - start_tsc) / cycles_per_us;
 	if (now - last_time >= IOKERNEL_POLL_INTERVAL) {
 		int i;
+
+		STAT_INC(SCHED_RUN, 1);
 
 		/* retrieve current network device tick */
 		hw_timestamp_update();
