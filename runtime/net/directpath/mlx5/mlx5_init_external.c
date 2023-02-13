@@ -16,7 +16,7 @@ static int mlx5_init_ext_thread_rx(struct shm_region *reg,
                                    struct kthread *k, uint32_t lkey)
 {
 	int ret;
-	struct mlx5_rxq *v = container_of(k->directpath_rxq, struct mlx5_rxq, rxq);
+	struct mlx5_rxq *v = &rxqs[k->kthread_idx];
 	void *buf, *dbr;
 
 	if (unlikely(spec->rx_cq.stride != sizeof(struct mlx5_cqe64)))
@@ -49,7 +49,7 @@ static int mlx5_init_ext_thread_tx(struct shm_region *reg,
                                    struct kthread *k, uint32_t lkey,
                                    void *bfreg)
 {
-	struct mlx5_txq *t = container_of(k->directpath_txq, struct mlx5_txq, txq);
+	struct mlx5_txq *t = &txqs[k->kthread_idx];
 	int ret;
 	void *buf, *dbr;
 

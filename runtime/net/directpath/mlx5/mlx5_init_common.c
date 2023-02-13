@@ -25,10 +25,56 @@ static uint32_t null_get_flow_affinity(uint8_t ipproto, uint16_t local_port,
 	return 0;
 }
 
+static void mlx5_softirq(void *arg)
+{
+	int cnt;
+	struct mlx5_rxq *v = arg;
+	struct mbuf *ms[RUNTIME_RX_BATCH_SIZE];
+
+	while (true) {
+		cnt = mlx5_gather_rx(v, ms, RUNTIME_RX_BATCH_SIZE);
+		if (cnt)
+			net_rx_batch(ms, cnt);
+		preempt_disable();
+		v->poll_th = thread_self();
+		thread_park_and_preempt_enable();
+	}
+}
+
+bool mlx5_rx_poll(unsigned int q_index)
+{
+	struct mlx5_rxq *v = &rxqs[q_index];
+	thread_t *th = v->poll_th;
+
+	if (!th || !mlx5_rxq_pending(v))
+		return false;
+
+	if (!__sync_bool_compare_and_swap(&v->poll_th, th, NULL))
+		return false;
+
+	thread_ready(th);
+	return true;
+}
+
+bool mlx5_rx_poll_locked(unsigned int q_index)
+{
+	struct mlx5_rxq *v = &rxqs[q_index];
+	thread_t *th = v->poll_th;
+
+	if (!th || !mlx5_rxq_pending(v))
+		return false;
+
+	if (!__sync_bool_compare_and_swap(&v->poll_th, th, NULL))
+		return false;
+
+	thread_ready_locked(th);
+	return true;
+}
+
 static struct net_driver_ops mlx5_default_net_ops = {
-	.rx_batch = mlx5_gather_rx,
+	.rx_poll = mlx5_rx_poll,
+	.rx_poll_locked = mlx5_rx_poll_locked,
 	.tx_single = mlx5_transmit_one,
-	.rxq_has_work = mlx5_rxq_busy,
 	.steer_flows = NULL,
 	.register_flow = null_register_flow,
 	.deregister_flow = null_deregister_flow,
@@ -41,9 +87,11 @@ int mlx5_init_thread(void)
 	struct hardware_queue_spec *hs;
 	struct mlx5_rxq *v = &rxqs[k->kthread_idx];
 
-	k->directpath_rxq = &v->rxq;
-	k->directpath_txq = &txqs[k->kthread_idx].txq;
 	v->shadow_tail = &k->q_ptrs->directpath_rx_tail;
+
+	v->poll_th = thread_create(mlx5_softirq, v);
+	if (!v->poll_th)
+		return -ENOMEM;
 
 	if (directpath_mode == DIRECTPATH_MODE_EXTERNAL)
 		return 0;

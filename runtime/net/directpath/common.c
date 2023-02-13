@@ -82,27 +82,6 @@ static int rx_memory_init(void)
 	return 0;
 }
 
-static void directpath_softirq_one(struct kthread *k)
-{
-	struct mbuf *ms[RUNTIME_RX_BATCH_SIZE];
-	int cnt;
-
-	cnt = net_ops.rx_batch(k->directpath_rxq, ms, RUNTIME_RX_BATCH_SIZE);
-	net_rx_batch(ms, cnt);
-}
-
-static void directpath_softirq(void *arg)
-{
-	struct kthread *k = arg;
-
-	while (true) {
-		directpath_softirq_one(k);
-		preempt_disable();
-		k->directpath_busy = false;
-		thread_park_and_preempt_enable();
-	}
-}
-
 int directpath_init(void)
 {
 	int ret;
@@ -136,18 +115,11 @@ int directpath_init(void)
 
 int directpath_init_thread(void)
 {
-	struct kthread *k = myk();
-	thread_t *th;
-
 	if (!cfg_directpath_enabled)
 		return 0;
 
-	th = thread_create(directpath_softirq, k);
-	if (!th)
-		return -ENOMEM;
-
-	k->directpath_softirq = th;
-	tcache_init_perthread(directpath_buf_tcache, perthread_ptr(directpath_buf_pt));
+	tcache_init_perthread(directpath_buf_tcache,
+	                      perthread_ptr(directpath_buf_pt));
 
 	return mlx5_init_thread();
 }

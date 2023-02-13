@@ -31,27 +31,22 @@ struct mlx5_wq {
 };
 
 struct mlx5_rxq {
-	/* handle for runtime */
-	struct direct_rxq rxq;
-
-	uint32_t *shadow_tail;
-
 	/* queue steering mode */
 	struct rcu_hlist_head head;
 	struct rcu_hlist_node link;
-	struct rcu_hlist_node *last_node;
-	spinlock_t lock;
+	thread_t *poll_th;
 
 	/* completion queue */
 	struct mlx5_cq cq;
+
 	/* work queue */
 	struct mlx5_wq wq;
+	uint32_t *shadow_tail;
 } __aligned(CACHE_LINE_SIZE);
 
-struct mlx5_txq {
-	/* handle for runtime */
-	struct direct_txq txq;
+BUILD_ASSERT(offsetof(struct mlx5_rxq, wq) <= CACHE_LINE_SIZE);
 
+struct mlx5_txq {
 	/* work queue */
 	struct mlx5_wq wq;
 	uint32_t bf_offset;
@@ -75,8 +70,11 @@ extern off_t tx_mr_offset;
 
 // Main RX/TX routines
 extern int mlx5_transmit_one(struct mbuf *m);
-extern int mlx5_gather_rx(struct direct_rxq *rxq, struct mbuf **ms, unsigned int budget);
-extern int mlx5_rxq_busy(struct direct_rxq *rxq);
+extern int mlx5_gather_rx(struct mlx5_rxq *rxq, struct mbuf **ms, unsigned int budget);
+
+extern bool mlx5_rx_poll(unsigned int q_index);
+extern bool mlx5_rx_poll_locked(unsigned int q_index);
+
 
 // Top level initializaiton functions
 extern int mlx5_verbs_init_context(bool uses_qsteering);

@@ -14,11 +14,6 @@ static bool softirq_iokernel_pending(struct kthread *k)
 	return !lrpc_empty(&k->rxq);
 }
 
-static bool softirq_directpath_pending(struct kthread *k)
-{
-	return rx_pending(k->directpath_rxq);
-}
-
 static bool softirq_timer_pending(struct kthread *k, uint64_t now_tsc)
 {
 	uint64_t now_us = (now_tsc - start_tsc) / cycles_per_us;
@@ -37,8 +32,8 @@ static bool softirq_storage_pending(struct kthread *k)
  */
 bool softirq_pending(struct kthread *k, uint64_t now_tsc)
 {
-	return softirq_iokernel_pending(k) || softirq_directpath_pending(k) ||
-	       softirq_timer_pending(k, now_tsc) || softirq_storage_pending(k);
+	return softirq_iokernel_pending(k) || softirq_timer_pending(k, now_tsc) ||
+	       softirq_storage_pending(k);
 }
 
 /**
@@ -65,11 +60,7 @@ bool softirq_run_locked(struct kthread *k)
 	}
 
 	/* check for directpath softirq work */
-	if (!k->directpath_busy && softirq_directpath_pending(k)) {
-		k->directpath_busy = true;
-		thread_ready_head_locked(k->directpath_softirq);
-		work_done = true;
-	}
+	work_done |= rx_poll_locked(k);
 
 	/* check for timer softirq work */
 	if (!k->timer_busy && softirq_timer_pending(k, now_tsc)) {
@@ -101,10 +92,12 @@ bool softirq_run(void)
 	bool work_done;
 
 	k = getk();
+	k->last_softirq_tsc = now_tsc;
+
 	if (!softirq_pending(k, now_tsc)) {
-		k->last_softirq_tsc = now_tsc;
+		work_done = rx_poll(k);
 		putk();
-		return false;
+		return work_done;
 	}
 	spin_lock(&k->lock);
 	work_done = softirq_run_locked(k);

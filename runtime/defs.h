@@ -407,25 +407,18 @@ struct kthread {
 	unsigned int		timern;
 	struct timer_idx	*timers;
 	thread_t		*iokernel_softirq;
-	thread_t		*directpath_softirq;
 	thread_t		*timer_softirq;
 	thread_t		*storage_softirq;
 	bool			iokernel_busy;
-	bool			directpath_busy;
 	bool			timer_busy;
 	bool			storage_busy;
-	unsigned int		pad2;
+	bool			pad2[5 + 8];
 	uint64_t		last_softirq_tsc;
 
 	/* 9th cache-line, storage nvme queues */
 	struct storage_q	storage_q;
 
-	/* 10th cache-line, direct path queues */
-	struct direct_rxq	*directpath_rxq;
-	struct direct_txq	*directpath_txq;
-	unsigned long		pad3[6];
-
-	/* 11th cache-line, statistics counters */
+	/* 10th cache-line, statistics counters */
 	uint64_t		stats[STAT_NR];
 };
 
@@ -436,7 +429,6 @@ BUILD_ASSERT(offsetof(struct kthread, txpktq) % CACHE_LINE_SIZE == 0);
 BUILD_ASSERT(offsetof(struct kthread, rq) % CACHE_LINE_SIZE == 0);
 BUILD_ASSERT(offsetof(struct kthread, timer_lock) % CACHE_LINE_SIZE == 0);
 BUILD_ASSERT(offsetof(struct kthread, storage_q) % CACHE_LINE_SIZE == 0);
-BUILD_ASSERT(offsetof(struct kthread, directpath_rxq) % CACHE_LINE_SIZE == 0);
 BUILD_ASSERT(offsetof(struct kthread, stats) % CACHE_LINE_SIZE == 0);
 
 DECLARE_PERTHREAD(struct kthread *, mykthread);
@@ -570,13 +562,13 @@ extern int __noinline net_tx_drain_overflow(void);
 
 struct trans_entry;
 struct net_driver_ops {
-	int (*rx_batch)(struct direct_rxq *rxq, struct mbuf **ms, unsigned int budget);
+	bool (*rx_poll)(unsigned int q_index);
+	bool (*rx_poll_locked)(unsigned int q_index);
 	int (*tx_single)(struct mbuf *m);
 	int (*steer_flows)(unsigned int *new_fg_assignment);
 	int (*register_flow)(unsigned int affininty, struct trans_entry *e, void **handle_out);
 	int (*deregister_flow)(struct trans_entry *e, void *handle);
 	uint32_t (*get_flow_affinity)(uint8_t ipproto, uint16_t local_port, struct netaddr remote);
-	int (*rxq_has_work)(struct direct_rxq *rxq);
 };
 
 extern struct net_driver_ops net_ops;
@@ -588,16 +580,29 @@ extern bool cfg_directpath_enabled;
 struct direct_txq {};
 struct direct_rxq {};
 
-static inline bool rx_pending(struct direct_rxq *rxq)
+
+static inline bool rx_poll(struct kthread *k)
 {
-	return cfg_directpath_enabled && net_ops.rxq_has_work(rxq);
+	assert(!spin_lock_held(&myk()->lock));
+	return net_ops.rx_poll && net_ops.rx_poll(k->kthread_idx);
+}
+
+static inline bool rx_poll_locked(struct kthread *k)
+{
+	assert(spin_lock_held(&myk()->lock));
+	return net_ops.rx_poll_locked && net_ops.rx_poll_locked(k->kthread_idx);
 }
 
 extern size_t directpath_rx_buf_pool_sz(unsigned int nrqs);
 
 #else
 
-static inline bool rx_pending(struct direct_rxq *rxq)
+static inline bool rx_poll(struct kthread *k)
+{
+	return false;
+}
+
+static inline bool rx_poll_locked(struct kthread *k)
 {
 	return false;
 }

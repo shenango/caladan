@@ -238,7 +238,7 @@ int mlx5_transmit_one(struct mbuf *m)
 	int i, compl = 0;
 
 	k = getk();
-	v = container_of(k->directpath_txq, struct mlx5_txq, txq);
+	v = &txqs[k->kthread_idx];
 	idx = v->wq.head & (v->wq.cnt - 1);
 
 	if (nr_inflight_tx(v) >= SQ_CLEAN_THRESH) {
@@ -302,19 +302,12 @@ static void mbuf_fill_cqe(struct mbuf *m, struct mlx5_cqe64 *cqe)
 	m->release = directpath_rx_completion;
 }
 
-int mlx5_rxq_busy(struct direct_rxq *rxq)
-{
-    struct mlx5_rxq *v = container_of(rxq, struct mlx5_rxq, rxq);
-    return mlx5_rxq_pending(v);
-}
-
-int mlx5_gather_rx(struct direct_rxq *rxq, struct mbuf **ms, unsigned int budget)
+int mlx5_gather_rx(struct mlx5_rxq *v, struct mbuf **ms, unsigned int budget)
 {
 	uint8_t opcode;
 	uint16_t wqe_idx;
 	int rx_cnt;
 
-	struct mlx5_rxq *v = container_of(rxq, struct mlx5_rxq, rxq);
 	struct mlx5_cqe64 *cqe;
 	struct mbuf *m;
 

@@ -266,10 +266,8 @@ static bool steal_work(struct kthread *l, struct kthread *r)
 	assert_spin_lock_held(&l->lock);
 	assert(myk() == l);
 
-	if (!work_available(r, now_tsc))
-		return false;
-	if (!spin_try_lock(&r->lock))
-		return false;
+	if (!work_available(r, now_tsc) || !spin_try_lock(&r->lock))
+		return rx_poll_locked(r);
 
 #ifdef GC
 	if (unlikely(get_gc_gen() != r->local_gc_gen)) {
