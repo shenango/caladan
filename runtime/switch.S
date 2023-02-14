@@ -9,6 +9,7 @@
  */
 
 .file "switch.S"
+.section        .note.GNU-stack,"",@progbits
 .text
 
 /* arguments registers (can be clobbered) */
