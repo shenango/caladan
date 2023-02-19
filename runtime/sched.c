@@ -328,14 +328,14 @@ static __noreturn __noinline void schedule(void)
 	assert_spin_lock_held(&l->lock);
 	assert(l->parked == false);
 
+	/* detect misuse of preempt disable */
+	BUG_ON((perthread_read(preempt_cnt) & ~PREEMPT_NOT_PENDING) != 1);
+
 	/* unmark busy for the stack of the last uthread */
 	if (likely(perthread_get_stable(__self) != NULL)) {
 		store_release(&perthread_get_stable(__self)->thread_running, false);
 		perthread_get_stable(__self) = NULL;
 	}
-
-	/* detect misuse of preempt disable */
-	BUG_ON((perthread_read(preempt_cnt) & ~PREEMPT_NOT_PENDING) != 1);
 
 	/* update entry stat counters */
 	STAT(RESCHEDULES)++;
