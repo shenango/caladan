@@ -10,7 +10,9 @@
 #ifndef unlikely
 #define unlikely(x) __builtin_expect(!!(x), 0)
 #endif
+#ifndef __cplusplus
 #define unreachable() __builtin_unreachable()
+#endif
 
 #define prefetch0(x) __builtin_prefetch((x), 0, 3)
 #define prefetch1(x) __builtin_prefetch((x), 0, 2)
