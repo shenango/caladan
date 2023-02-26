@@ -131,6 +131,7 @@ struct proc {
 
 	unsigned int		has_directpath:1;
 	unsigned int		has_vfio_directpath:1;
+	unsigned int        vfio_directpath_rmp:1;
 	struct ref		ref;
 	unsigned int		kill:1;       /* the proc is being torn down */
 	unsigned int		attach_fail:1;
@@ -376,7 +377,8 @@ extern void dpdk_print_eth_stats(void);
  */
 extern int directpath_init(void);
 #ifdef DIRECTPATH
-extern int alloc_directpath_ctx(struct proc *p,
+struct directpath_spec;
+extern int alloc_directpath_ctx(struct proc *p, bool use_rmp,
                                 struct directpath_spec *spec_out,
                                 int *memfd_out, int *barfd_out);
 extern void free_ctx(struct proc *p);

@@ -18,6 +18,7 @@
 #include <base/mem.h>
 #include <base/thread.h>
 
+#include <iokernel/directpath.h>
 #include <iokernel/shm.h>
 #include <runtime/thread.h>
 
@@ -41,7 +42,7 @@ static size_t calculate_egress_pool_size(void)
 
 struct iokernel_control iok;
 bool cfg_prio_is_lc;
-bool cfg_request_hardware_queues;
+unsigned int cfg_request_hardware_queues = DIRECTPATH_REQUEST_NONE;
 uint64_t cfg_ht_punish_us;
 uint64_t cfg_qdelay_us = 10;
 uint64_t cfg_quantum_us = 100;
@@ -108,7 +109,7 @@ static size_t estimate_shm_space(void)
 #ifdef DIRECTPATH
 	// mlx5 directpath
 	if (cfg_directpath_enabled) {
-		ret += PGSIZE_2MB * 4;
+		ret += PGSIZE_2MB * 32;
 
 		ret += align_up(directpath_rx_buf_pool_sz(maxks), PGSIZE_2MB);
 	}

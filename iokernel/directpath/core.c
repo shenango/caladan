@@ -8,6 +8,8 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include <iokernel/directpath.h>
+
 #include "../defs.h"
 #include "mlx5_ifc.h"
 #include <infiniband/mlx5dv.h>
@@ -178,7 +180,7 @@ static int setup_steering(void)
 
 	root_flow_group = mlx5dv_devx_obj_create(vfcontext, infg, sizeof(infg), outfg, sizeof(outfg));
 	if (!root_flow_group) {
-		log_err("bad flow group %u %x", DEVX_GET(create_flow_group_out, outfg, status), DEVX_GET(create_flow_group_out, outfg, syndrome));
+		LOG_CMD_FAIL("flow group", create_flow_group_out, outfg);
 		return -1;
 	}
 
@@ -188,7 +190,7 @@ static int setup_steering(void)
 
 static unsigned int ctx_max_doorbells(struct directpath_ctx *dp)
 {
-	return 4 * dp->nr_qs;
+	return !!dp->use_rmp + 4 * dp->nr_qs;
 }
 
 static size_t estimate_region_size(struct directpath_ctx *dp)
@@ -196,22 +198,33 @@ static size_t estimate_region_size(struct directpath_ctx *dp)
 	uint32_t i;
 	size_t total = 0;
 	size_t wasted = 0;
+	size_t lg_cq_sz = DEFAULT_CQ_LOG_SZ;
 
 	/* doorbells */
 	total += CACHE_LINE_SIZE * ctx_max_doorbells(dp);
 
+	if (dp->use_rmp) {
+		wasted += align_up(total, PGSIZE_4KB) - total;
+		total = align_up(total, PGSIZE_4KB);
+		total += DIRECTPATH_STRIDE_RQ_NUM_DESC * sizeof(struct mlx5_mprq_wqe);
+
+		lg_cq_sz = __builtin_ctzl(DIRECTPATH_TOTAL_RX_EL);
+	}
+
 	for (i = 0; i < dp->nr_qs; i++) {
 		wasted += align_up(total, PGSIZE_4KB) - total;
 		total = align_up(total, PGSIZE_4KB);
-		total += (1UL << DEFAULT_CQ_LOG_SZ) * sizeof(struct mlx5_cqe64);
+		total += (1UL << lg_cq_sz) * sizeof(struct mlx5_cqe64);
 
 		wasted += align_up(total, PGSIZE_4KB) - total;
 		total = align_up(total, PGSIZE_4KB);
 		total += (1UL << DEFAULT_CQ_LOG_SZ) * sizeof(struct mlx5_cqe64);
 
-		wasted += align_up(total, PGSIZE_4KB) - total;
-		total = align_up(total, PGSIZE_4KB);
-		total += (1UL << DEFAULT_RQ_LOG_SZ) * MLX5_SEND_WQE_BB;
+		if (!dp->use_rmp) {
+			wasted += align_up(total, PGSIZE_4KB) - total;
+			total = align_up(total, PGSIZE_4KB);
+			total += (1UL << DEFAULT_RQ_LOG_SZ) * MLX5_SEND_WQE_BB;
+		}
 
 		wasted += align_up(total, PGSIZE_4KB) - total;
 		total = align_up(total, PGSIZE_4KB);
@@ -350,8 +363,12 @@ static int fill_wqc(struct directpath_ctx *dp, struct qp *qp, struct wq *wq, voi
 	int ret;
 	size_t wqe_cnt = 1UL << log_nr_wqe;
 	uint64_t bufs, dbr;
+	size_t bbsz = MLX5_SEND_WQE_BB;
 
-	ret = alloc_from_uregion(dp, wqe_cnt * MLX5_SEND_WQE_BB, PGSIZE_4KB, &bufs);
+	if (is_rq && dp->use_rmp)
+		bbsz = sizeof(struct mlx5_mprq_wqe);
+
+	ret = alloc_from_uregion(dp, bbsz * wqe_cnt, PGSIZE_4KB, &bufs);
 	if (ret)
 		return -ENOMEM;
 
@@ -359,14 +376,22 @@ static int fill_wqc(struct directpath_ctx *dp, struct qp *qp, struct wq *wq, voi
 	if (ret)
 		return -ENOMEM;
 
-	DEVX_SET(wq, wqc, wq_type, 1 /* WQ_CYCLIC */); // TODO striding RQ
-	DEVX_SET(wq, wqc, pd, dp->pdn);
+	DEVX_SET(wq, wqc, wq_type, 1 /* WQ_CYCLIC */);
 
-	if (!is_rq)
+	if (is_rq && dp->use_rmp) {
+		int16_t lg_nm_strides = __builtin_ctz(DIRECTPATH_NUM_STRIDES) - 9;
+		DEVX_SET(wq, wqc, wq_type, 0x3 /* CYCLIC_STRIDING_WQ */);
+		DEVX_SET(wq, wqc, single_wqe_log_num_of_strides, lg_nm_strides /* 512 ^ {2 ^ lg_nm_strides}*/);
+		DEVX_SET(wq, wqc, two_byte_shift_en, 1);
+		uint16_t lg_stride_size = __builtin_ctz(DIRECTPATH_STRIDE_SIZE / 64);
+		DEVX_SET(wq, wqc, single_stride_log_num_of_bytes, lg_stride_size /* 64 * {2 ^ lg_stride_size} */);
+	} else if (!is_rq) {
 		DEVX_SET(wq, wqc, uar_page, qp->uarn);
+	}
 
+	DEVX_SET(wq, wqc, pd, dp->pdn);
 	DEVX_SET64(wq, wqc, dbr_addr, dbr);
-	DEVX_SET(wq, wqc, log_wq_stride, MLX5_SEND_WQE_SHIFT);
+	DEVX_SET(wq, wqc, log_wq_stride, __builtin_ctz(bbsz));
 	DEVX_SET(wq, wqc, log_wq_sz, log_nr_wqe);
 	DEVX_SET(wq, wqc, dbr_umem_valid, 1);
 	DEVX_SET(wq, wqc, wq_umem_valid, 1);
@@ -374,7 +399,7 @@ static int fill_wqc(struct directpath_ctx *dp, struct qp *qp, struct wq *wq, voi
 	DEVX_SET(wq, wqc, wq_umem_id, dp->mem_reg->umem_id);
 	DEVX_SET64(wq, wqc, wq_umem_offset, bufs);
 
-	wq->stride = 1UL << MLX5_SEND_WQE_SHIFT;
+	wq->stride = bbsz;
 	wq->buf = dp->region.base + bufs;
 	wq->dbrec = dp->region.base + dbr;
 	wq->wqe_cnt = wqe_cnt;
@@ -431,15 +456,20 @@ static int create_rq(struct directpath_ctx *dp, struct qp *qp, uint32_t log_nr_w
 
 	DEVX_SET(rqc, rq_ctx, cqn, qp->rx_cq.cqn);
 
-	wq_ctx = DEVX_ADDR_OF(rqc, rq_ctx, wq);
-
-	ret = fill_wqc(dp, qp, &qp->rx_wq, wq_ctx, log_nr_wqe, true);
-	if (ret)
-		return ret;
+	if (dp->use_rmp) {
+		DEVX_SET(rqc, rq_ctx, mem_rq_type, 1 /* RQ_INLINE */);
+		DEVX_SET(rqc, rq_ctx, rmpn, dp->rmpn);
+		DEVX_SET(rqc, rq_ctx, user_index, 1);
+	} else {
+		wq_ctx = DEVX_ADDR_OF(rqc, rq_ctx, wq);
+		ret = fill_wqc(dp, qp, &qp->rx_wq, wq_ctx, log_nr_wqe, true);
+		if (ret)
+			return ret;
+	}
 
 	qp->rx_wq.obj = mlx5dv_devx_obj_create(vfcontext, in, sizeof(in), out, sizeof(out));
-	if (!qp->rx_wq.obj) {
-		log_err("create rq obj failed status %d syndrome %x", DEVX_GET(create_rq_out, out, status), DEVX_GET(create_rq_out, out, syndrome));
+	if (unlikely(!qp->rx_wq.obj)) {
+		LOG_CMD_FAIL("rq", create_rq_out, out);
 		return -1;
 	}
 
@@ -534,6 +564,38 @@ static int create_cq(struct directpath_ctx *dp, struct cq *cq, uint32_t log_nr_c
 		}
 	}
 
+	return 0;
+}
+
+static int create_rmp(struct directpath_ctx *dp, struct wq *wq,
+                      uint32_t log_nr_wqe, uint32_t *rmpn)
+{
+	int ret;
+	uint32_t in[DEVX_ST_SZ_DW(create_rmp_in)] = {0};
+	uint32_t out[DEVX_ST_SZ_DW(create_rmp_out)] = {0};
+	void *rmp_ctx, *wq_ctx;
+
+	DEVX_SET(create_rmp_in, in, opcode, MLX5_CMD_OP_CREATE_RMP);
+
+	rmp_ctx = DEVX_ADDR_OF(create_rmp_in, in, ctx);
+	DEVX_SET(rmpc, rmp_ctx, state, MLX5_RMPC_STATE_RDY);
+	DEVX_SET(rmpc, rmp_ctx, basic_cyclic_rcv_wqe, 0); // TODO?
+
+	wq_ctx = DEVX_ADDR_OF(rmpc, rmp_ctx, wq);
+	log_err("rmp wqc:");
+	ret = fill_wqc(dp, NULL, wq, wq_ctx, log_nr_wqe, true);
+	if (ret) {
+		log_err("failed to setup rmp wqc");
+		return ret;
+	}
+
+	wq->obj = mlx5dv_devx_obj_create(vfcontext, in, sizeof(in), out, sizeof(out));
+	if (unlikely(!wq->obj)) {
+		LOG_CMD_FAIL("rmp", create_rmp_out, out);
+		return -1;
+	}
+
+	*rmpn = DEVX_GET(create_rmp_out, out, rmpn);
 	return 0;
 }
 
@@ -656,13 +718,13 @@ static int allocate_user_memory(struct directpath_ctx *dp)
 {
 	int ret;
 
-	dp->memfd = memfd_create("directpath", 0); // Maybe huge?
+	dp->memfd = memfd_create("directpath", MFD_HUGETLB); // Maybe huge?
 	if (dp->memfd < 0) {
 		log_err("failed to create memfd!");
 		return -errno;
 	}
 
-	dp->region.len = estimate_region_size(dp);
+	dp->region.len = align_up(estimate_region_size(dp), PGSIZE_2MB);
 	ret = ftruncate(dp->memfd, dp->region.len);
 	if (ret) {
 		log_err("failed to ftruncate");
@@ -761,12 +823,17 @@ void free_ctx(struct proc *p)
 	for (i = 0; i < ctx->nr_qs; i++)
 		free_qp(&ctx->qps[i]);
 
+	if (ctx->rmp.obj) {
+		ret = mlx5dv_devx_obj_destroy(ctx->rmp.obj);
+		if (ret)
+			log_warn("failed to destroy rmp wq obj");
+	}
+
 	if (ctx->tis_obj) {
 		ret = mlx5dv_devx_obj_destroy(ctx->tis_obj);
 		if (ret)
-			log_warn("failed to destroy td obj");
+			log_warn("failed to destroy tis obj");
 	}
-
 
 	if (ctx->td_obj) {
 		ret = mlx5dv_devx_obj_destroy(ctx->td_obj);
@@ -796,6 +863,8 @@ void free_ctx(struct proc *p)
 	if (ctx->pd)
 		ibv_dealloc_pd(ctx->pd);
 
+
+	p->directpath_data = 0;
 	free(ctx->rqns);
 	free(ctx);
 }
@@ -805,11 +874,13 @@ int directpath_get_clock(unsigned int *frequency_khz, void **core_clock)
 	return mlx5_vfio_get_clock(vfcontext, frequency_khz, core_clock);
 }
 
-int alloc_directpath_ctx(struct proc *p, struct directpath_spec *spec_out,
-                         int *memfd_out, int *barfd_out)
+int alloc_directpath_ctx(struct proc *p, bool use_rmp,
+                         struct directpath_spec *spec_out, int *memfd_out,
+                         int *barfd_out)
 {
 	int ret = 0;
 	uint32_t i;
+	size_t lg_cq_sz;
 	struct directpath_ctx *dp;
 	struct mlx5dv_pd pd_out;
 	struct mlx5dv_obj init_obj;
@@ -827,6 +898,7 @@ int alloc_directpath_ctx(struct proc *p, struct directpath_spec *spec_out,
 	dp->command_slot = COMMAND_SLOT_UNALLOCATED;
 	dp->region.base = MAP_FAILED;
 	dp->nr_qs = p->thread_count;
+	dp->use_rmp = use_rmp;
 	dp->rqns = malloc(sizeof(*dp->rqns) * p->thread_count);
 	if (unlikely(!dp->rqns))
 		goto err;
@@ -869,13 +941,27 @@ int alloc_directpath_ctx(struct proc *p, struct directpath_spec *spec_out,
 		dp->nr_alloc_uarn++;
 	}
 
+	if (use_rmp) {
+		ret = create_rmp(dp, &dp->rmp, __builtin_ctz(DIRECTPATH_STRIDE_RQ_NUM_DESC), &dp->rmpn);
+		if (unlikely(ret)) {
+			log_err("failed to create rmp!");
+			goto err;
+		}
+
+		wq_fill_spec(&dp->region, &dp->rmp, &spec_out->rmp);
+		lg_cq_sz = __builtin_ctzl(DIRECTPATH_TOTAL_RX_EL);
+	} else {
+		spec_out->rmp.nr_entries = 0;
+		lg_cq_sz = DEFAULT_CQ_LOG_SZ;
+	}
+
 	for (i = 0; i < dp->nr_qs; i++) {
 
 		/* round robin assign every pair of SQs to a UARN */
 		dp->qps[i].uarn = dp->uarns[(i / 2) % dp->nr_alloc_uarn];
 		dp->qps[i].uar_offset = i % 2 == 0 ? 0x800 : 0xA00;
 
-		ret = create_cq(dp, &dp->qps[i].rx_cq, DEFAULT_CQ_LOG_SZ, true, i);
+		ret = create_cq(dp, &dp->qps[i].rx_cq, lg_cq_sz, true, i);
 		if (ret)
 			goto err;
 

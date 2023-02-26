@@ -11,6 +11,26 @@
 
 #include "mlx5.h"
 
+struct mlx5_rmp rmp;
+
+static int mlx5_init_ext_rmp(struct shm_region *reg,
+                              struct directpath_ring_q_spec *spec,
+                              uint32_t lkey)
+{
+	void *buf, *dbr;
+
+	buf = shmptr_to_ptr(reg, spec->buf, spec->nr_entries * spec->stride);
+	dbr = shmptr_to_ptr(reg, spec->dbrec, CACHE_LINE_SIZE);
+
+	if (unlikely(!buf || !dbr))
+		return -EINVAL;
+
+	spin_lock_init(&rmp.lock);
+
+	return mlx5_init_rxq_wq(&rmp.wq, buf, dbr, spec->nr_entries, spec->stride,
+	                        lkey);
+}
+
 static int mlx5_init_ext_thread_rx(struct shm_region *reg,
                                    struct directpath_queue_spec *spec,
                                    struct kthread *k, uint32_t lkey)
@@ -33,6 +53,9 @@ static int mlx5_init_ext_thread_rx(struct shm_region *reg,
 	if (unlikely(ret))
 		return ret;
 
+	if (cfg_directpath_strided)
+		return 0;
+
 	buf = shmptr_to_ptr(reg, spec->rx_wq.buf,
 	                    spec->rx_wq.nr_entries * spec->rx_wq.stride);
 	dbr = shmptr_to_ptr(reg, spec->rx_wq.dbrec, CACHE_LINE_SIZE);
@@ -40,7 +63,7 @@ static int mlx5_init_ext_thread_rx(struct shm_region *reg,
 	if (unlikely(!buf || !dbr))
 		return -EINVAL;
 
-	return mlx5_init_rxq_wq(v, buf, dbr, spec->rx_wq.nr_entries,
+	return mlx5_init_rxq_wq(&v->wq, buf, dbr, spec->rx_wq.nr_entries,
 	                        spec->rx_wq.stride, lkey);
 }
 
@@ -101,6 +124,12 @@ int mlx5_init_ext_late(struct directpath_spec *spec, int bar_fd, int mem_fd)
 	 */
 	rx_mr_offset = spec->va_base - (uintptr_t)netcfg.tx_region.base;
 	tx_mr_offset = rx_mr_offset;
+
+	if (cfg_directpath_strided) {
+		ret = mlx5_init_ext_rmp(&memfd_reg, &spec->rmp, spec->mr);
+		if (unlikely(ret))
+			return ret;
+	}
 
 	/* set up each queue pair */
 	for (i = 0; i < maxks; i++) {

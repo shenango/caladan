@@ -255,9 +255,17 @@ static int mlx5_create_rxq_verbs(int index, struct mlx5_rxq *v, bool use_rss)
 	struct ibv_wq *rx_wq;
 	struct ibv_rwq_ind_table *rwq_ind_tbl;
 
+	uint32_t max_wr = RQ_NUM_DESC;
+	uint32_t cqe_cnt = RQ_NUM_DESC;
+
+	if (cfg_directpath_strided) {
+		max_wr = DIRECTPATH_STRIDE_RQ_NUM_DESC;
+		cqe_cnt = max_wr * DIRECTPATH_NUM_STRIDES;
+	}
+
 	/* Create a CQ */
 	struct ibv_cq_init_attr_ex cq_attr = {
-		.cqe = RQ_NUM_DESC,
+		.cqe = cqe_cnt,
 		.channel = NULL,
 		.comp_vector = 0,
 		.wc_flags = IBV_WC_EX_WITH_BYTE_LEN,
@@ -274,21 +282,29 @@ static int mlx5_create_rxq_verbs(int index, struct mlx5_rxq *v, bool use_rss)
 	/* Create the work queue for RX */
 	struct ibv_wq_init_attr wq_init_attr = {
 		.wq_type = IBV_WQT_RQ,
-		.max_wr = RQ_NUM_DESC,
+		.max_wr = max_wr,
 		.max_sge = 1,
 		.pd = pd,
 		.cq = ibv_cq_ex_to_cq(rx_cq),
 		.comp_mask = 0,
 		.create_flags = 0,
 	};
+
 	struct mlx5dv_wq_init_attr dv_wq_attr = {
-		.comp_mask = 0,
+		.comp_mask = MLX5DV_WQ_INIT_ATTR_MASK_STRIDING_RQ,
+		.striding_rq_attrs.single_stride_log_num_of_bytes = __builtin_ctz(DIRECTPATH_STRIDE_SIZE),
+		.striding_rq_attrs.single_wqe_log_num_of_strides = __builtin_ctz(DIRECTPATH_NUM_STRIDES),
+		.striding_rq_attrs.two_byte_shift_en = 1,
 	};
+
+	if (!cfg_directpath_strided)
+		dv_wq_attr.comp_mask = 0;
+
 	rx_wq = mlx5dv_create_wq(context, &wq_init_attr, &dv_wq_attr);
 	if (!rx_wq)
 		return -errno;
 
-	if (wq_init_attr.max_wr != RQ_NUM_DESC)
+	if (wq_init_attr.max_wr != max_wr)
 		log_warn("Ring size is larger than anticipated");
 
 	/* Set the WQ state to ready */
@@ -353,7 +369,7 @@ static int mlx5_create_rxq_verbs(int index, struct mlx5_rxq *v, bool use_rss)
 	if (unlikely(rx_cq_dv.cqe_size != sizeof(struct mlx5_cqe64)))
 		return -EINVAL;
 
-	ret = mlx5_init_rxq_wq(v, rx_wq_dv.buf, rx_wq_dv.dbrec, rx_wq_dv.wqe_cnt,
+	ret = mlx5_init_rxq_wq(&v->wq, rx_wq_dv.buf, rx_wq_dv.dbrec, rx_wq_dv.wqe_cnt,
 		                   rx_wq_dv.stride, mr->lkey);
 	if (ret)
 		return ret;
@@ -457,10 +473,12 @@ static int mlx5_create_txq_verbs(int index, struct mlx5_txq *v)
 
 int mlx5_verbs_init_context(bool uses_qsteering)
 {
-	int i;
+	int i, ret;
 
 	struct ibv_device **dev_list;
 	struct mlx5dv_context_attr attr = {0};
+	struct mlx5dv_context query_attrs = {0};
+	struct mlx5dv_striding_rq_caps *caps;
 	struct pci_addr pci_addr;
 
 	BUG_ON(setenv("MLX5_SINGLE_THREADED", "1", 1));
@@ -500,6 +518,37 @@ int mlx5_verbs_init_context(bool uses_qsteering)
 	}
 
 	ibv_free_device_list(dev_list);
+
+	if (cfg_directpath_strided) {
+		query_attrs.comp_mask = MLX5DV_CONTEXT_MASK_STRIDING_RQ;
+		ret = mlx5dv_query_device(context, &query_attrs);
+		if (unlikely(ret)) {
+			log_err("mlx5_verbs_init_context: failed to query device");
+			return ret;
+		}
+
+		caps = &query_attrs.striding_rq_caps;
+		if (unlikely(!ibv_is_qpt_supported(caps->supported_qpts,
+			                               IBV_QPT_RAW_PACKET))) {
+			log_err("mlx5_verbs_init_context: device does not support strq");
+			return -EINVAL;
+		}
+
+		uint32_t val = __builtin_ctz(DIRECTPATH_STRIDE_SIZE);
+		if (val < caps->min_single_stride_log_num_of_bytes ||
+			val > caps->max_single_stride_log_num_of_bytes) {
+			log_err("mlx5_verbs_init_context: bad stride size");
+			return -EINVAL;
+		}
+
+		val = __builtin_ctz(DIRECTPATH_NUM_STRIDES);
+		if (val < caps->min_single_wqe_log_num_of_strides ||
+			val > caps->max_single_wqe_log_num_of_strides) {
+			log_err("mlx5_verbs_init_context: bad num strides");
+			return -EINVAL;
+		}
+	}
+
 	return 0;
 }
 

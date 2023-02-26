@@ -5666,14 +5666,40 @@ struct mlx5_ifc_dealloc_transport_domain_in_bits {
 	u8         reserved_at_60[0x20];
 };
 
-struct mlx5_ifc_create_rmp_out_bits {
-	u8         reserved_at_0[0x40];
 
-	u8         reserved_at_40[0x8];
-	u8         rmpn[0x18];
-
-	u8         reserved_at_60[0x20];
+enum {
+	MLX5_RMPC_STATE_RDY = 0x1,
+	MLX5_RMPC_STATE_ERR = 0x3,
 };
+
+struct mlx5_ifc_rmpc_bits {
+	u8 reserved_at_0[0x8];
+	u8 state[0x4];
+	u8 reserved_at_c[0x14];
+	u8 basic_cyclic_rcv_wqe[0x1];
+	u8 reserved_at_21[0x1f];
+	u8 reserved_at_40[0x140];
+	struct mlx5_ifc_wq_bits wq;
+};
+
+struct mlx5_ifc_create_rmp_out_bits {
+	u8 status[0x8];
+	u8 reserved_at_8[0x18];
+	u8 syndrome[0x20];
+	u8 reserved_at_40[0x8];
+	u8 rmpn[0x18];
+	u8 reserved_at_60[0x20];
+};
+
+struct mlx5_ifc_create_rmp_in_bits {
+	u8 opcode[0x10];
+	u8 uid[0x10];
+	u8 reserved_at_20[0x10];
+	u8 op_mod[0x10];
+	u8 reserved_at_40[0xc0];
+	struct mlx5_ifc_rmpc_bits ctx;
+};
+
 
 struct mlx5_ifc_destroy_rmp_in_bits {
 	u8         opcode[0x10];
@@ -6338,11 +6364,18 @@ struct mlx5_eqe_page_req {
 	__be32 rsvd1[5];
 };
 
+struct mlx5_eqe_cq_err {
+	__be32	cqn;
+	u8	reserved1[7];
+	u8	syndrome;
+};
+
 union ev_data {
 	__be32 raw[7];
 	struct mlx5_eqe_cmd cmd;
 	struct mlx5_eqe_page_req req_pages;
 	struct mlx5_eqe_comp comp;
+	struct mlx5_eqe_cq_err cq_err;
 } __packed;
 
 struct mlx5_eqe {

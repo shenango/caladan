@@ -107,7 +107,7 @@ int mlx5_init_txq_wq(struct mlx5_txq *v, void *buf, uint32_t *dbr,
 	return 0;
 }
 
-int mlx5_init_rxq_wq(struct mlx5_rxq *v, void *seg_buf, uint32_t *dbr,
+int mlx5_init_rxq_wq(struct mlx5_wq *wq, void *seg_buf, uint32_t *dbr,
 	                 uint32_t size, uint32_t stride, uint32_t lkey)
 {
 	int ret;
@@ -115,9 +115,12 @@ int mlx5_init_rxq_wq(struct mlx5_rxq *v, void *seg_buf, uint32_t *dbr,
 	struct mlx5_wqe_data_seg *seg;
 	void *buf;
 
-	ret = mlx5_init_wq(&v->wq, seg_buf, dbr, size, stride);
+	ret = mlx5_init_wq(wq, seg_buf, dbr, size, stride);
 	if (unlikely(ret))
 		return ret;
+
+	if (cfg_directpath_strided)
+		return mlx5_init_rxq_wq_stride(wq, seg_buf, dbr, size, stride, lkey);
 
 	/* set byte_count and lkey for all descriptors once */
 	for (i = 0; i < size; i++) {
@@ -131,12 +134,12 @@ int mlx5_init_rxq_wq(struct mlx5_rxq *v, void *seg_buf, uint32_t *dbr,
 			return -ENOMEM;
 
 		seg->addr = htobe64((unsigned long)buf + RX_BUF_HEAD + rx_mr_offset);
-		v->wq.buffers[i] = buf;
+		wq->buffers[i] = buf;
 	}
 
 	udma_to_device_barrier();
-	v->wq.dbr[0] = htobe32(size & 0xffff);
-	v->wq.head = size;
+	wq->dbr[0] = htobe32(size & 0xffff);
+	wq->head = size;
 	return 0;
 }
 
@@ -311,12 +314,15 @@ int mlx5_gather_rx(struct mlx5_rxq *v, struct mbuf **ms, unsigned int budget)
 	struct mlx5_cqe64 *cqe;
 	struct mbuf *m;
 
-	for (rx_cnt = 0; rx_cnt < budget; rx_cnt++, v->cq.head++) {
+	for (rx_cnt = 0; rx_cnt < budget; rx_cnt++) {
 		cqe = &v->cq.cqes[v->cq.head & (v->cq.cnt - 1)];
 		opcode = cqe_status(cqe, v->cq.cnt, v->cq.head);
 
 		if (opcode == MLX5_CQE_INVALID)
 			break;
+
+		v->cq.head++;
+		prefetch(&v->cq.cqes[v->cq.head & (v->cq.cnt - 1)]);
 
 		if (unlikely(opcode != MLX5_CQE_RESP_SEND))
 			panic_error_cqe(cqe, opcode);

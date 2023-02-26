@@ -24,6 +24,7 @@
 #include <base/log.h>
 #include <base/thread.h>
 #include <iokernel/control.h>
+#include <iokernel/directpath.h>
 
 #include "hw_timestamp.h"
 #include "defs.h"
@@ -104,7 +105,7 @@ static int control_setup_directpath(struct proc *p, int controlfd)
 	if (!spec)
 		return -ENOMEM;
 
-	ret = alloc_directpath_ctx(p, spec, &memfd, &barfd);
+	ret = alloc_directpath_ctx(p, p->vfio_directpath_rmp, spec, &memfd, &barfd);
 	if (ret) {
 		log_err("control: failed to allocate context");
 		goto err;
@@ -176,7 +177,7 @@ static struct proc *control_create_proc(mem_key_t key, size_t len,
 	struct proc *p = NULL;
 	struct thread_spec *threads = NULL;
 	unsigned long *overflow_queue = NULL;
-	void *shbuf;
+	void *shbuf = NULL;
 	int i, ret;
 
 	/* attach the shared memory region */
@@ -225,7 +226,11 @@ static struct proc *control_create_proc(mem_key_t key, size_t len,
 	if (!p->runtime_info)
 		goto fail;
 	memset(&p->runtime_info->congestion, 0, sizeof(p->runtime_info->congestion));
-	p->has_vfio_directpath = p->has_directpath = hdr.request_directpath_queues;
+	if (hdr.request_directpath_queues != DIRECTPATH_REQUEST_NONE) {
+		p->has_vfio_directpath = p->has_directpath = true;
+		if (hdr.request_directpath_queues == DIRECTPATH_REQUEST_STRIDED_RMP)
+			p->vfio_directpath_rmp = true;
+	}
 
 	/* initialize the threads */
 	for (i = 0; i < hdr.thread_count; i++) {

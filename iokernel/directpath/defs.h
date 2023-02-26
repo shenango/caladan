@@ -24,6 +24,7 @@ struct mlx5_eqe;
 struct directpath_ctx;
 extern void directpath_handle_cmd_eqe(struct mlx5_eqe *eqe);
 extern void directpath_handle_completion_eqe(struct mlx5_eqe *eqe);
+extern void directpath_handle_cq_error_eqe(struct mlx5_eqe *eqe);
 extern bool directpath_commands_poll(void);
 extern bool directpath_events_poll(void);
 extern int directpath_commands_init(void);
@@ -110,6 +111,10 @@ struct directpath_ctx {
 	size_t region_allocated;
 	size_t max_doorbells;
 	size_t doorbells_allocated;
+
+	struct wq rmp;
+	bool use_rmp;
+	uint32_t rmpn;
 
 	struct mlx5dv_devx_umem *mem_reg;
 	struct mlx5dv_devx_obj *tir_obj;

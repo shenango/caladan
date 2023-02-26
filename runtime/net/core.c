@@ -255,6 +255,11 @@ static void iokernel_softirq_poll(struct kthread *k)
 			mbuf_free((struct mbuf *)payload);
 			break;
 
+		case RX_REFILL_BUFS:
+			BUG_ON(!net_ops.trigger_rx_refill);
+			net_ops.trigger_rx_refill();
+			break;
+
 		default:
 			panic("net: invalid RXQ cmd '%ld'", cmd);
 		}

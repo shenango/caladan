@@ -38,6 +38,8 @@ struct mlx5_rxq {
 
 	/* completion queue */
 	struct mlx5_cq cq;
+	uint16_t strides_consumed;
+	uint32_t wq_tail;
 
 	/* work queue */
 	struct mlx5_wq wq;
@@ -65,13 +67,20 @@ extern struct mlx5_rxq rxqs[NCPU];
 extern struct ibv_qp *rx_qps[NCPU];
 extern struct ibv_context *context;
 
+struct mlx5_rmp {
+	struct mlx5_wq wq;
+	uint64_t rmp_head;
+	spinlock_t lock;
+};
+
+extern struct mlx5_rmp rmp;
 extern off_t rx_mr_offset;
 extern off_t tx_mr_offset;
 
 // Main RX/TX routines
 extern int mlx5_transmit_one(struct mbuf *m);
 extern int mlx5_gather_rx(struct mlx5_rxq *rxq, struct mbuf **ms, unsigned int budget);
-
+extern int mlx5_gather_rx_strided(struct mlx5_rxq *v, struct mbuf **ms, unsigned int budget);
 extern bool mlx5_rx_poll(unsigned int q_index);
 extern bool mlx5_rx_poll_locked(unsigned int q_index);
 
@@ -81,13 +90,16 @@ extern int mlx5_verbs_init_context(bool uses_qsteering);
 extern int mlx5_verbs_init(bool uses_qsteering);
 extern int mlx5_init_flow_steering(void);
 extern int mlx5_init_queue_steering(void);
+extern int mlx5_rx_stride_init(void);
+extern int mlx5_rx_stride_init_thread(void);
 
 // Lower level intialization functions
 extern int mlx5_init_cq(struct mlx5_cq *cq, struct mlx5_cqe64 *cqes,
 	                    uint32_t cqe_cnt, uint32_t *cqe_dbr);
-extern int mlx5_init_rxq_wq(struct mlx5_rxq *v, void *buf, uint32_t *dbr,
+extern int mlx5_init_rxq_wq(struct mlx5_wq *wq, void *buf, uint32_t *dbr,
 	                        uint32_t size, uint32_t stride, uint32_t lkey);
-
+extern int mlx5_init_rxq_wq_stride(struct mlx5_wq *wq, void *seg_buf, uint32_t *dbr,
+	                        uint64_t size, uint32_t stride, uint32_t lkey);
 extern int mlx5_init_txq_wq(struct mlx5_txq *v, void *buf, uint32_t *dbr,
 	                        uint32_t size, uint32_t stride, uint32_t lkey,
 	                        uint32_t sqn, void *bf_reg);
@@ -107,7 +119,7 @@ static inline unsigned int nr_inflight_tx(struct mlx5_txq *v)
  */
 static inline uint8_t cqe_status(struct mlx5_cqe64 *cqe, uint32_t cqe_cnt, uint32_t head)
 {
-	uint16_t parity = head & cqe_cnt;
+	uint64_t parity = head & cqe_cnt;
 	uint8_t op_own = ACCESS_ONCE(cqe->op_own);
 	uint8_t op_owner = op_own & MLX5_CQE_OWNER_MASK;
 	uint8_t op_code = (op_own & 0xf0) >> 4;

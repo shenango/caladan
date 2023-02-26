@@ -157,6 +157,9 @@ bool directpath_events_poll(void)
 			case MLX5_EVENT_TYPE_COMP:
 				directpath_handle_completion_eqe(eqe);
 				break;
+			case MLX5_EVENT_TYPE_CQ_ERROR:
+				directpath_handle_cq_error_eqe(eqe);
+				break;
 			default:
 				log_err("got an eqe! eqe->type: %hhu (%u)", eqe->type, eq->cons_idx);
 				break;

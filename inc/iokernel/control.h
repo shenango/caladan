@@ -17,7 +17,7 @@
  * struct control_hdr, please increment the version number!
  */
 
-#define CONTROL_HDR_VERSION 6
+#define CONTROL_HDR_VERSION 7
 
 /* The abstract namespace path for the control socket. */
 #define CONTROL_SOCK_PATH	"\0/control/iokernel.sock"
@@ -34,7 +34,7 @@ struct q_ptrs {
 	uint64_t		oldest_tsc;
 	uint64_t		rcu_gen;
 	uint64_t		run_start_tsc;
-	uint64_t		pad2;
+	uint64_t		directpath_strides_consumed;
 
 	/* second cache line contains information written by the scheduler */
 	uint64_t		curr_grant_gen;
@@ -54,6 +54,7 @@ struct congestion_info {
 
 struct runtime_info {
 	struct congestion_info congestion;
+	uint64_t directpath_strides_posted;
 	unsigned int flow_tbl[NCPU];
 };
 
@@ -99,36 +100,6 @@ enum {
 	SCHED_PRIO_BE,     /* low priority, best-effort task */
 };
 
-
-struct directpath_ring_q_spec {
-	shmptr_t buf;
-	shmptr_t dbrec;
-	uint32_t nr_entries;
-	uint32_t stride;
-};
-
-struct directpath_queue_spec {
-	uint32_t sqn;
-	uint32_t uarn;
-	uint32_t uar_offset;
-	struct directpath_ring_q_spec rx_wq;
-	struct directpath_ring_q_spec rx_cq;
-	struct directpath_ring_q_spec tx_wq;
-	struct directpath_ring_q_spec tx_cq;
-};
-
-struct directpath_spec {
-	uint32_t mr;
-	size_t va_base;
-	size_t memfd_region_size;
-
-	/* bar map */
-	off_t offs;
-	size_t bar_map_size;
-
-	struct directpath_queue_spec qs[];
-};
-
 /* describes scheduler options */
 struct sched_spec {
 	unsigned int		priority;
@@ -141,6 +112,12 @@ struct sched_spec {
 };
 
 #define CONTROL_HDR_MAGIC	0x696f6b3a /* "iok:" */
+
+enum {
+	DIRECTPATH_REQUEST_NONE = 0,
+	DIRECTPATH_REQUEST_REGULAR = 1,
+	DIRECTPATH_REQUEST_STRIDED_RMP = 2,
+};
 
 /* the main control header */
 struct control_hdr {

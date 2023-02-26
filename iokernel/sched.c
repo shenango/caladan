@@ -11,6 +11,9 @@
 #include <base/log.h>
 #include <base/cpu.h>
 
+#include <iokernel/directpath.h>
+#include <iokernel/queue.h>
+
 #include "defs.h"
 #include "sched.h"
 #include "ksched.h"
@@ -548,6 +551,8 @@ static void sched_measure_delay(struct proc *p)
 	/* zero the rxq delays */
 	memset(rxq_delay, 0, sizeof(uint64_t) * p->thread_count);
 
+	uint64_t consumed_strides = 0;
+
 	/* detect per-kthread delay */
 	for (i = 0; i < p->thread_count; i++) {
 		has_work_pending[i] = standing_queue[i] = false;
@@ -555,6 +560,14 @@ static void sched_measure_delay(struct proc *p)
 		sched_measure_kthread_delay(&p->threads[i],
 				  &total_delay[i], rxq_delay,
 				  &has_work_pending[i], &standing_queue[i]);
+		consumed_strides += ACCESS_ONCE(p->threads[i].q_ptrs->directpath_strides_consumed);
+	}
+
+	uint64_t posted_strides = ACCESS_ONCE(p->runtime_info->directpath_strides_posted);
+
+	if (posted_strides &&
+	    posted_strides - consumed_strides < DIRECTPATH_STRIDE_REFILL_THRESH_HI) {
+		rx_send_to_runtime(p, 0, RX_REFILL_BUFS, 0);
 	}
 
 	for (i = 0; i < p->thread_count; i++) {

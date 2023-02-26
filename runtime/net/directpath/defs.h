@@ -4,6 +4,7 @@
 #include <base/pci.h>
 #include <base/tcache.h>
 #include <base/thread.h>
+#include <iokernel/directpath.h>
 #include <iokernel/queue.h>
 
 #include "../defs.h"
@@ -27,9 +28,13 @@ enum {
 	DIRECTPATH_MODE_EXTERNAL,
 };
 extern int directpath_mode;
+extern bool cfg_directpath_strided;
 
-static inline unsigned int directpath_get_buf_size(void)
+static inline size_t directpath_get_buf_size(void)
 {
+	if (cfg_directpath_strided)
+		return DIRECTPATH_STRIDE_MODE_BUF_SZ;
+
 	return align_up(net_get_mtu() + RX_BUF_HEAD + RX_BUF_TAIL,
 			2 * CACHE_LINE_SIZE);
 }

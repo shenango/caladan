@@ -1,5 +1,7 @@
 #ifdef DIRECTPATH
 
+#include <signal.h>
+
 #include <util/mmio.h>
 #include <util/udma_barrier.h>
 
@@ -8,7 +10,7 @@
 #include "defs.h"
 #include "mlx5_ifc.h"
 
-#define QUEUE_DEMOTION_US 100
+#define QUEUE_DEMOTION_US 500
 
 static struct mlx5_cqe64 *get_cqe(struct cq *cq, uint32_t idx)
 {
@@ -77,6 +79,8 @@ void directpath_poll_proc(struct proc *p, uint64_t cur_tsc)
 	if (lastth->park_tsc + QUEUE_DEMOTION_US * cycles_per_us > cur_tsc)
 		return;
 
+	return;
+
 	cq = &ctx->qps[lastth - p->threads].rx_cq;
 	cons_idx = ACCESS_ONCE(lastth->q_ptrs->directpath_rx_tail);
 	directpath_arm_queue(cq, cons_idx);
@@ -98,6 +102,16 @@ void directpath_handle_completion_eqe(struct mlx5_eqe *eqe)
 	BUG_ON(cq->state != RXQ_STATE_ARMED);
 	cq->state = RXQ_STATE_ACTIVE;
 	ctx->fully_armed = false;
+}
+
+void directpath_handle_cq_error_eqe(struct mlx5_eqe *eqe)
+{
+	uint32_t cqn = be32toh(eqe->data.cq_err.cqn) & 0xffffff;
+	struct cq *cq = cqn_to_cq_map[cqn];
+	struct directpath_ctx *ctx = container_of(cq, struct directpath_ctx, qps[cq->qp_idx].rx_cq);
+	struct proc *p = ctx->p;
+	log_warn("killing proc with cq overrun");
+	kill(p->pid, SIGINT);
 }
 
 void directpath_notify_waking(struct proc *p, struct thread *th)

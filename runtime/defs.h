@@ -488,7 +488,7 @@ extern unsigned int maxks;
 extern unsigned int guaranteedks;
 extern struct kthread *ks[NCPU];
 extern bool cfg_prio_is_lc;
-extern bool cfg_request_hardware_queues;
+extern unsigned int cfg_request_hardware_queues;
 extern uint64_t cfg_ht_punish_us;
 extern uint64_t cfg_qdelay_us;
 extern uint64_t cfg_quantum_us;
@@ -569,6 +569,7 @@ struct net_driver_ops {
 	int (*register_flow)(unsigned int affininty, struct trans_entry *e, void **handle_out);
 	int (*deregister_flow)(struct trans_entry *e, void *handle);
 	uint32_t (*get_flow_affinity)(uint8_t ipproto, uint16_t local_port, struct netaddr remote);
+	void (*trigger_rx_refill)(void);
 };
 
 extern struct net_driver_ops net_ops;
@@ -688,6 +689,7 @@ extern int tcp_init_late(void);
 extern int rcu_init_late(void);
 extern int directpath_init_late(void);
 
+struct directpath_spec;
 extern int mlx5_init_ext_late(struct directpath_spec *spec, int bar_fd, int mem_fd);
 
 /* configuration loading */
