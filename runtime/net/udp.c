@@ -48,6 +48,7 @@ static int udp_send_raw(struct mbuf *m, size_t len,
 struct udpconn {
 	struct trans_entry	e;
 	bool			shutdown;
+	bool			nonblocking;
 
 	/* ingress support */
 	spinlock_t		inq_lock;
@@ -123,6 +124,7 @@ static const struct trans_ops udp_conn_ops = {
 static void udp_init_conn(udpconn_t *c)
 {
 	c->shutdown = false;
+	c->nonblocking = false;
 
 	/* initialize ingress fields */
 	spin_lock_init(&c->inq_lock);
@@ -308,8 +310,13 @@ ssize_t udp_read_from(udpconn_t *c, void *buf, size_t len,
 	spin_lock_np(&c->inq_lock);
 
 	/* block until there is an actionable event */
-	while (mbufq_empty(&c->inq) && !c->inq_err && !c->shutdown)
+	while (mbufq_empty(&c->inq) && !c->inq_err && !c->shutdown) {
+		if (c->nonblocking) {
+			spin_unlock_np(&c->inq_lock);
+			return -EAGAIN;
+		}
 		waitq_wait(&c->inq_wq, &c->inq_lock);
+	}
 
 	/* is the socket drained and shutdown? */
 	if (mbufq_empty(&c->inq) && c->shutdown) {
@@ -400,8 +407,13 @@ ssize_t udp_write_to(udpconn_t *c, const void *buf, size_t len,
 	spin_lock_np(&c->outq_lock);
 
 	/* block until there is an actionable event */
-	while (c->outq_len >= c->outq_cap && !c->shutdown)
+	while (c->outq_len >= c->outq_cap && !c->shutdown) {
+		if (c->nonblocking) {
+			spin_unlock_np(&c->outq_lock);
+			return -EAGAIN;
+		}
 		waitq_wait(&c->outq_wq, &c->outq_lock);
+	}
 
 	/* is the socket shutdown? */
 	if (c->shutdown) {
@@ -532,6 +544,19 @@ void udp_close(udpconn_t *c)
 
 	if (free_conn)
 		udp_conn_put(c);
+}
+
+void udp_set_nonblocking(udpconn_t *c, bool nonblocking)
+{
+	spin_lock_np(&c->outq_lock);
+	spin_lock(&c->inq_lock);
+	c->nonblocking = nonblocking;
+	if (nonblocking) {
+		waitq_release(&c->inq_wq);
+		waitq_release(&c->outq_wq);
+	}
+	spin_unlock(&c->inq_lock);
+	spin_unlock_np(&c->outq_lock);
 }
 
 

@@ -48,6 +48,7 @@ extern ssize_t udp_write(udpconn_t *c, const void *buf, size_t len);
 extern void udp_shutdown(udpconn_t *c);
 extern void udp_close(udpconn_t *c);
 
+extern void udp_set_nonblocking(udpconn_t *c, bool nonblocking);
 
 /*
  * UDP Parallel API

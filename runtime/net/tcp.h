@@ -87,21 +87,22 @@ struct tcpconn {
 	struct list_node	global_link;
 	struct list_node	queue_link;
 	spinlock_t		lock;
+	bool			nonblocking;
 	struct kref		ref;
 	int			err; /* error code for read(), write(), etc. */
 	uint32_t		winmax; /* initial receive window size */
 
 	/* ingress path */
-	unsigned int		rx_closed:1;
-	unsigned int		rx_exclusive:1;
+	bool			rx_closed;
+	bool			rx_exclusive;
 	waitq_t			rx_wq;
 	unsigned int		rxq_ooo_len;
 	struct list_head	rxq_ooo;
 	struct list_head	rxq;
 
 	/* egress path */
-	unsigned int		tx_closed:1;
-	unsigned int		tx_exclusive:1;
+	bool			tx_closed;
+	bool			tx_exclusive;
 	waitq_t			tx_wq;
 	uint32_t		tx_last_ack;
 	uint32_t		tx_last_win;
