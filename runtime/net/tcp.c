@@ -197,7 +197,6 @@ void tcp_conn_set_state(tcpconn_t *c, int new_state)
 	if (c->pcb.state < TCP_STATE_ESTABLISHED &&
 	    new_state >= TCP_STATE_ESTABLISHED) {
 		waitq_release(&c->tx_wq);
-		poll_set(&c->poll_src, POLLOUT);
 	}
 
 	tcp_debug_state_change(c, c->pcb.state, new_state);
