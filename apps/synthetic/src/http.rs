@@ -191,7 +191,7 @@ impl LoadgenProtocol for HttpProtocol {
                 let mut to_read = total_req_bytes - curbytes;
                 while to_read > 0 {
                     let rlen = min(to_read, buf.get_free_space());
-                    sock.read_exact(buf.get_empty_buf())?;
+                    sock.read_exact(&mut buf.get_empty_buf()[..rlen])?;
                     to_read -= rlen;
                 }
             }
