@@ -21,7 +21,7 @@ use arrayvec::ArrayVec;
 use std::collections::BTreeMap;
 use std::f32::INFINITY;
 use std::io;
-use std::io::{ErrorKind, Read, Write};
+use std::io::{Error, ErrorKind, Read, Write};
 use std::net::{Ipv4Addr, SocketAddrV4};
 use std::slice;
 use std::str::FromStr;
@@ -64,6 +64,9 @@ use dns::DnsProtocol;
 
 mod reflex;
 use reflex::ReflexProtocol;
+
+mod http;
+use http::HttpProtocol;
 
 #[derive(Copy, Clone, Debug)]
 enum Distribution {
@@ -123,9 +126,73 @@ pub enum Transport {
     Tcp,
 }}
 
+pub struct Buffer<'a> {
+    buf: &'a mut [u8],
+    head: usize,
+    tail: usize,
+}
+
+impl<'a> Buffer<'a> {
+    pub fn new(inbuf: &mut [u8]) -> Buffer {
+        Buffer {
+            buf: inbuf,
+            head: 0,
+            tail: 0,
+        }
+    }
+
+    pub fn data_size(&self) -> usize {
+        self.head - self.tail
+    }
+
+    pub fn get_data(&self) -> &[u8] {
+        &self.buf[self.tail..self.head]
+    }
+
+    pub fn push_data(&mut self, size: usize) {
+        self.head += size;
+        assert!(self.head <= self.buf.len());
+    }
+
+    pub fn pull_data(&mut self, size: usize) {
+        assert!(size <= self.data_size());
+        self.tail += size;
+    }
+
+    pub fn get_free_space(&self) -> usize {
+        self.buf.len() - self.head
+    }
+
+    pub fn get_empty_buf(&mut self) -> &mut [u8] {
+        &mut self.buf[self.head..]
+    }
+
+    pub fn try_shrink(&mut self) -> io::Result<()> {
+        if self.data_size() == 0 {
+            self.head = 0;
+            self.tail = 0;
+            return Ok(());
+        }
+
+        if self.head < self.buf.len() {
+            return Ok(());
+        }
+
+        if self.data_size() == self.buf.len() {
+            return Err(Error::new(ErrorKind::Other, "Need larger buffers"));
+        }
+
+        self.buf.as_mut().copy_within(self.tail..self.head, 0);
+        self.head = self.data_size();
+        self.tail = 0;
+        Ok(())
+    }
+}
+
 trait LoadgenProtocol: Send + Sync {
     fn gen_req(&self, i: usize, p: &Packet, buf: &mut Vec<u8>);
-    fn read_response(&self, sock: &Connection, scratch: &mut [u8]) -> io::Result<(usize, u64)>;
+    fn uses_ordered_requests(&self) -> bool;
+    fn read_response(&self, sock: &Connection, scratch: &mut Buffer) -> io::Result<(usize, u64)>;
 }
 
 arg_enum! {
@@ -265,6 +332,7 @@ fn run_memcached_preload(
 
                 let mut vec_s: Vec<u8> = Vec::with_capacity(4096);
                 let mut vec_r: Vec<u8> = vec![0; 4096];
+                let mut buf = Buffer::new(&mut vec_r[..]);
                 for n in 0..perthread {
                     vec_s.clear();
                     proto.set_request((i * perthread + n) as u64, 0, &mut vec_s);
@@ -274,7 +342,7 @@ fn run_memcached_preload(
                         return false;
                     }
 
-                    if let Err(e) = proto.read_response(&sock1, &mut vec_r[..]) {
+                    if let Err(e) = proto.read_response(&sock1, &mut buf) {
                         println!("preload receive ({}/{}): {}", n, perthread, e);
                         return false;
                     }
@@ -636,10 +704,17 @@ fn run_client_worker(
     let receive_thread = backend.spawn_thread(move || {
         let mut recv_buf = vec![0; 4096];
         let mut receive_times = vec![None; packets_per_thread];
+        let mut buf = Buffer::new(&mut recv_buf);
+        let use_ordering = rproto.uses_ordered_requests();
         wg2.done();
-        for _ in 0..receive_times.len() {
-            match rproto.read_response(&socket2, &mut recv_buf[..]) {
-                Ok((idx, tsc)) => receive_times[idx] = Some((Instant::now(), tsc)),
+        for i in 0..receive_times.len() {
+            match rproto.read_response(&socket2, &mut buf) {
+                Ok((mut idx, tsc)) => {
+                    if use_ordering {
+                        idx = i;
+                    }
+                    receive_times[idx] = Some((Instant::now(), tsc));
+                }
                 Err(e) => {
                     match e.raw_os_error() {
                         Some(-103) | Some(-104) => break,
@@ -706,7 +781,11 @@ fn run_client_worker(
         .join()
         .unwrap()
         .into_iter()
-        .zip(packets.iter_mut())
+        .zip(
+            packets
+                .iter_mut()
+                .filter(|p| !proto.uses_ordered_requests() || p.actual_start.is_some()),
+        )
         .for_each(|(c, p)| {
             if let Some((inst, tsc)) = c {
                 (*p).completion_time = Some(inst - start);
@@ -988,7 +1067,7 @@ fn main() {
                 .short("p")
                 .long("protocol")
                 .value_name("PROTOCOL")
-                .possible_values(&["synthetic", "memcached", "dns", "reflex"])
+                .possible_values(&["synthetic", "memcached", "dns", "reflex", "http"])
                 .default_value("synthetic")
                 .help("Server protocol"),
         )
@@ -1096,6 +1175,7 @@ fn main() {
         .args(&MemcachedProtocol::args())
         .args(&DnsProtocol::args())
         .args(&ReflexProtocol::args())
+        .args(&HttpProtocol::args())
         .get_matches();
 
     let addr: SocketAddrV4 = FromStr::from_str(matches.value_of("ADDR").unwrap()).unwrap();
@@ -1115,6 +1195,7 @@ fn main() {
         "memcached" => Arc::new(Box::new(MemcachedProtocol::with_args(&matches, tport))),
         "dns" => Arc::new(Box::new(DnsProtocol::with_args(&matches, tport))),
         "reflex" => Arc::new(Box::new(ReflexProtocol::with_args(&matches, tport))),
+        "http" => Arc::new(Box::new(HttpProtocol::with_args(&matches, tport))),
         _ => unreachable!(),
     };
 

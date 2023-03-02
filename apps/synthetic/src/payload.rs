@@ -12,6 +12,7 @@ pub struct Payload {
 
 pub const PAYLOAD_SIZE: usize = 24;
 
+use Buffer;
 use Connection;
 use LoadgenProtocol;
 use Transport;
@@ -20,6 +21,10 @@ use Transport;
 pub struct SyntheticProtocol {}
 
 impl LoadgenProtocol for SyntheticProtocol {
+    fn uses_ordered_requests(&self) -> bool {
+        false
+    }
+
     fn gen_req(&self, i: usize, p: &Packet, buf: &mut Vec<u8>) {
         Payload {
             work_iterations: p.work_iterations,
@@ -30,7 +35,8 @@ impl LoadgenProtocol for SyntheticProtocol {
         .unwrap();
     }
 
-    fn read_response(&self, mut sock: &Connection, scratch: &mut [u8]) -> io::Result<(usize, u64)> {
+    fn read_response(&self, mut sock: &Connection, buf: &mut Buffer) -> io::Result<(usize, u64)> {
+        let scratch = buf.get_empty_buf();
         sock.read_exact(&mut scratch[..PAYLOAD_SIZE])?;
         let payload = Payload::deserialize(&mut &scratch[..])?;
         Ok((payload.index as usize, payload.randomness))
