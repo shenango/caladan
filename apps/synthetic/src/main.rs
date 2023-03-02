@@ -1085,6 +1085,13 @@ fn main() {
                 .default_value("")
                 .help("loadshift spec"),
         )
+        .arg(
+            Arg::with_name("intersample_sleep")
+                .long("intersample_sleep")
+                .takes_value(true)
+                .default_value("0")
+                .help("seconds to sleep between samples"),
+        )
         .args(&SyntheticProtocol::args())
         .args(&MemcachedProtocol::args())
         .args(&DnsProtocol::args())
@@ -1111,6 +1118,7 @@ fn main() {
         _ => unreachable!(),
     };
 
+    let intersample_sleep = value_t_or_exit!(matches, "intersample_sleep", u64);
     let output = value_t_or_exit!(matches, "output", OutputMode);
     let mean = value_t_or_exit!(matches, "mean", f64);
     let distribution = match matches.value_of("distribution").unwrap() {
@@ -1264,8 +1272,8 @@ fn main() {
                     // Run at full pps 3 times for 20 seconds
                     for _ in 0..1 {
                     let sched = gen_classic_packet_schedule(
-                        Duration::from_secs(2),
-                        packets_per_second,
+                        Duration::from_secs(1),
+                        (0.75 * (packets_per_second as f64)) as usize,
                         OutputMode::Silent,
                         distribution,
                         20,
@@ -1283,6 +1291,7 @@ fn main() {
                             0,
                         );
                     }
+                    backend.sleep(Duration::from_secs(intersample_sleep));
                 }
 
                 let step_size = (packets_per_second - start_packets_per_second) / samples;
@@ -1306,6 +1315,7 @@ fn main() {
                         sched,
                         j,
                     ) { break; }
+                    if j != samples { backend.sleep(Duration::from_secs(intersample_sleep)); }
                 }
                 if let Some(ref mut g) = barrier_group {
                     g.barrier();
