@@ -1,7 +1,6 @@
 #![allow(non_upper_case_globals)]
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
-#![feature(asm_sym)]
 #![feature(thread_local)]
 #![feature(new_uninit)]
 #![feature(get_mut_unchecked)]
@@ -17,9 +16,6 @@ use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-// https://github.com/rust-lang/rust-bindgen/issues/1651
-#[allow(deref_nullptr)]
-#[allow(unaligned_references)]
 pub mod ffi {
     include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 }
