@@ -7,6 +7,8 @@
  * RX queue.
  */
 
+#include <poll.h>
+
 #include <base/stddef.h>
 #include <runtime/smalloc.h>
 #include <net/ip.h>
@@ -266,8 +268,10 @@ void tcp_rx_conn(struct trans_entry *e, struct mbuf *m)
 	store_release(&c->pcb.rcv_nxt_wnd, nxt_wnd);
 
 	/* should we wake a thread */
-	if (!list_empty(&c->rxq) || (tcphdr->flags & TCP_PUSH) > 0)
+	if (!list_empty(&c->rxq) || (tcphdr->flags & TCP_PUSH) > 0) {
 		rx_th = waitq_signal(&c->rx_wq, &c->lock);
+		poll_set(&c->poll_src, POLLIN);
+	}
 
 	/* handle delayed acks */
 	if (++c->acks_delayed_cnt >= 2) {
@@ -492,8 +496,10 @@ __tcp_rx_conn(tcpconn_t *c, struct mbuf *m, uint32_t ack, uint32_t snd_nxt,
 		do_ack = true;
 		goto done;
 	}
-	if (snd_was_full && !tcp_is_snd_full(c))
+	if (snd_was_full && !tcp_is_snd_full(c)) {
+		poll_set(&c->poll_src, POLLOUT);
 		waitq_release_start(&c->tx_wq, &waiters);
+	}
 
 	/*
 	 * Fast retransmit -> detect a duplicate ACK if:
@@ -554,6 +560,7 @@ __tcp_rx_conn(tcpconn_t *c, struct mbuf *m, uint32_t ack, uint32_t snd_nxt,
 			assert(!list_empty(&c->rxq));
 			assert(do_drop == false);
 			rx_th = waitq_signal(&c->rx_wq, &c->lock);
+			poll_set(&c->poll_src, POLLIN);
 		}
 		if (++c->acks_delayed_cnt >= 2) {
 			do_ack = true;

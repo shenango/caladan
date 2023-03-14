@@ -9,6 +9,29 @@
 #include <runtime/thread.h>
 #include <runtime/sync.h>
 
+// External Poll Support
+
+typedef void (*poll_notif_fn_t)(unsigned long pdata, unsigned int event_mask);
+
+typedef struct poll_source {
+	poll_notif_fn_t set_fn;
+	poll_notif_fn_t clear_fn;
+	unsigned long poller_data;
+} poll_source_t;
+
+static inline void poll_clear(poll_source_t *src, unsigned int event_mask)
+{
+	if (src->clear_fn)
+		src->clear_fn(src->poller_data, event_mask);
+}
+
+static inline void poll_set(poll_source_t *src, unsigned int event_mask)
+{
+	if (src->set_fn)
+		src->set_fn(src->poller_data, event_mask);
+}
+
+
 typedef struct poll_waiter {
 	spinlock_t		lock;
 	struct list_head	triggered;

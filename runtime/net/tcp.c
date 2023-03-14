@@ -3,6 +3,7 @@
  */
 
 #include <string.h>
+#include <poll.h>
 
 #include <base/stddef.h>
 #include <base/hash.h>
@@ -231,6 +232,7 @@ void tcp_conn_set_state(tcpconn_t *c, int new_state)
 	if (c->pcb.state < TCP_STATE_ESTABLISHED &&
 	    new_state >= TCP_STATE_ESTABLISHED) {
 		waitq_release(&c->tx_wq);
+		poll_set(&c->poll_src, POLLOUT);
 	}
 
 	tcp_debug_state_change(c, c->pcb.state, new_state);
@@ -341,6 +343,9 @@ tcpconn_t *tcp_conn_alloc(void)
 	c->pcb.rcv_wnd = TCP_WIN;
 	c->pcb.rcv_mss = tcp_calculate_mss(net_get_mtu());
 
+	c->poll_src.set_fn = NULL;
+	c->poll_src.clear_fn = NULL;
+
 	return c;
 }
 
@@ -435,6 +440,8 @@ struct tcpqueue {
 	bool			shutdown;
 	bool			nonblocking;
 
+	poll_source_t	poll_src;
+
 	struct kref ref;
 	struct flow_registration flow;
 };
@@ -477,6 +484,7 @@ static void tcp_queue_recv(struct trans_entry *e, struct mbuf *m)
 	spin_lock_np(&q->l);
 	list_add_tail(&q->conns, &c->queue_link);
 	th = waitq_signal(&q->wq, &q->l);
+	poll_set(&q->poll_src, POLLIN);
 	spin_unlock_np(&q->l);
 	waitq_signal_finish(th);
 
@@ -536,6 +544,9 @@ int tcp_listen(struct netaddr laddr, int backlog, tcpqueue_t **q_out)
 	q->nonblocking = false;
 	kref_init(&q->ref);
 
+	q->poll_src.set_fn = NULL;
+	q->poll_src.clear_fn = NULL;
+
 
 	if (laddr.port == 0)
 		ret = trans_table_add_with_ephemeral_port(&q->e);
@@ -588,6 +599,10 @@ int tcp_accept(tcpqueue_t *q, tcpconn_t **c_out)
 	q->backlog++;
 	c = list_pop(&q->conns, tcpconn_t, queue_link);
 	assert(c != NULL);
+
+	if (list_empty(&q->conns) && !q->shutdown)
+		poll_clear(&q->poll_src, POLLIN);
+
 	spin_unlock_np(&q->l);
 
 	*c_out = c;
@@ -600,6 +615,7 @@ static void __tcp_qshutdown(tcpqueue_t *q)
 	spin_lock_np(&q->l);
 	BUG_ON(q->shutdown);
 	q->shutdown = true;
+	poll_set(&q->poll_src, POLLRDHUP | POLLHUP | POLLIN);
 	spin_unlock_np(&q->l);
 
 	/* prevent ingress receive and error dispatch (after RCU period) */
@@ -644,6 +660,9 @@ void tcp_qclose(tcpqueue_t *q)
 		list_del_from(&q->conns, &c->queue_link);
 		tcp_close(c);
 	}
+
+	q->poll_src.set_fn = NULL;
+	q->poll_src.clear_fn = NULL;
 
 	kref_put(&q->ref, tcp_queue_release_ref);
 }
@@ -888,6 +907,10 @@ static ssize_t tcp_read_wait(tcpconn_t *c, size_t len,
 		      c->tx_last_ack + c->tx_last_win + c->winmax / 4)) {
 		do_ack = true;
 	}
+
+	if (list_empty(&c->rxq))
+		poll_clear(&c->poll_src, POLLIN);
+
 	spin_unlock_np(&c->lock);
 
 	if (do_ack)
@@ -1117,6 +1140,10 @@ static void tcp_write_finish(tcpconn_t *c)
 
 	tcp_timer_update(c);
 	waitq_release_start(&c->tx_wq, &waiters);
+
+	if (tcp_is_snd_full(c))
+		poll_clear(&c->poll_src, POLLOUT);
+
 	spin_unlock_np(&c->lock);
 
 	tcp_tx_fast_retransmit_finish(c, retransmit);
@@ -1232,6 +1259,7 @@ void tcp_conn_fail(tcpconn_t *c, int err)
 	if (!c->tx_closed) {
 		store_release(&c->tx_closed, true);
 		waitq_release(&c->tx_wq);
+		poll_set(&c->poll_src, POLLHUP);
 	}
 
 	/* will be freed by the writer if one is busy */
@@ -1264,6 +1292,7 @@ void tcp_conn_shutdown_rx(tcpconn_t *c)
 	if (c->rx_closed)
 		return;
 
+	poll_set(&c->poll_src, POLLRDHUP | POLLIN);
 	c->rx_closed = true;
 	waitq_release(&c->rx_wq);
 }
@@ -1297,6 +1326,7 @@ static int tcp_conn_shutdown_tx(tcpconn_t *c)
 	else
 		WARN();
 
+	poll_set(&c->poll_src, POLLHUP);
 	c->tx_closed = true;
 	waitq_release(&c->tx_wq);
 
@@ -1381,6 +1411,10 @@ void tcp_close(tcpconn_t *c)
 	if (ret)
 		tcp_conn_fail(c, -ret);
 	tcp_conn_shutdown_rx(c);
+
+	c->poll_src.set_fn = NULL;
+	c->poll_src.clear_fn = NULL;
+
 	spin_unlock_np(&c->lock);
 
 	tcp_conn_put(c);
@@ -1403,6 +1437,55 @@ void tcpq_set_nonblocking(tcpqueue_t *q, bool nonblocking)
 	q->nonblocking = nonblocking;
 	if (nonblocking)
 		waitq_release(&q->wq);
+	spin_unlock_np(&q->l);
+}
+
+
+void tcp_poll_install_cb(tcpconn_t *c, poll_notif_fn_t setfn,
+			                    poll_notif_fn_t clearfn, unsigned long data)
+{
+	unsigned int flags = 0;
+
+	spin_lock_np(&c->lock);
+	c->poll_src.set_fn = setfn;
+	c->poll_src.clear_fn = clearfn;
+	c->poll_src.poller_data = data;
+
+	if (c->pcb.state == TCP_STATE_ESTABLISHED && !tcp_is_snd_full(c))
+		flags |= POLLOUT;
+
+	if (!list_empty(&c->rxq))
+		flags |= POLLIN;
+
+	if (c->rx_closed)
+		flags |= POLLRDHUP;
+
+	if (c->tx_closed)
+		flags |= POLLHUP;
+
+	poll_set(&c->poll_src, flags);
+
+	spin_unlock_np(&c->lock);
+}
+
+void tcpq_poll_install_cb(tcpqueue_t *q, poll_notif_fn_t setfn,
+			                    poll_notif_fn_t clearfn, unsigned long data)
+{
+	unsigned int flags = 0;
+
+	spin_lock_np(&q->l);
+	q->poll_src.set_fn = setfn;
+	q->poll_src.clear_fn = clearfn;
+	q->poll_src.poller_data = data;
+
+	if (!list_empty(&q->conns))
+		flags |= POLLIN;
+
+	if (q->shutdown)
+		flags |= POLLIN | POLLRDHUP | POLLHUP;
+
+	poll_set(&q->poll_src, flags);
+
 	spin_unlock_np(&q->l);
 }
 

@@ -9,6 +9,7 @@
 #include <net/ip.h>
 #include <net/udp.h>
 #include <runtime/net.h>
+#include <runtime/poll.h>
 #include <sys/uio.h>
 
 /* the maximum possible payload size (for the largest possible MTU) */
@@ -49,6 +50,8 @@ extern void udp_shutdown(udpconn_t *c);
 extern void udp_close(udpconn_t *c);
 
 extern void udp_set_nonblocking(udpconn_t *c, bool nonblocking);
+extern void udp_poll_install_cb(udpconn_t *c, poll_notif_fn_t setfn,
+			                    poll_notif_fn_t clearfn, unsigned long data);
 
 /*
  * UDP Parallel API

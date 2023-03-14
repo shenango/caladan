@@ -5,6 +5,7 @@
 #pragma once
 
 #include <runtime/net.h>
+#include <runtime/poll.h>
 #include <sys/uio.h>
 #include <sys/socket.h>
 
@@ -41,3 +42,9 @@ extern ssize_t tcp_writev(tcpconn_t *c, const struct iovec *iov, int iovcnt);
 extern int tcp_shutdown(tcpconn_t *c, int how);
 extern void tcp_abort(tcpconn_t *c);
 extern void tcp_close(tcpconn_t *c);
+
+extern void tcp_poll_install_cb(tcpconn_t *c, poll_notif_fn_t setfn,
+			                    poll_notif_fn_t clearfn, unsigned long data);
+extern void tcpq_poll_install_cb(tcpqueue_t *q, poll_notif_fn_t setfn,
+			                    poll_notif_fn_t clearfn, unsigned long data);
+

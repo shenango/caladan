@@ -92,6 +92,8 @@ struct tcpconn {
 	int			err; /* error code for read(), write(), etc. */
 	uint32_t		winmax; /* initial receive window size */
 
+	poll_source_t	poll_src;
+
 	/* ingress path */
 	bool			rx_closed;
 	bool			rx_exclusive;

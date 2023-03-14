@@ -3,6 +3,7 @@
  */
 
 #include <string.h>
+#include <poll.h>
 
 #include <base/hash.h>
 #include <base/kref.h>
@@ -71,6 +72,9 @@ struct udpconn {
 	int			outq_len;
 	waitq_t			outq_wq;
 
+	/* protected by @inq_lock (less likely that POLLOUT will be cleared) */
+	poll_source_t		poll_src;
+
 	struct kref		ref;
 	struct flow_registration		flow;
 };
@@ -96,7 +100,8 @@ static void udp_conn_recv(struct trans_entry *e, struct mbuf *m)
 
 	/* enqueue the packet on the ingress queue */
 	mbufq_push_tail(&c->inq, m);
-	c->inq_len++;
+	if (c->inq_len++ == 0)
+		poll_set(&c->poll_src, POLLIN);
 
 	/* wake up a waiter */
 	th = waitq_signal(&c->inq_wq, &c->inq_lock);
@@ -115,6 +120,10 @@ static void udp_conn_err(struct trans_entry *e, int err)
 	spin_lock_np(&c->inq_lock);
 	do_release = !c->inq_err && !c->shutdown;
 	c->inq_err = err;
+
+	if (do_release)
+		poll_set(&c->poll_src, POLLERR);
+
 	spin_unlock_np(&c->inq_lock);
 
 	if (do_release)
@@ -148,6 +157,9 @@ static void udp_init_conn(udpconn_t *c)
 	waitq_init(&c->outq_wq);
 
 	kref_init(&c->ref);
+
+	c->poll_src.set_fn = NULL;
+	c->poll_src.clear_fn = NULL;
 }
 
 static void udp_finish_release_conn(struct rcu_head *h)
@@ -290,6 +302,15 @@ int udp_set_buffers(udpconn_t *c, int read_mbufs, int write_mbufs)
 	c->inq_cap = read_mbufs;
 	c->outq_cap = write_mbufs;
 
+	spin_lock_np(&c->inq_lock);
+
+	if (c->outq_len < c->outq_cap)
+		poll_set(&c->poll_src, POLLOUT);
+	else
+		poll_clear(&c->poll_src, POLLOUT);
+
+	spin_unlock_np(&c->inq_lock);
+
 	/* TODO: free mbufs that go over new limits? */
 	return 0;
 }
@@ -338,7 +359,8 @@ ssize_t udp_read_from(udpconn_t *c, void *buf, size_t len,
 
 	/* pop an mbuf and deliver the payload */
 	m = mbufq_pop_head(&c->inq);
-	c->inq_len--;
+	if (--c->inq_len == 0 && !c->shutdown)
+		poll_clear(&c->poll_src, POLLIN);
 	spin_unlock_np(&c->inq_lock);
 
 	ret = MIN(len, mbuf_length(m));
@@ -364,7 +386,11 @@ static void udp_tx_release_mbuf(struct mbuf *m)
 	bool free_conn;
 
 	spin_lock_np(&c->outq_lock);
-	c->outq_len--;
+	if (c->outq_len-- == c->outq_cap) {
+		spin_lock(&c->inq_lock);
+		poll_set(&c->poll_src, POLLOUT);
+		spin_unlock(&c->inq_lock);
+	}
 	free_conn = (c->outq_free && c->outq_len == 0);
 	if (!c->shutdown)
 		th = waitq_signal(&c->outq_wq, &c->outq_lock);
@@ -427,7 +453,11 @@ ssize_t udp_write_to(udpconn_t *c, const void *buf, size_t len,
 		return -EPIPE;
 	}
 
-	c->outq_len++;
+	if (++c->outq_len >= c->outq_cap) {
+		spin_lock(&c->inq_lock);
+		poll_clear(&c->poll_src, POLLOUT);
+		spin_unlock(&c->inq_lock);
+	}
 	spin_unlock_np(&c->outq_lock);
 
 	m = net_tx_alloc_mbuf_sz(udp_headroom(), len);
@@ -487,12 +517,13 @@ ssize_t udp_write(udpconn_t *c, const void *buf, size_t len)
 
 static void __udp_shutdown(udpconn_t *c)
 {
-	spin_lock_np(&c->inq_lock);
 	spin_lock_np(&c->outq_lock);
+	spin_lock(&c->inq_lock);
 	BUG_ON(c->shutdown);
 	c->shutdown = true;
+	poll_set(&c->poll_src, POLLIN | POLLHUP | POLLRDHUP);
+	spin_unlock(&c->inq_lock);
 	spin_unlock_np(&c->outq_lock);
-	spin_unlock_np(&c->inq_lock);
 
 	/* prevent ingress receive and error dispatch (after RCU period) */
 	trans_table_remove(&c->e);
@@ -540,6 +571,9 @@ void udp_close(udpconn_t *c)
 		mbuf_free(m);
 	}
 
+	c->poll_src.set_fn = NULL;
+	c->poll_src.clear_fn = NULL;
+
 	spin_lock_np(&c->outq_lock);
 	free_conn = c->outq_len == 0;
 	c->outq_free = true;
@@ -563,6 +597,30 @@ void udp_set_nonblocking(udpconn_t *c, bool nonblocking)
 	}
 	spin_unlock(&c->inq_lock);
 	spin_unlock_np(&c->outq_lock);
+}
+
+void udp_poll_install_cb(udpconn_t *c, poll_notif_fn_t setfn,
+			                    poll_notif_fn_t clearfn, unsigned long data)
+{
+	unsigned int flags = 0;
+
+	spin_lock_np(&c->inq_lock);
+	c->poll_src.set_fn = setfn;
+	c->poll_src.clear_fn = clearfn;
+	c->poll_src.poller_data = data;
+
+	if (c->outq_len < c->outq_cap)
+		flags |= POLLOUT;
+
+	if (c->inq_len)
+		flags |= POLLIN;
+
+	if (c->shutdown)
+		flags |= POLLHUP | POLLRDHUP;
+
+	poll_set(&c->poll_src, flags);
+
+	spin_unlock_np(&c->inq_lock);
 }
 
 
