@@ -405,6 +405,11 @@ struct tcpqueue {
 	struct flow_registration flow;
 };
 
+struct netaddr tcpq_local_addr(tcpqueue_t *q)
+{
+	return q->e.laddr;
+}
+
 static void tcp_queue_recv(struct trans_entry *e, struct mbuf *m)
 {
 	tcpqueue_t *q = container_of(e, tcpqueue_t, e);
@@ -492,7 +497,11 @@ int tcp_listen(struct netaddr laddr, int backlog, tcpqueue_t **q_out)
 	q->nonblocking = false;
 	kref_init(&q->ref);
 
-	ret = trans_table_add(&q->e);
+
+	if (laddr.port == 0)
+		ret = trans_table_add_with_ephemeral_port(&q->e);
+	else
+		ret = trans_table_add(&q->e);
 	if (ret) {
 		sfree(q);
 		return ret;
