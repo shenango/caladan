@@ -21,11 +21,8 @@ static void tcp_tx_release_mbuf(struct mbuf *m)
 static uint16_t tcp_hdr_chksum(uint32_t local_ip, uint32_t remote_ip,
 			       uint16_t len)
 {
-
-#ifdef DIRECTPATH
-	if (cfg_directpath_enabled)
+	if (cfg_directpath_enabled())
 		return 0;
-#endif
 
 	return ipv4_phdr_cksum(IPPROTO_TCP, local_ip, remote_ip, len);
 }

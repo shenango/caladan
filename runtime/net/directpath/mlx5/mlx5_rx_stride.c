@@ -27,12 +27,10 @@ BUILD_ASSERT(DIRECTPATH_NUM_STRIDES <= UINT16_MAX);
 static struct slab mbuf_slab;
 static struct tcache *mbuf_tcache;
 static DEFINE_PERTHREAD(struct tcache_perthread, mbuf_pt);
-BUILD_ASSERT(PGSIZE_2MB % DIRECTPATH_STRIDE_MODE_BUF_SZ == 0);
-
 
 static inline bool shared_rmp_enabled(void)
 {
-	return directpath_mode == DIRECTPATH_MODE_EXTERNAL;
+	return cfg_directpath_mode == DIRECTPATH_MODE_EXTERNAL;
 }
 
 static struct mlx5_wq *get_rx_wq(struct mlx5_rxq *v)
@@ -313,29 +311,8 @@ int mlx5_gather_rx_strided(struct mlx5_rxq *v, struct mbuf **ms,
 	return rx_cnt;
 }
 
-int mlx5_rx_stride_init_thread(void)
+int mlx5_rx_stride_init_bufs(void)
 {
-	if (!cfg_directpath_strided)
-		return 0;
-
-	myk()->q_ptrs->directpath_strides_consumed = 0;
-
-	tcache_init_perthread(mbuf_tcache, &perthread_get(mbuf_pt));
-	return 0;
-}
-
-int mlx5_rx_stride_init(void)
-{
-	int ret;
-
-	ret = slab_create(&mbuf_slab, "mbufs", sizeof(struct mbuf), 0);
-	if (ret)
-		return ret;
-
-	mbuf_tcache = slab_create_tcache(&mbuf_slab, TCACHE_DEFAULT_MAG_SIZE);
-	if (!mbuf_tcache)
-		return -ENOMEM;
-
 	nrbufs = iok.rx_len / DIRECTPATH_STRIDE_MODE_BUF_SZ;
 	nrbufs = align_up(nrbufs, CACHE_LINE_SIZE / sizeof(uint16_t));
 
@@ -354,4 +331,36 @@ int mlx5_rx_stride_init(void)
 	}
 
 	return 0;
+}
+
+int mlx5_rx_stride_init_thread(void)
+{
+	if (!cfg_directpath_strided)
+		return 0;
+
+	myk()->q_ptrs->directpath_strides_consumed = 0;
+
+	tcache_init_perthread(mbuf_tcache, &perthread_get(mbuf_pt));
+	return 0;
+}
+
+int mlx5_rx_stride_init(void)
+{
+	int ret;
+
+	if (!cfg_directpath_strided)
+		return 0;
+
+	ret = slab_create(&mbuf_slab, "mbufs", sizeof(struct mbuf), 0);
+	if (ret)
+		return ret;
+
+	mbuf_tcache = slab_create_tcache(&mbuf_slab, TCACHE_DEFAULT_MAG_SIZE);
+	if (!mbuf_tcache)
+		return -ENOMEM;
+
+	if (cfg_directpath_external())
+		return 0;
+
+	return mlx5_rx_stride_init_bufs();
 }

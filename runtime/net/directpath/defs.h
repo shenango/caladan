@@ -21,15 +21,6 @@
 /* some NICs expect enough padding for CRC etc., even if they strip it */
 #define RX_BUF_TAIL			64
 
-enum {
-	DIRECTPATH_MODE_ALLOW_ANY = 0,
-	DIRECTPATH_MODE_FLOW_STEERING,
-	DIRECTPATH_MODE_QUEUE_STEERING,
-	DIRECTPATH_MODE_EXTERNAL,
-};
-extern int directpath_mode;
-extern bool cfg_directpath_strided;
-
 static inline size_t directpath_get_buf_size(void)
 {
 	if (cfg_directpath_strided)

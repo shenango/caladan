@@ -24,9 +24,31 @@ struct net_driver_ops net_ops;
 unsigned int eth_mtu = ETH_DEFAULT_MTU;
 
 /* TX buffer allocation */
-struct mempool net_tx_buf_mp;
+static struct mempool net_tx_buf_mp;
 static struct tcache *net_tx_buf_tcache;
 static DEFINE_PERTHREAD(struct tcache_perthread, net_tx_buf_pt);
+
+int net_init_mempool_late(void)
+{
+	int i, ret;
+
+	ret = mempool_create(&net_tx_buf_mp, iok.tx_buf, iok.tx_len, PGSIZE_2MB,
+			     align_up(net_get_mtu() + MBUF_HEAD_LEN + MBUF_DEFAULT_HEADROOM,
+				      CACHE_LINE_SIZE * 2));
+	if (unlikely(ret))
+		return ret;
+
+	net_tx_buf_tcache = mempool_create_tcache(&net_tx_buf_mp,
+		"runtime_tx_bufs", TCACHE_DEFAULT_MAG_SIZE);
+	if (unlikely(!net_tx_buf_tcache))
+		return -ENOMEM;
+
+	for (i = 0; i < maxks; i++)
+		tcache_init_perthread(net_tx_buf_tcache,
+			&perthread_get_remote(net_tx_buf_pt, i));
+
+	return 0;
+}
 
 
 /*
@@ -638,7 +660,6 @@ int net_init_thread(void)
 		return -ENOMEM;
 
 	k->iokernel_softirq = th;
-	tcache_init_perthread(net_tx_buf_tcache, perthread_ptr(net_tx_buf_pt));
 	return 0;
 }
 
@@ -676,6 +697,15 @@ static struct net_driver_ops iokernel_ops = {
 	.get_flow_affinity = compute_flow_affinity,
 };
 
+int net_init_late(void)
+{
+	/* iokernel may provide buffers later */
+	if (cfg_directpath_external())
+		return 0;
+
+	return net_init_mempool_late();
+}
+
 /**
  * net_init - initializes the network stack
  *
@@ -683,28 +713,11 @@ static struct net_driver_ops iokernel_ops = {
  */
 int net_init(void)
 {
-	int ret;
-
-	ret = mempool_create(&net_tx_buf_mp, iok.tx_buf, iok.tx_len, PGSIZE_2MB,
-			     align_up(net_get_mtu() + MBUF_HEAD_LEN + MBUF_DEFAULT_HEADROOM,
-				      CACHE_LINE_SIZE * 2));
-	if (ret)
-		return ret;
-
-	net_tx_buf_tcache = mempool_create_tcache(&net_tx_buf_mp,
-		"runtime_tx_bufs", TCACHE_DEFAULT_MAG_SIZE);
-	if (!net_tx_buf_tcache)
-		return -ENOMEM;
-
 	log_info("net: started network stack");
 	net_dump_config();
 
-#ifdef DIRECTPATH
-	if (!cfg_directpath_enabled)
+	if (!cfg_directpath_enabled())
 		net_ops = iokernel_ops;
-#else
-	net_ops = iokernel_ops;
-#endif
 
 	return 0;
 }

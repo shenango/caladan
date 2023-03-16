@@ -12,9 +12,6 @@
 
 #include "../defs.h"
 
-extern struct mempool net_tx_buf_mp;
-
-
 /*
  * Network Error Reporting Functions
  */

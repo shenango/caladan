@@ -7,6 +7,7 @@
 #include <sys/mman.h>
 
 #include <base/log.h>
+#include <base/mempool.h>
 #include <iokernel/control.h>
 
 #include "mlx5.h"
@@ -117,15 +118,50 @@ int mlx5_init_ext_late(struct directpath_spec *spec, int bar_fd, int mem_fd)
 		return -1;
 	}
 
+	iok.rx_buf = shmptr_to_ptr(&memfd_reg, spec->buf_region,
+		spec->rx_buf_region_size + spec->tx_buf_region_size);
+	if (unlikely(!iok.rx_buf)) {
+		log_err("mlx5_ext: failed to attach buffer region");
+		return -1;
+	}
+	iok.rx_len = spec->rx_buf_region_size;
+
+	ret = mempool_create(&directpath_buf_mp, iok.rx_buf, iok.rx_len, PGSIZE_2MB,
+	                     directpath_get_buf_size());
+	if (unlikely(ret))
+		return ret;
+
+	directpath_buf_tcache = mempool_create_tcache(&directpath_buf_mp,
+		"runtime_rx_bufs", cfg_directpath_strided ? 1 : TCACHE_DEFAULT_MAG_SIZE);
+
+	if (unlikely(!directpath_buf_tcache))
+		return -ENOMEM;
+
+	for (i = 0; i < maxks; i++)
+		tcache_init_perthread(directpath_buf_tcache,
+			&perthread_get_remote(directpath_buf_pt, i));
+
+	iok.tx_buf = iok.rx_buf + iok.rx_len;
+	iok.tx_len = spec->tx_buf_region_size;
+	ret = net_init_mempool_late();
+	if (unlikely(ret)) {
+		log_err("failed to setup late tx mempools");
+		return ret;
+	}
+
 	/*
 	 * The NIC memory registration is done using the VA of the shared memory
 	 * region as mapped in the iokernel. This computes the offset to add to
 	 * every runtime-process VA when sending VAs directly to the NIC.
 	 */
-	rx_mr_offset = spec->va_base - (uintptr_t)netcfg.tx_region.base;
+	rx_mr_offset = spec->va_base - (uintptr_t)iok.rx_buf;
 	tx_mr_offset = rx_mr_offset;
 
 	if (cfg_directpath_strided) {
+		ret = mlx5_rx_stride_init_bufs();
+		if (unlikely(ret))
+			return ret;
+
 		ret = mlx5_init_ext_rmp(&memfd_reg, &spec->rmp, spec->mr);
 		if (unlikely(ret))
 			return ret;

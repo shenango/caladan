@@ -10,8 +10,7 @@
 /* configuration options */
 struct pci_addr nic_pci_addr;
 static bool cfg_pci_addr_specified;
-bool cfg_directpath_enabled;
-int directpath_mode = DIRECTPATH_MODE_ALLOW_ANY;
+int cfg_directpath_mode = DIRECTPATH_MODE_DISABLED;
 
 struct mempool directpath_buf_mp;
 struct tcache *directpath_buf_tcache;
@@ -20,13 +19,13 @@ DEFINE_PERTHREAD(struct tcache_perthread, directpath_buf_pt);
 int directpath_parse_arg(const char *name, const char *val)
 {
 	if (strncmp(val, "fs", strlen("fs")) == 0)
-		directpath_mode = DIRECTPATH_MODE_FLOW_STEERING;
+		cfg_directpath_mode = DIRECTPATH_MODE_FLOW_STEERING;
 	else if (strncmp(val, "qs", strlen("qs")) == 0)
-		directpath_mode = DIRECTPATH_MODE_QUEUE_STEERING;
+		cfg_directpath_mode = DIRECTPATH_MODE_QUEUE_STEERING;
 	else if (strncmp(val, "ext", strlen("ext")) == 0)
-		directpath_mode = DIRECTPATH_MODE_EXTERNAL;
+		cfg_directpath_mode = DIRECTPATH_MODE_EXTERNAL;
 	else
-		directpath_mode = DIRECTPATH_MODE_ALLOW_ANY;
+		cfg_directpath_mode = DIRECTPATH_MODE_ALLOW_ANY;
 
 	return 0;
 }
@@ -69,6 +68,10 @@ static int rx_memory_init(void)
 {
 	int ret;
 
+	/* for external mode, memory is provided after init */
+	if (cfg_directpath_mode == DIRECTPATH_MODE_EXTERNAL)
+		return 0;
+
 	ret = mempool_create(&directpath_buf_mp, iok.rx_buf, iok.rx_len, PGSIZE_2MB,
 			     directpath_get_buf_size());
 	if (ret)
@@ -86,7 +89,7 @@ int directpath_init(void)
 {
 	int ret;
 
-	if (!cfg_directpath_enabled)
+	if (!cfg_directpath_enabled())
 		return 0;
 
 	ret = rx_memory_init();
@@ -115,11 +118,13 @@ int directpath_init(void)
 
 int directpath_init_thread(void)
 {
-	if (!cfg_directpath_enabled)
+	if (!cfg_directpath_enabled())
 		return 0;
 
-	tcache_init_perthread(directpath_buf_tcache,
-	                      perthread_ptr(directpath_buf_pt));
+	if (cfg_directpath_mode != DIRECTPATH_MODE_EXTERNAL) {
+		tcache_init_perthread(directpath_buf_tcache,
+		                      perthread_ptr(directpath_buf_pt));
+	}
 
 	return mlx5_init_thread();
 }
@@ -160,10 +165,10 @@ static void flow_registration_worker(void *arg)
 
 void register_flow(struct flow_registration *f)
 {
-	if (!cfg_directpath_enabled)
+	if (!cfg_directpath_enabled())
 		return;
 
-	if (directpath_mode != DIRECTPATH_MODE_FLOW_STEERING)
+	if (cfg_directpath_mode != DIRECTPATH_MODE_FLOW_STEERING)
 		return;
 
 	/* take a reference for the hardware flow table */
@@ -181,11 +186,10 @@ void register_flow(struct flow_registration *f)
 
 void deregister_flow(struct flow_registration *f)
 {
-	if (!cfg_directpath_enabled)
+	if (!cfg_directpath_enabled())
 		return;
 
-
-	if (directpath_mode != DIRECTPATH_MODE_FLOW_STEERING)
+	if (cfg_directpath_mode != DIRECTPATH_MODE_FLOW_STEERING)
 		return;
 
 	spin_lock_np(&flow_worker_lock);
@@ -199,10 +203,10 @@ void deregister_flow(struct flow_registration *f)
 
 int directpath_init_late(void)
 {
-	if (!cfg_directpath_enabled)
+	if (!cfg_directpath_enabled())
 		return 0;
 
-	if (directpath_mode != DIRECTPATH_MODE_FLOW_STEERING)
+	if (cfg_directpath_mode != DIRECTPATH_MODE_FLOW_STEERING)
 		return 0;
 
 	return thread_spawn(flow_registration_worker, NULL);

@@ -29,11 +29,22 @@
 #include "net/defs.h"
 
 #define PACKET_QUEUE_MCOUNT	4096
-#define COMMAND_QUEUE_MCOUNT	4096
+#define LRPC_QUEUE_SIZE_DIRECTPATH 16
+
+static size_t lrpc_q_size(void)
+{
+	if (cfg_directpath_enabled())
+		return LRPC_QUEUE_SIZE_DIRECTPATH;
+
+	return PACKET_QUEUE_MCOUNT;
+}
 
 /* the egress buffer pool must be large enough to fill all the TXQs entirely */
 static size_t calculate_egress_pool_size(void)
 {
+	if (cfg_directpath_external())
+		return 0;
+
 	size_t buflen = MBUF_DEFAULT_LEN;
 	return align_up(PACKET_QUEUE_MCOUNT *
 			buflen * MAX(1, guaranteedks) * 8UL,
@@ -79,18 +90,18 @@ static size_t estimate_shm_space(void)
 	ret += CACHE_LINE_SIZE;
 
 	// RX queues (wb is not included)
-	q = sizeof(struct lrpc_msg) * PACKET_QUEUE_MCOUNT;
+	q = sizeof(struct lrpc_msg) * lrpc_q_size();
 	q = align_up(q, CACHE_LINE_SIZE);
 	ret += q * maxks;
 
 	// TX packet queues
-	q = sizeof(struct lrpc_msg) * PACKET_QUEUE_MCOUNT;
+	q = sizeof(struct lrpc_msg) * lrpc_q_size();
 	q = align_up(q, CACHE_LINE_SIZE);
 	q += align_up(sizeof(uint32_t), CACHE_LINE_SIZE);
 	ret += q * maxks;
 
 	// TX command queues
-	q = sizeof(struct lrpc_msg) * COMMAND_QUEUE_MCOUNT;
+	q = sizeof(struct lrpc_msg) * lrpc_q_size();
 	q = align_up(q, CACHE_LINE_SIZE);
 	q += align_up(sizeof(uint32_t), CACHE_LINE_SIZE);
 	ret += q * maxks;
@@ -106,14 +117,13 @@ static size_t estimate_shm_space(void)
 	ret += calculate_egress_pool_size();
 	ret = align_up(ret, PGSIZE_2MB);
 
-#ifdef DIRECTPATH
 	// mlx5 directpath
-	if (cfg_directpath_enabled) {
-		ret += PGSIZE_2MB * 32;
-
+	if (cfg_directpath_enabled() && !cfg_directpath_external()) {
+		ret += PGSIZE_2MB * 4;
+		if (is_directpath_strided())
+			ret += PGSIZE_2MB * 28;
 		ret += align_up(directpath_rx_buf_pool_sz(maxks), PGSIZE_2MB);
 	}
-#endif
 
 #ifdef DIRECT_STORAGE
 	// SPDK completion queue memory
@@ -144,6 +154,7 @@ void *iok_shm_alloc(size_t size, size_t alignment, shmptr_t *shm_out)
 		r->base = mem_map_shm(iok.key, NULL, r->len, PGSIZE_2MB, true);
 		if (r->base == MAP_FAILED)
 			panic("failed to map shared memory (requested %lu bytes)", r->len);
+		log_info("shm: using %lu bytes", r->len);
 	}
 
 	if (alignment < CACHE_LINE_SIZE)
@@ -225,23 +236,26 @@ int ioqueues_init(void)
 
 	for (i = 0; i < maxks; i++) {
 		ts = &iok.threads[i];
-		ioqueue_alloc(&ts->rxq, PACKET_QUEUE_MCOUNT, false);
-		ioqueue_alloc(&ts->txpktq, PACKET_QUEUE_MCOUNT, true);
-		ioqueue_alloc(&ts->txcmdq, COMMAND_QUEUE_MCOUNT, true);
+		ioqueue_alloc(&ts->rxq, lrpc_q_size(), false);
+		ioqueue_alloc(&ts->txpktq, lrpc_q_size(), true);
+		ioqueue_alloc(&ts->txcmdq, lrpc_q_size(), true);
 
 		iok_shm_alloc(sizeof(struct q_ptrs), CACHE_LINE_SIZE, &ts->q_ptrs);
 		ts->rxq.wb = ts->q_ptrs;
 	}
 
+	/* don't allocate buffer space, iokernel will provide */
+	if (cfg_directpath_external())
+		return 0;
+
 	iok.tx_len = calculate_egress_pool_size();
 	iok.tx_buf = iok_shm_alloc(iok.tx_len, PGSIZE_2MB, NULL);
 
-#ifdef DIRECTPATH
-	if (cfg_directpath_enabled) {
+	if (cfg_directpath_enabled()) {
 		iok.rx_len = directpath_rx_buf_pool_sz(maxks);
 		iok.rx_buf = iok_shm_alloc(iok.rx_len, PGSIZE_2MB, NULL);
 	}
-#endif
+
 	return 0;
 }
 

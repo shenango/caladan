@@ -331,7 +331,6 @@ static int parse_enable_storage(const char *name, const char *val)
 static int parse_enable_directpath(const char *name, const char *val)
 {
 #ifdef DIRECTPATH
-	cfg_directpath_enabled = true;
 	return directpath_parse_arg(name, val);
 #else
 	log_err("cfg: cannot enable directpath, "
@@ -505,11 +504,7 @@ int cfg_load(const char *path)
 #else
 		"disabled",
 #endif
-#ifdef DIRECTPATH
-		 cfg_directpath_enabled ? "enabled" : "disabled");
-#else
-		"disabled");
-#endif
+		 cfg_directpath_enabled() ? "enabled" : "disabled");
 
 out:
 	fclose(f);

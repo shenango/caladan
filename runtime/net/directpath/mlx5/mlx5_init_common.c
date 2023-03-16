@@ -133,7 +133,7 @@ int mlx5_init_thread(void)
 	if (ret)
 		return ret;
 
-	if (directpath_mode == DIRECTPATH_MODE_EXTERNAL)
+	if (cfg_directpath_mode == DIRECTPATH_MODE_EXTERNAL)
 		return 0;
 
 	hs = &iok.threads[k->kthread_idx].direct_rxq;
@@ -161,7 +161,7 @@ int mlx5_init(void)
 	if (ret)
 		return ret;
 
-	if (directpath_mode == DIRECTPATH_MODE_EXTERNAL) {
+	if (cfg_directpath_mode == DIRECTPATH_MODE_EXTERNAL) {
 		// hardware queue information will be provided later by the iokernel
 		if (cfg_directpath_strided)
 			cfg_request_hardware_queues = DIRECTPATH_REQUEST_STRIDED_RMP;
@@ -171,13 +171,13 @@ int mlx5_init(void)
 		return 0;
 	}
 
-	if (directpath_mode == DIRECTPATH_MODE_FLOW_STEERING ||
-	    directpath_mode == DIRECTPATH_MODE_ALLOW_ANY) {
+	if (cfg_directpath_mode == DIRECTPATH_MODE_FLOW_STEERING ||
+	    cfg_directpath_mode == DIRECTPATH_MODE_ALLOW_ANY) {
 
 		/* try to initialize in DevX mode */
 		ret = mlx5_verbs_init_context(false);
 		if (ret == 0) {
-			directpath_mode = DIRECTPATH_MODE_FLOW_STEERING;
+			cfg_directpath_mode = DIRECTPATH_MODE_FLOW_STEERING;
 			log_err("directpath_init: selected flow steering mode");
 
 			ret = mlx5_verbs_init(false);
@@ -188,10 +188,10 @@ int mlx5_init(void)
 		}
 	}
 
-	assert(directpath_mode == DIRECTPATH_MODE_QUEUE_STEERING ||
-	       directpath_mode == DIRECTPATH_MODE_ALLOW_ANY);
+	assert(cfg_directpath_mode == DIRECTPATH_MODE_QUEUE_STEERING ||
+	       cfg_directpath_mode == DIRECTPATH_MODE_ALLOW_ANY);
 
-	directpath_mode = DIRECTPATH_MODE_QUEUE_STEERING;
+	cfg_directpath_mode = DIRECTPATH_MODE_QUEUE_STEERING;
 	log_err("directpath_init: selected queue steering mode");
 
 	ret = mlx5_verbs_init_context(true);

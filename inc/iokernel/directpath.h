@@ -8,17 +8,22 @@
 
 #include <iokernel/shm.h>
 
-#define DIRECTPATH_RMP 1
+#define DIRECTPATH_STRIDE_RQ_NUM_DESC   16
+#define DIRECTPATH_STRIDE_MODE_BUF_SZ   65536
+#define DIRECTPATH_STRIDE_SIZE          128
 
-#define DIRECTPATH_STRIDE_RQ_NUM_DESC 32UL
-#define DIRECTPATH_STRIDE_MODE_BUF_SZ (65536UL)
-#define DIRECTPATH_STRIDE_SIZE 128UL
 #define DIRECTPATH_NUM_STRIDES \
  (DIRECTPATH_STRIDE_MODE_BUF_SZ / DIRECTPATH_STRIDE_SIZE)
 #define DIRECTPATH_TOTAL_RX_EL \
  (DIRECTPATH_NUM_STRIDES * DIRECTPATH_STRIDE_RQ_NUM_DESC)
+#define DIRECTPATH_STRIDE_REFILL_THRESH_HI \
+ (DIRECTPATH_TOTAL_RX_EL / 2)
 
-#define DIRECTPATH_STRIDE_REFILL_THRESH_HI DIRECTPATH_TOTAL_RX_EL / 2
+#define DIRECTPATH_STRIDE_RX_BUF_POOL_SZ \
+    (4 * DIRECTPATH_STRIDE_SIZE * DIRECTPATH_TOTAL_RX_EL)
+
+#define DIRECTPATH_TX_POOL_BUF(txqsz, nrqs) \
+    ((size_t)(txqsz) * 8UL * 2048UL * (size_t)(nrqs))
 
 BUILD_ASSERT(DIRECTPATH_STRIDE_MODE_BUF_SZ % DIRECTPATH_STRIDE_SIZE == 0);
 BUILD_ASSERT(PGSIZE_2MB % DIRECTPATH_STRIDE_MODE_BUF_SZ == 0);
@@ -51,6 +56,10 @@ struct directpath_spec {
     size_t bar_map_size;
 
     struct directpath_ring_q_spec rmp;
+
+    shmptr_t buf_region;
+    size_t rx_buf_region_size;
+    size_t tx_buf_region_size;
 
     struct directpath_queue_spec qs[];
 };

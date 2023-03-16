@@ -577,10 +577,34 @@ extern struct net_driver_ops net_ops;
 #ifdef DIRECTPATH
 
 extern int directpath_parse_arg(const char *name, const char *val);
-extern bool cfg_directpath_enabled;
+extern int cfg_directpath_mode;
+extern bool cfg_directpath_strided;
+
+enum {
+	DIRECTPATH_MODE_DISABLED = 0,
+	DIRECTPATH_MODE_ALLOW_ANY,
+	DIRECTPATH_MODE_FLOW_STEERING,
+	DIRECTPATH_MODE_QUEUE_STEERING,
+	DIRECTPATH_MODE_EXTERNAL,
+};
+
+static inline bool is_directpath_strided(void)
+{
+	return cfg_directpath_strided;
+}
+
+static inline bool cfg_directpath_enabled(void)
+{
+	return cfg_directpath_mode != DIRECTPATH_MODE_DISABLED;
+}
+
+static inline bool cfg_directpath_external(void)
+{
+	return cfg_directpath_mode == DIRECTPATH_MODE_EXTERNAL;
+}
+
 struct direct_txq {};
 struct direct_rxq {};
-
 
 static inline bool rx_poll(struct kthread *k)
 {
@@ -597,6 +621,21 @@ static inline bool rx_poll_locked(struct kthread *k)
 extern size_t directpath_rx_buf_pool_sz(unsigned int nrqs);
 
 #else
+
+static inline bool is_directpath_strided(void)
+{
+	return false;
+}
+
+static inline bool cfg_directpath_enabled(void)
+{
+	return false;
+}
+
+static inline bool cfg_directpath_external(void)
+{
+	return false;
+}
 
 static inline bool rx_poll(struct kthread *k)
 {
@@ -688,6 +727,9 @@ extern int stat_init_late(void);
 extern int tcp_init_late(void);
 extern int rcu_init_late(void);
 extern int directpath_init_late(void);
+extern int net_init_late(void);
+
+extern int net_init_mempool_late(void);
 
 struct directpath_spec;
 extern int mlx5_init_ext_late(struct directpath_spec *spec, int bar_fd, int mem_fd);

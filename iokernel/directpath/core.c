@@ -193,6 +193,19 @@ static unsigned int ctx_max_doorbells(struct directpath_ctx *dp)
 	return !!dp->use_rmp + 4 * dp->nr_qs;
 }
 
+static size_t ctx_buffer_region(struct directpath_ctx *dp)
+{
+	size_t pool_total = 0;
+
+	if (dp->use_rmp)
+		pool_total += DIRECTPATH_STRIDE_RX_BUF_POOL_SZ;
+	else
+		pool_total += DIRECTPATH_STRIDE_RX_BUF_POOL_SZ * dp->nr_qs * 32;
+
+	pool_total += DIRECTPATH_TX_POOL_BUF((1UL << DEFAULT_SQ_LOG_SZ), dp->nr_qs);
+	return pool_total;
+}
+
 static size_t estimate_region_size(struct directpath_ctx *dp)
 {
 	uint32_t i;
@@ -230,6 +243,11 @@ static size_t estimate_region_size(struct directpath_ctx *dp)
 		total = align_up(total, PGSIZE_4KB);
 		total += (1UL << DEFAULT_SQ_LOG_SZ) * MLX5_SEND_WQE_BB;
 	}
+
+	wasted += align_up(total, PGSIZE_4KB) - total;
+	total = align_up(total, PGSIZE_4KB);
+	total += ctx_buffer_region(dp);
+	log_info("allocating %lu bytes for buf pool", ctx_buffer_region(dp));
 
 	log_debug("reg size %lu, wasted %lu", total, wasted);
 
@@ -582,7 +600,6 @@ static int create_rmp(struct directpath_ctx *dp, struct wq *wq,
 	DEVX_SET(rmpc, rmp_ctx, basic_cyclic_rcv_wqe, 0); // TODO?
 
 	wq_ctx = DEVX_ADDR_OF(rmpc, rmp_ctx, wq);
-	log_err("rmp wqc:");
 	ret = fill_wqc(dp, NULL, wq, wq_ctx, log_nr_wqe, true);
 	if (ret) {
 		log_err("failed to setup rmp wqc");
@@ -880,7 +897,8 @@ int alloc_directpath_ctx(struct proc *p, bool use_rmp,
 {
 	int ret = 0;
 	uint32_t i;
-	size_t lg_cq_sz;
+	uint64_t buf;
+	size_t lg_cq_sz, buf_reg_sz;
 	struct directpath_ctx *dp;
 	struct mlx5dv_pd pd_out;
 	struct mlx5dv_obj init_obj;
@@ -992,7 +1010,21 @@ int alloc_directpath_ctx(struct proc *p, bool use_rmp,
 	if (ret)
 		goto err;
 
-	dp->mreg = ibv_reg_mr(dp->pd, p->region.base, p->region.len,
+	buf_reg_sz = ctx_buffer_region(dp);
+	ret = alloc_from_uregion(dp, buf_reg_sz, PGSIZE_4KB, &buf);
+	if (ret) {
+		log_err("failed to alloc rx buf region");
+		return ret;
+	}
+
+	spec_out->buf_region = ptr_to_shmptr(&dp->region, dp->region.base + buf,
+	                                     buf_reg_sz);
+
+	spec_out->tx_buf_region_size =
+		DIRECTPATH_TX_POOL_BUF((1UL << DEFAULT_SQ_LOG_SZ), dp->nr_qs);
+	spec_out->rx_buf_region_size = buf_reg_sz - spec_out->tx_buf_region_size;
+
+	dp->mreg = ibv_reg_mr(dp->pd, dp->region.base + buf, buf_reg_sz,
 	                      IBV_ACCESS_LOCAL_WRITE);
 	if (!dp->mreg) {
 		log_err("failed to create mr");
@@ -1008,7 +1040,7 @@ int alloc_directpath_ctx(struct proc *p, bool use_rmp,
 
 	spec_out->memfd_region_size = dp->region.len;
 	spec_out->mr = dp->mreg->lkey;
-	spec_out->va_base = (uintptr_t)p->region.base;
+	spec_out->va_base = (uintptr_t)dp->region.base + buf;
 	spec_out->offs = bar_offs;
 	spec_out->bar_map_size = bar_map_size;
 
