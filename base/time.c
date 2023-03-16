@@ -29,6 +29,12 @@ void __time_delay_us(uint64_t us)
 /* derived from DPDK */
 static int time_calibrate_tsc(void)
 {
+	/* cycles_per_us may be provided in advance */
+	if (cycles_per_us) {
+		start_tsc = rdtsc();
+		return 0;
+	}
+
 	/* TODO: New Intel CPUs report this value in CPUID */
 	struct timespec sleeptime = {.tv_nsec = 5E8 }; /* 1/2 second */
 	struct timespec t_start, t_end;

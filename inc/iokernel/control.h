@@ -137,6 +137,7 @@ struct iokernel_info {
 	DEFINE_BITMAP(managed_cores, NCPU);
 	unsigned char		rss_key[40];
 	struct pci_addr		directpath_pci;
+	int			cycles_per_us;
 };
 
 BUILD_ASSERT(sizeof(struct iokernel_info) <= IOKERNEL_INFO_SIZE);

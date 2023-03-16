@@ -167,6 +167,12 @@ int runtime_init(const char *cfgpath, thread_fn_t main_fn, void *arg)
 	pthread_t tid[NCPU];
 	int ret, i;
 
+	ret = ioqueues_init_early();
+	if (unlikely(ret))
+		return ret;
+
+	cycles_per_us = iok.iok_info->cycles_per_us;
+
 	ret = base_init();
 	if (ret) {
 		log_err("base library global init failed, ret = %d", ret);

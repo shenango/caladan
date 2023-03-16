@@ -245,6 +245,8 @@ int main(int argc, char *argv[])
 	if (ret)
 		return ret;
 
+	iok_info->cycles_per_us = cycles_per_us;
+
 	pthread_barrier_wait(&init_barrier);
 
 	dataplane_loop();

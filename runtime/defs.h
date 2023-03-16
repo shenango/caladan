@@ -729,6 +729,7 @@ extern int rcu_init_late(void);
 extern int directpath_init_late(void);
 extern int net_init_late(void);
 
+extern int ioqueues_init_early(void);
 extern int net_init_mempool_late(void);
 
 struct directpath_spec;
