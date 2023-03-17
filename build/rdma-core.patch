@@ -197,7 +197,7 @@ index 0bc8b5d9..00efb0ce 100644
  	.get_byte_mask			= &dr_ste_v1_get_byte_mask,
  	.set_ctrl_always_hit_htbl	= &dr_ste_v1_set_ctrl_always_hit_htbl,
 diff --git a/providers/mlx5/libmlx5.map b/providers/mlx5/libmlx5.map
-index 8eeb261b..83dc69cf 100644
+index 8eeb261b..90b6e604 100644
 --- a/providers/mlx5/libmlx5.map
 +++ b/providers/mlx5/libmlx5.map
 @@ -105,6 +105,9 @@ MLX5_1.10 {
@@ -210,7 +210,7 @@ index 8eeb261b..83dc69cf 100644
  } MLX5_1.9;
  
  MLX5_1.11 {
-@@ -228,4 +231,10 @@ MLX5_1.24 {
+@@ -228,4 +231,11 @@ MLX5_1.24 {
  		mlx5dv_crypto_login_query;
  		mlx5dv_destroy_steering_anchor;
  		mlx5dv_dr_action_create_dest_root_table;
@@ -220,9 +220,10 @@ index 8eeb261b..83dc69cf 100644
 +		mlx5_vfio_cmd_slot_alloc;
 +		mlx5_vfio_cmd_slot_get_fd;
 +		mlx5_vfio_get_clock;
++		mlx5_access_reg;
  } MLX5_1.23;
 diff --git a/providers/mlx5/mlx5_vfio.c b/providers/mlx5/mlx5_vfio.c
-index fa19f2a9..c318a8a1 100644
+index fa19f2a9..658315ad 100644
 --- a/providers/mlx5/mlx5_vfio.c
 +++ b/providers/mlx5/mlx5_vfio.c
 @@ -524,7 +524,7 @@ static int mlx5_vfio_wait_event(struct mlx5_vfio_context *ctx,
@@ -378,7 +379,25 @@ index fa19f2a9..c318a8a1 100644
  	ctx->bar_map = (struct mlx5_init_seg *)base;
  	ctx->bar_map_size = reg.size;
  	return 0;
-@@ -2592,8 +2681,9 @@ _vfio_devx_umem_reg(struct ibv_context *context,
+@@ -1707,6 +1796,17 @@ out:
+ 	return err;
+ }
+ 
++
++int mlx5_access_reg(struct ibv_context *ibctx, void *data_in,
++				int size_in, void *data_out, int size_out,
++				uint16_t reg_id, int arg, int write)
++{
++	struct mlx5_vfio_context *ctx = to_mvfio_ctx(ibctx);
++
++	return mlx5_vfio_access_reg(ctx, data_in, size_in, data_out, size_out,
++	                            reg_id, arg, write);
++}
++
+ static int mlx5_vfio_get_caps_mode(struct mlx5_vfio_context *ctx,
+ 				   enum mlx5_cap_type cap_type,
+ 				   enum mlx5_cap_mode cap_mode)
+@@ -2592,8 +2692,9 @@ _vfio_devx_umem_reg(struct ibv_context *context,
  
  	iova_page_shift = ilog32(vfio_umem->iova_size - 1);
  	num_pas = 1;
@@ -391,10 +410,10 @@ index fa19f2a9..c318a8a1 100644
  	}
  
 diff --git a/providers/mlx5/mlx5dv.h b/providers/mlx5/mlx5dv.h
-index 163aab7b..d1235255 100644
+index 163aab7b..5e510aa7 100644
 --- a/providers/mlx5/mlx5dv.h
 +++ b/providers/mlx5/mlx5dv.h
-@@ -1710,6 +1710,17 @@ int mlx5dv_vfio_get_events_fd(struct ibv_context *ibctx);
+@@ -1710,6 +1710,20 @@ int mlx5dv_vfio_get_events_fd(struct ibv_context *ibctx);
   */
  int mlx5dv_vfio_process_events(struct ibv_context *context);
  
@@ -408,11 +427,14 @@ index 163aab7b..d1235255 100644
 +			      unsigned int slot);
 +extern void mlx5_vfio_post_cmd_db(struct ibv_context *ibctx, unsigned int vector);
 +extern void export_fd(struct ibv_context *ibctx, int *fdout, off_t *offout, size_t *szout);
++extern int mlx5_access_reg(struct ibv_context *ibctx, void *data_in,
++				int size_in, void *data_out, int size_out,
++				uint16_t reg_id, int arg, int write);
 +
  struct ibv_context *
  mlx5dv_open_device(struct ibv_device *device, struct mlx5dv_context_attr *attr);
  
-@@ -1999,6 +2010,13 @@ mlx5dv_dr_rule_create(struct mlx5dv_dr_matcher *matcher,
+@@ -1999,6 +2013,13 @@ mlx5dv_dr_rule_create(struct mlx5dv_dr_matcher *matcher,
  		      size_t num_actions,
  		      struct mlx5dv_dr_action *actions[]);
  

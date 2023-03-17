@@ -175,6 +175,7 @@ enum {
 };
 
 enum {
+	MLX5_REG_PMTU		 = 0x5003,
 	MLX5_REG_HOST_ENDIANNESS = 0x7004,
 };
 
@@ -366,6 +367,21 @@ struct mlx5_ifc_destroy_flow_table_in_bits {
 	u8         table_id[0x18];
 
 	u8         reserved_at_c0[0x140];
+};
+
+struct mlx5_ifc_pmtu_reg_bits {
+	u8         reserved_at_0[0x8];
+	u8         local_port[0x8];
+	u8         reserved_at_10[0x10];
+
+	u8         max_mtu[0x10];
+	u8         reserved_at_30[0x10];
+
+	u8         admin_mtu[0x10];
+	u8         reserved_at_50[0x10];
+
+	u8         oper_mtu[0x10];
+	u8         reserved_at_70[0x10];
 };
 
 struct mlx5_ifc_query_flow_table_in_bits {

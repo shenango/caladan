@@ -4,6 +4,7 @@
 #include <base/list.h>
 #include <base/log.h>
 #include <iokernel/shm.h>
+#include <net/ethernet.h>
 
 #include <infiniband/mlx5dv.h>
 
@@ -13,6 +14,9 @@
 #define DEFAULT_CQ_LOG_SZ 8
 #define DEFAULT_RQ_LOG_SZ 7
 #define DEFAULT_SQ_LOG_SZ 7
+
+#define DIRECTPATH_PORT 1
+#define DIRECTPATH_MAX_MTU ETH_MAX_LEN_JUMBO
 
 #define POLL_EQ_BATCH_SIZE 32
 

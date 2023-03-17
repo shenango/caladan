@@ -107,8 +107,8 @@ netbench_udp: $(netbench_udp_obj) $(fake_worker_obj) $(librt_libs) $(RUNTIME_DEP
 	$(LDXX) -o $@ $(LDFLAGS) $(fake_worker_obj) $(netbench_udp_obj) \
 	$(librt_libs) $(RUNTIME_LIBS)
 
-netbench_linux: $(netbench_linux_obj) $(fake_worker_obj)
-	$(LDXX) -o $@ $(LDFLAGS) $(fake_worker_obj) $(netbench_linux_obj) -lpthread
+netbench_linux: $(netbench_linux_obj) $(fake_worker_obj) $(ROOT_PATH)/libbase.a
+	$(LDXX) -o $@ $(LDFLAGS) $(fake_worker_obj) $(netbench_linux_obj)  $(ROOT_PATH)/libbase.a  -lpthread
 
 netperf: $(netperf_obj) $(librt_libs) $(RUNTIME_DEPS)
 	$(LDXX) -o $@ $(LDFLAGS) $(netperf_obj) $(librt_libs) $(RUNTIME_LIBS)

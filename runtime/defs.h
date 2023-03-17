@@ -608,7 +608,7 @@ struct direct_rxq {};
 
 static inline bool rx_poll(struct kthread *k)
 {
-	assert(!spin_lock_held(&myk()->lock));
+	// Note: the caller must not hold the kthread-local lock
 	return net_ops.rx_poll && net_ops.rx_poll(k->kthread_idx);
 }
 

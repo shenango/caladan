@@ -71,16 +71,120 @@ static void wq_fill_spec(struct shm_region *reg,
 	spec->dbrec = ptr_to_shmptr(reg, wq->dbrec, CACHE_LINE_SIZE);
 }
 
-static void qp_fill_spec(struct shm_region *reg, struct qp *qp,
+static void qp_fill_spec(struct directpath_ctx *ctx, struct qp *qp,
 	                       struct directpath_queue_spec *spec)
 {
 	spec->sqn = qp->sqn;
 	spec->uarn = qp->uarn;
 	spec->uar_offset = qp->uar_offset;
-	wq_fill_spec(reg, &qp->rx_wq, &spec->rx_wq);
-	cq_fill_spec(reg, &qp->rx_cq, &spec->rx_cq);
-	wq_fill_spec(reg, &qp->tx_wq, &spec->tx_wq);
-	cq_fill_spec(reg, &qp->tx_cq, &spec->tx_cq);
+
+	if (!ctx->use_rmp)
+		wq_fill_spec(&ctx->region, &qp->rx_wq, &spec->rx_wq);
+
+	cq_fill_spec(&ctx->region, &qp->rx_cq, &spec->rx_cq);
+	wq_fill_spec(&ctx->region, &qp->tx_wq, &spec->tx_wq);
+	cq_fill_spec(&ctx->region, &qp->tx_cq, &spec->tx_cq);
+}
+
+static int directpath_query_port_mtu(int port)
+{
+	int ret;
+
+	uint32_t in[DEVX_ST_SZ_DW(pmtu_reg)] = {0};
+	uint32_t out[DEVX_ST_SZ_DW(pmtu_reg)] = {0};
+
+	DEVX_SET(pmtu_reg, in, local_port, port);
+	ret = mlx5_access_reg(vfcontext, in, sizeof(in), out,
+	                      sizeof(out), MLX5_REG_PMTU, 0, 0);
+	if (ret) {
+		log_err("failed to query port mtu (err %d)", ret);
+		return ret;
+	}
+
+	log_info("directpath: max mtu %u", DEVX_GET(pmtu_reg, out, max_mtu));
+	log_info("directpath: oper mtu %u", DEVX_GET(pmtu_reg, out, oper_mtu));
+	log_info("directpath: admin mtu %u", DEVX_GET(pmtu_reg, out, admin_mtu));
+
+	return 0;
+}
+
+static int directpath_set_port_mtu(int port, uint16_t mtu)
+{
+	uint32_t in[DEVX_ST_SZ_DW(pmtu_reg)] = {0};
+	uint32_t out[DEVX_ST_SZ_DW(pmtu_reg)] = {0};
+
+	DEVX_SET(pmtu_reg, in, admin_mtu, mtu);
+	DEVX_SET(pmtu_reg, in, local_port, port);
+	return mlx5_access_reg(vfcontext, in, sizeof(in), out,
+	                       sizeof(out), MLX5_REG_PMTU, 0, 1);
+}
+
+
+static int directpath_query_nic_vport(void)
+{
+	uint32_t in[DEVX_ST_SZ_DW(query_nic_vport_context_in)] = {0};
+	uint32_t out[DEVX_ST_SZ_DW(query_nic_vport_context_out)];
+	int ret;
+	void *nic_vport_ctx;
+
+	DEVX_SET(query_nic_vport_context_in, in, opcode, 0x754);
+	DEVX_SET(query_nic_vport_context_in, in, allowed_list_type, 0 /*current_uc_mac_address*/);
+
+	ret = mlx5dv_devx_general_cmd(vfcontext, in, sizeof(in), out, sizeof(out));
+	if (ret) {
+		LOG_CMD_FAIL("query vport", query_nic_vport_context_out, out);
+		return ret;
+	}
+
+	nic_vport_ctx = DEVX_ADDR_OF(query_nic_vport_context_out, out,
+	                             nic_vport_context);
+	uint8_t *mac_addr = DEVX_ADDR_OF(nic_vport_context,
+	                        nic_vport_ctx,
+	                        permanent_address) + 2;
+	log_info("directpath: mac %02X:%02X:%02X:%02X:%02X:%02X", mac_addr[0], mac_addr[1],
+		     mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
+
+	log_info("directpath: promisc mc: %d", DEVX_GET(nic_vport_context, nic_vport_ctx, promisc_mc));
+	log_info("directpath: mtu: %d", DEVX_GET(nic_vport_context, nic_vport_ctx, mtu));
+
+	return 0;
+}
+
+static int directpath_setup_port(void)
+{
+	uint32_t out[DEVX_ST_SZ_DW(modify_nic_vport_context_out)] = {0};
+	uint32_t in[DEVX_ST_SZ_DW(modify_nic_vport_context_in)];
+	int ret;
+
+	DEVX_SET(modify_nic_vport_context_in, in, opcode, MLX5_CMD_OP_MODIFY_NIC_VPORT_CONTEXT);
+	DEVX_SET(modify_nic_vport_context_in, in, field_select.promisc, 1);
+	DEVX_SET(modify_nic_vport_context_in, in, nic_vport_context.promisc_uc, 1);
+	DEVX_SET(modify_nic_vport_context_in, in, nic_vport_context.promisc_mc, 1);
+	DEVX_SET(modify_nic_vport_context_in, in, nic_vport_context.promisc_all, 1);
+
+
+
+	DEVX_SET(modify_nic_vport_context_in, in, field_select.mtu, 1);
+	DEVX_SET(modify_nic_vport_context_in, in, nic_vport_context.mtu, DIRECTPATH_MAX_MTU);
+
+	ret = mlx5dv_devx_general_cmd(vfcontext, in, sizeof(in), out, sizeof(out));
+	if (ret) {
+		LOG_CMD_FAIL("setup port context", modify_nic_vport_context_out, out);
+		return ret;
+	}
+	ret = directpath_set_port_mtu(DIRECTPATH_PORT, DIRECTPATH_MAX_MTU);
+	if (ret)
+		return ret;
+
+	ret = directpath_query_port_mtu(DIRECTPATH_PORT);
+	if (ret)
+		return ret;
+
+	ret = directpath_query_nic_vport();
+	if (ret)
+		return ret;
+
+	return 0;
 }
 
 static void qp_fill_iokspec(struct thread *th, struct qp *qp)
@@ -861,7 +965,7 @@ void directpath_get_spec(struct directpath_ctx *dp, struct directpath_spec *spec
 		spec_out->rmp.nr_entries = 0;
 
 	for (i = 0; i < dp->nr_qs; i++)
-		qp_fill_spec(&dp->region, &dp->qps[i], &spec_out->qs[i]);
+		qp_fill_spec(dp, &dp->qps[i], &spec_out->qs[i]);
 
 	buf = dp->region.base + align_up(dp->region_allocated, PGSIZE_2MB);
 	spec_out->rx_buf_region_size = ctx_rx_buffer_region(dp);
@@ -1103,6 +1207,12 @@ int directpath_init(void)
 	ret = setup_steering();
 	if (ret) {
 		log_err("failed to init steering %d", ret);
+		return ret;
+	}
+
+	ret = directpath_setup_port();
+	if (ret) {
+		log_err("failed to setup port");
 		return ret;
 	}
 
