@@ -131,7 +131,7 @@ struct proc {
 
 	unsigned int		has_directpath:1;
 	unsigned int		has_vfio_directpath:1;
-	unsigned int        vfio_directpath_rmp:1;
+	unsigned int		vfio_directpath_rmp:1;
 	struct ref		ref;
 	unsigned int		kill:1;       /* the proc is being torn down */
 	unsigned int		attach_fail:1;
@@ -403,7 +403,10 @@ static inline int alloc_directpath_ctx(struct proc *p, ...)
 	return -1;
 }
 
-static inline void free_ctx(struct proc *p) {}
+static inline void release_directpath_ctx(struct proc *p) {}
+static inline void directpath_preallocate(bool use_rmp, unsigned int nrqs, unsigned int cnt) {}
+static inline void directpath_dataplane_notify_kill(struct proc *p) {}
+static inline void directpath_dataplane_attach(struct proc *p) {}
 
 static inline bool directpath_poll(void)
 {

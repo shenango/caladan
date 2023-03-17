@@ -1,4 +1,6 @@
 
+#ifdef DIRECTPATH
+
 #include <base/log.h>
 #include <base/mem.h>
 #include <base/mempool.h>
@@ -364,3 +366,5 @@ int mlx5_rx_stride_init(void)
 
 	return mlx5_rx_stride_init_bufs();
 }
+
+#endif

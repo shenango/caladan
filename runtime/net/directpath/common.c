@@ -3,9 +3,10 @@
 #include <base/mempool.h>
 #include <runtime/sync.h>
 #include <base/log.h>
-#include "defs.h"
 
 #ifdef DIRECTPATH
+
+#include "defs.h"
 
 /* configuration options */
 struct pci_addr nic_pci_addr;
