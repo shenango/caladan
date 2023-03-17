@@ -33,6 +33,13 @@ extern void directpath_run_commands(struct directpath_ctx *ctx);
 #define MAX_CQ 65536 // TODO FIX
 extern struct cq *cqn_to_cq_map[MAX_CQ];
 
+// Flow steering
+#define FLOW_TBL_TYPE 0x0
+#define FLOW_TBL_LOG_ENTRIES 12
+#define FLOW_TBL_NR_ENTRIES (1 << FLOW_TBL_LOG_ENTRIES)
+extern uint32_t table_number;
+extern uint32_t flow_group_number;
+
 struct eq {
 	uint32_t eqn;
 	uint32_t cons_idx;
@@ -86,9 +93,13 @@ struct directpath_ctx {
 	/* hot data */
 	struct proc *p;
 
+	unsigned int kill:1;
+	unsigned int fully_armed:1;
+	unsigned int use_rmp:1;
+	unsigned int has_flow_rule:1;
+
 	/* command data */
 	int8_t command_slot;
-	bool fully_armed;
 	struct list_node command_slot_wait_link;
 
 	uint64_t sw_rss_gen;
@@ -113,7 +124,6 @@ struct directpath_ctx {
 	size_t doorbells_allocated;
 
 	struct wq rmp;
-	bool use_rmp;
 	uint32_t rmpn;
 
 	struct mlx5dv_devx_umem *mem_reg;
@@ -121,7 +131,6 @@ struct directpath_ctx {
 	struct mlx5dv_devx_obj *tis_obj;
 	struct mlx5dv_devx_obj *rqt_obj;
 	struct mlx5dv_devx_obj *td_obj;
-	struct mlx5dv_devx_obj *fte;
 	int flow_tbl_index;
 
 	struct ibv_mr *mreg;

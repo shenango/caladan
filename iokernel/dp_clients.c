@@ -60,6 +60,9 @@ static void dp_clients_add_client(struct proc *p)
 #pragma GCC diagnostic pop
 	}
 
+	if (p->has_vfio_directpath)
+		directpath_dataplane_attach(p);
+
 	return;
 
 fail_extmem:
@@ -126,6 +129,8 @@ static void dp_clients_remove_client(struct proc *p)
 
 	/* release cores assigned to this runtime */
 	p->kill = true;
+	if (p->has_vfio_directpath)
+		directpath_dataplane_notify_kill(p);
 	sched_detach_proc(p);
 	proc_put(p);
 }

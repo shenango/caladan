@@ -378,16 +378,24 @@ extern void dpdk_print_eth_stats(void);
 extern int directpath_init(void);
 #ifdef DIRECTPATH
 struct directpath_spec;
+
+extern int directpath_get_clock(unsigned int *frequency_khz, void **core_clock);
+
+/* may not be called from the dataplane thread (potentially blocking) */
 extern int alloc_directpath_ctx(struct proc *p, bool use_rmp,
                                 struct directpath_spec *spec_out,
                                 int *memfd_out, int *barfd_out);
-extern void free_ctx(struct proc *p);
+extern void release_directpath_ctx(struct proc *p);
+extern void directpath_preallocate(bool use_rmp, unsigned int nrqs, unsigned int cnt);
+
+/* must be called from the dataplane thread */
 extern bool directpath_poll(void);
-extern int directpath_get_clock(unsigned int *frequency_khz, void **core_clock);
 extern void directpath_poll_thread_delay(struct proc *p, struct thread *th,
                                   uint64_t *delay, uint64_t cur_tsc);
 extern void directpath_poll_proc(struct proc *p, uint64_t cur_tsc);
 extern void directpath_notify_waking(struct proc *p, struct thread *th);
+extern void directpath_dataplane_notify_kill(struct proc *p);
+extern void directpath_dataplane_attach(struct proc *p);
 #else
 
 static inline int alloc_directpath_ctx(struct proc *p, ...)

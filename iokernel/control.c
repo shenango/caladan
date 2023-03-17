@@ -129,7 +129,7 @@ static int control_setup_directpath(struct proc *p, int controlfd)
 	return 0;
 
 err:
-	free_ctx(p);
+	release_directpath_ctx(p);
 	free(spec);
 	return ret;
 }
@@ -311,7 +311,7 @@ static void control_destroy_proc(struct proc *p)
 	int ret;
 
 	if (p->has_vfio_directpath) {
-		free_ctx(p);
+		release_directpath_ctx(p);
 	} else if (!cfg.vfio_directpath) {
 		ret = nl_remove_mac_address(&p->mac);
 		if (unlikely(ret))
@@ -391,6 +391,10 @@ static void control_add_client(void)
 				ucred.pid);
 		goto fail_destroy_proc;
 	}
+
+	// TODO: a preallocation policy: for now just allocate another one like this
+	if (p->has_vfio_directpath)
+		directpath_preallocate(p->vfio_directpath_rmp, p->thread_count, 1);
 
 	clients[nr_clients] = p;
 	clientfds[nr_clients++] = fd;

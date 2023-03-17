@@ -154,7 +154,7 @@ int mlx5_init_ext_late(struct directpath_spec *spec, int bar_fd, int mem_fd)
 	 * region as mapped in the iokernel. This computes the offset to add to
 	 * every runtime-process VA when sending VAs directly to the NIC.
 	 */
-	rx_mr_offset = spec->va_base - (uintptr_t)iok.rx_buf;
+	rx_mr_offset = spec->va_base - (uintptr_t)memfd_reg.base;
 	tx_mr_offset = rx_mr_offset;
 
 	if (cfg_directpath_strided) {

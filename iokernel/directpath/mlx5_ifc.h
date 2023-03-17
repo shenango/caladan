@@ -5620,6 +5620,15 @@ struct mlx5_ifc_delete_fte_in_bits {
 	u8         reserved_at_120[0xe0];
 };
 
+struct mlx5_ifc_delete_fte_out_bits {
+        u8         status[0x8];
+        u8         reserved_at_8[0x18];
+
+        u8         syndrome[0x20];
+
+        u8         reserved_at_40[0x40];
+};
+
 struct mlx5_ifc_create_cq_out_bits {
 	u8         status[0x8];
 	u8         reserved_at_8[0x18];

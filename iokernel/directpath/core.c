@@ -3,6 +3,7 @@
 #include <base/log.h>
 #include <base/time.h>
 #include <base/thread.h>
+#include <net/mbuf.h>
 
 #include <sys/mman.h>
 #include <sys/types.h>
@@ -18,21 +19,20 @@
 
 #include "defs.h"
 
-static struct mlx5dv_devx_obj *root_flow_tbl;
-static struct mlx5dv_devx_obj *root_flow_group;
-
-static uint32_t table_number;
-static uint32_t flow_group_number;
-
 static off_t bar_offs;
 static size_t bar_map_size;
 static int bar_fd;
 
+#define MAX_PREALLOC 128
+static struct directpath_ctx *preallocated_ctx[MAX_PREALLOC];
+static unsigned int nr_prealloc;
+
 /* flow steering stuff */
-#define FLOW_TBL_TYPE 0x0
-#define FLOW_TBL_LOG_ENTRIES 12
-#define FLOW_TBL_NR_ENTRIES (1 << FLOW_TBL_LOG_ENTRIES)
 static DEFINE_BITMAP(mac_used_entries, FLOW_TBL_NR_ENTRIES);
+static struct mlx5dv_devx_obj *root_flow_tbl;
+static struct mlx5dv_devx_obj *root_flow_group;
+uint32_t table_number;
+uint32_t flow_group_number;
 
 #define TIME_OP(opn, x) do { \
 	uint64_t t = rdtsc(); \
@@ -97,50 +97,6 @@ static void qp_fill_iokspec(struct thread *th, struct qp *qp)
 	h->consumer_idx = &th->q_ptrs->directpath_rx_tail;
 }
 
-static int directpath_activate_rx(struct directpath_ctx *ctx)
-{
-	uint32_t in[DEVX_ST_SZ_DW(set_fte_in) + DEVX_ST_SZ_DW(dest_format)] = {};
-	uint32_t out[DEVX_ST_SZ_DW(set_fte_out)] = {};
-	void *in_flow_context;
-	uint8_t *in_dests;
-	int index;
-
-	index = bitmap_find_next_cleared(mac_used_entries, FLOW_TBL_NR_ENTRIES, 0);
-	if (index == FLOW_TBL_NR_ENTRIES) {
-		log_err("flow table exhausted!");
-		return -ENOMEM;
-	}
-
-	DEVX_SET(set_fte_in, in, opcode, MLX5_CMD_OP_SET_FLOW_TABLE_ENTRY);
-	DEVX_SET(set_fte_in, in, table_type, FLOW_TBL_TYPE);
-	DEVX_SET(set_fte_in, in, table_id, table_number);
-	DEVX_SET(set_fte_in, in, flow_index, index);
-
-	in_flow_context = DEVX_ADDR_OF(set_fte_in, in, flow_context);
-	DEVX_SET(flow_context, in_flow_context, group_id, flow_group_number);
-	DEVX_SET(flow_context, in_flow_context, action, (1 << 2));
-
-	memcpy(DEVX_ADDR_OF(flow_context, in_flow_context, match_value.outer_headers.dmac_47_16), &ctx->p->mac, sizeof(ctx->p->mac));
-
-	DEVX_SET(flow_context, in_flow_context, destination_list_size, 1);
-
-	in_dests = DEVX_ADDR_OF(flow_context, in_flow_context, destination);
-	DEVX_SET(dest_format, in_dests, destination_type, MLX5_FLOW_DEST_TYPE_TIR);
-	DEVX_SET(dest_format, in_dests, destination_id, ctx->tirn);
-
-	ctx->fte = mlx5dv_devx_obj_create(vfcontext, in, sizeof(in), out, sizeof(out));
-
-	if (!ctx->fte) {
-		log_err("couldnt create STE for tir");
-		return -1;
-	}
-
-	bitmap_set(mac_used_entries, index);
-	ctx->flow_tbl_index = index;
-
-	return 0;
-}
-
 static int setup_steering(void)
 {
 	uint32_t in[DEVX_ST_SZ_DW(create_flow_table_in)] = {0};
@@ -193,17 +149,23 @@ static unsigned int ctx_max_doorbells(struct directpath_ctx *dp)
 	return !!dp->use_rmp + 4 * dp->nr_qs;
 }
 
-static size_t ctx_buffer_region(struct directpath_ctx *dp)
+static size_t ctx_rx_buffer_region(struct directpath_ctx *dp)
 {
-	size_t pool_total = 0;
+	size_t reg_size;
 
 	if (dp->use_rmp)
-		pool_total += DIRECTPATH_STRIDE_RX_BUF_POOL_SZ;
+		reg_size = DIRECTPATH_STRIDE_RX_BUF_POOL_SZ;
 	else
-		pool_total += DIRECTPATH_STRIDE_RX_BUF_POOL_SZ * dp->nr_qs * 32;
+		reg_size = DIRECTPATH_STRIDE_RX_BUF_POOL_SZ * dp->nr_qs * 32;
 
-	pool_total += DIRECTPATH_TX_POOL_BUF((1UL << DEFAULT_SQ_LOG_SZ), dp->nr_qs);
-	return pool_total;
+	return align_up(reg_size, PGSIZE_2MB);
+}
+
+static size_t ctx_tx_buffer_region(struct directpath_ctx *dp)
+{
+	size_t buflen = MBUF_DEFAULT_LEN;
+	buflen *= (1UL << DEFAULT_SQ_LOG_SZ) * 8 * dp->nr_qs;
+	return align_up(buflen, PGSIZE_2MB);
 }
 
 static size_t estimate_region_size(struct directpath_ctx *dp)
@@ -244,12 +206,17 @@ static size_t estimate_region_size(struct directpath_ctx *dp)
 		total += (1UL << DEFAULT_SQ_LOG_SZ) * MLX5_SEND_WQE_BB;
 	}
 
-	wasted += align_up(total, PGSIZE_4KB) - total;
-	total = align_up(total, PGSIZE_4KB);
-	total += ctx_buffer_region(dp);
-	log_info("allocating %lu bytes for buf pool", ctx_buffer_region(dp));
+	wasted += align_up(total, PGSIZE_2MB) - total;
+	total = align_up(total, PGSIZE_2MB);
+	total += ctx_rx_buffer_region(dp);
+	log_info("allocating %lu bytes for rx buf pool", ctx_rx_buffer_region(dp));
 
-	log_debug("reg size %lu, wasted %lu", total, wasted);
+	wasted += align_up(total, PGSIZE_2MB) - total;
+	total = align_up(total, PGSIZE_2MB);
+	total += ctx_tx_buffer_region(dp);
+	log_info("allocating %lu bytes for tx buf pool", ctx_tx_buffer_region(dp));
+
+	log_info("reg size %lu, wasted %lu", total, wasted);
 
 	return total;
 }
@@ -802,13 +769,9 @@ static void free_qp(struct qp *qp)
 
 }
 
-void free_ctx(struct proc *p)
+static void free_ctx(struct directpath_ctx *ctx)
 {
 	int i, ret;
-	struct directpath_ctx *ctx = (struct directpath_ctx *)p->directpath_data;
-
-	if (!ctx)
-		return;
 
 	if (ctx->mreg) {
 		ret = ibv_dereg_mr(ctx->mreg);
@@ -816,14 +779,8 @@ void free_ctx(struct proc *p)
 			log_warn("couldn't free MR");
 	}
 
-	if (ctx->fte) {
-		ret = mlx5dv_devx_obj_destroy(ctx->fte);
-		if (ret) {
-			log_warn("couldn't destroy STE obj");
-		}
-
+	if (ctx->flow_tbl_index != FLOW_TBL_NR_ENTRIES)
 		bitmap_clear(mac_used_entries, ctx->flow_tbl_index);
-	}
 
 	if (ctx->tir_obj) {
 		ret = mlx5dv_devx_obj_destroy(ctx->tir_obj);
@@ -880,8 +837,9 @@ void free_ctx(struct proc *p)
 	if (ctx->pd)
 		ibv_dealloc_pd(ctx->pd);
 
+	if (ctx->p)
+		ctx->p->directpath_data = 0;
 
-	p->directpath_data = 0;
 	free(ctx->rqns);
 	free(ctx);
 }
@@ -891,39 +849,74 @@ int directpath_get_clock(unsigned int *frequency_khz, void **core_clock)
 	return mlx5_vfio_get_clock(vfcontext, frequency_khz, core_clock);
 }
 
-int alloc_directpath_ctx(struct proc *p, bool use_rmp,
-                         struct directpath_spec *spec_out, int *memfd_out,
-                         int *barfd_out)
+void directpath_get_spec(struct directpath_ctx *dp, struct directpath_spec *spec_out, int *memfd_out, int *barfd_out)
+{
+	size_t buf_sz;
+	void *buf;
+	int i;
+
+	if (dp->use_rmp)
+		wq_fill_spec(&dp->region, &dp->rmp, &spec_out->rmp);
+	else
+		spec_out->rmp.nr_entries = 0;
+
+	for (i = 0; i < dp->nr_qs; i++)
+		qp_fill_spec(&dp->region, &dp->qps[i], &spec_out->qs[i]);
+
+	buf = dp->region.base + align_up(dp->region_allocated, PGSIZE_2MB);
+	spec_out->rx_buf_region_size = ctx_rx_buffer_region(dp);
+	spec_out->tx_buf_region_size = ctx_tx_buffer_region(dp);
+
+	buf_sz = spec_out->rx_buf_region_size + spec_out->tx_buf_region_size;
+	spec_out->buf_region = ptr_to_shmptr(&dp->region, buf, buf_sz);
+
+	*memfd_out = dp->memfd;
+	*barfd_out = bar_fd;
+
+	spec_out->memfd_region_size = dp->region.len;
+	spec_out->mr = dp->mreg->lkey;
+	spec_out->va_base = (uintptr_t)dp->region.base;
+	spec_out->offs = bar_offs;
+	spec_out->bar_map_size = bar_map_size;
+}
+
+
+static int alloc_raw_ctx(unsigned int nrqs, bool use_rmp, struct directpath_ctx **dp_out)
 {
 	int ret = 0;
 	uint32_t i;
-	uint64_t buf;
-	size_t lg_cq_sz, buf_reg_sz;
+	size_t lg_cq_sz;
 	struct directpath_ctx *dp;
 	struct mlx5dv_pd pd_out;
 	struct mlx5dv_obj init_obj;
 
 	BUG_ON(!vfcontext);
 
-	dp = malloc(sizeof(*dp) + p->thread_count * sizeof(struct qp));
+	dp = malloc(sizeof(*dp) + nrqs * sizeof(struct qp));
 	if (!dp)
 		return -ENOMEM;
 
-	memset(dp, 0, sizeof(*dp) + p->thread_count * sizeof(struct qp));
-	dp->p = p;
-	p->directpath_data = (unsigned long)dp;
+	memset(dp, 0, sizeof(*dp) + nrqs * sizeof(struct qp));
 	dp->memfd = -1;
+	dp->flow_tbl_index = FLOW_TBL_NR_ENTRIES;
 	dp->command_slot = COMMAND_SLOT_UNALLOCATED;
 	dp->region.base = MAP_FAILED;
-	dp->nr_qs = p->thread_count;
+	dp->nr_qs = nrqs;
 	dp->use_rmp = use_rmp;
-	dp->rqns = malloc(sizeof(*dp->rqns) * p->thread_count);
+	dp->rqns = malloc(sizeof(*dp->rqns) * nrqs);
 	if (unlikely(!dp->rqns))
 		goto err;
 
 	dp->pd = ibv_alloc_pd(vfcontext);
 	if (!dp->pd)
 		goto err;
+
+	dp->flow_tbl_index =
+		bitmap_find_next_cleared(mac_used_entries, FLOW_TBL_NR_ENTRIES, 0);
+	if (dp->flow_tbl_index == FLOW_TBL_NR_ENTRIES) {
+		log_err("flow table exhausted!");
+		goto err;
+	}
 
 	init_obj.pd.in = dp->pd;
 	init_obj.pd.out = &pd_out;
@@ -966,10 +959,8 @@ int alloc_directpath_ctx(struct proc *p, bool use_rmp,
 			goto err;
 		}
 
-		wq_fill_spec(&dp->region, &dp->rmp, &spec_out->rmp);
 		lg_cq_sz = __builtin_ctzl(DIRECTPATH_TOTAL_RX_EL);
 	} else {
-		spec_out->rmp.nr_entries = 0;
 		lg_cq_sz = DEFAULT_CQ_LOG_SZ;
 	}
 
@@ -994,12 +985,6 @@ int alloc_directpath_ctx(struct proc *p, bool use_rmp,
 		ret = create_sq(dp, &dp->qps[i], DEFAULT_SQ_LOG_SZ);
 		if (ret)
 			goto err;
-
-		/* fill spec for runtime */
-		qp_fill_spec(&dp->region, &dp->qps[i], &spec_out->qs[i]);
-
-		/* fill info for iokernel polling */
-		qp_fill_iokspec(&p->threads[i], &dp->qps[i]);
 	}
 
 	ret = create_rqt(dp);
@@ -1010,47 +995,81 @@ int alloc_directpath_ctx(struct proc *p, bool use_rmp,
 	if (ret)
 		goto err;
 
-	buf_reg_sz = ctx_buffer_region(dp);
-	ret = alloc_from_uregion(dp, buf_reg_sz, PGSIZE_4KB, &buf);
-	if (ret) {
-		log_err("failed to alloc rx buf region");
-		return ret;
-	}
-
-	spec_out->buf_region = ptr_to_shmptr(&dp->region, dp->region.base + buf,
-	                                     buf_reg_sz);
-
-	spec_out->tx_buf_region_size =
-		DIRECTPATH_TX_POOL_BUF((1UL << DEFAULT_SQ_LOG_SZ), dp->nr_qs);
-	spec_out->rx_buf_region_size = buf_reg_sz - spec_out->tx_buf_region_size;
-
-	dp->mreg = ibv_reg_mr(dp->pd, dp->region.base + buf, buf_reg_sz,
+	dp->mreg = ibv_reg_mr(dp->pd, dp->region.base, dp->region.len,
 	                      IBV_ACCESS_LOCAL_WRITE);
 	if (!dp->mreg) {
 		log_err("failed to create mr");
 		goto err;
 	}
 
-	ret = directpath_activate_rx(dp);
-	if (ret)
-		goto err;
-
-	*memfd_out = dp->memfd;
-	*barfd_out = bar_fd;
-
-	spec_out->memfd_region_size = dp->region.len;
-	spec_out->mr = dp->mreg->lkey;
-	spec_out->va_base = (uintptr_t)dp->region.base + buf;
-	spec_out->offs = bar_offs;
-	spec_out->bar_map_size = bar_map_size;
+	*dp_out = dp;
 
 	return 0;
 
 err:
-	log_err("err in allocating process (%d)", ret);
-	free_ctx(p);
+	log_err("err in allocating directpath ctx (%d)", ret);
+	free_ctx(dp);
 	return ret ? ret : -1;
 }
+
+void release_directpath_ctx(struct proc *p)
+{
+	assert(p->directpath_data);
+	free_ctx((struct directpath_ctx *)p->directpath_data);
+}
+
+void directpath_preallocate(bool use_rmp, unsigned int nrqs, unsigned int cnt)
+{
+	int ret;
+	unsigned int i;
+
+	for (i = 0; i < cnt; i++) {
+		if (nr_prealloc == MAX_PREALLOC)
+			break;
+
+		ret = alloc_raw_ctx(nrqs, use_rmp, &preallocated_ctx[nr_prealloc]);
+		if (ret)
+			break;
+
+		nr_prealloc++;
+	}
+}
+
+int alloc_directpath_ctx(struct proc *p, bool use_rmp,
+                         struct directpath_spec *spec_out, int *memfd_out,
+                         int *barfd_out)
+{
+	int ret;
+	unsigned int i;
+	struct directpath_ctx *dp = NULL;
+
+	for (i = 0; i < nr_prealloc; i++) {
+		if (preallocated_ctx[i]->nr_qs == p->thread_count &&
+		    preallocated_ctx[i]->use_rmp == use_rmp) {
+			dp = preallocated_ctx[i];
+			preallocated_ctx[i] = preallocated_ctx[--nr_prealloc];
+			break;
+		}
+	}
+
+	if (!dp) {
+		log_warn_ratelimited("allocating fresh context on startup path");
+		ret = alloc_raw_ctx(p->thread_count, use_rmp, &dp);
+		if (unlikely(ret))
+			return ret;
+	}
+
+	dp->p = p;
+	p->directpath_data = (unsigned long)dp;
+
+	/* fill info for iokernel polling */
+	for (i = 0; i < p->thread_count; i++)
+		qp_fill_iokspec(&p->threads[i], &dp->qps[i]);
+
+	directpath_get_spec(dp, spec_out, memfd_out, barfd_out);
+	return 0;
+}
+
 
 int directpath_init(void)
 {
