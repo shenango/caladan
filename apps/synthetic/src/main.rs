@@ -676,17 +676,18 @@ fn run_client_worker(
     for sched in schedules.iter() {
         end += duration_to_ns(sched.runtime);
         loop {
-            let nxt = last + sched.arrival.sample(&mut rng);
-            if nxt >= end {
-                break;
-            }
-            last = nxt;
             packets.push(Packet {
                 randomness: rng.gen::<u64>(),
                 target_start: Duration::from_nanos(last),
                 work_iterations: sched.service.sample(&mut rng),
                 ..Default::default()
             });
+
+            let nxt = last + sched.arrival.sample(&mut rng);
+            if nxt >= end {
+                break;
+            }
+            last = nxt;
         }
         sched_boundaries.push(packets.len());
     }

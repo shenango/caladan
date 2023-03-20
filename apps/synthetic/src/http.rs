@@ -109,16 +109,28 @@ fn header_extract(state: ParseState, buf: &[u8]) -> io::Result<ParseState> {
                     return Ok(ParseState::Done(next_line_begin + 2, content_len.unwrap()));
                 }
                 let header_ln = &buf[next_line_begin..idx + next_line_begin];
-                if header_ln.len() > 16 {
-                    let utfln = unsafe { std::str::from_utf8_unchecked(&header_ln[..16]) };
-                    if utfln.eq_ignore_ascii_case("content-length: ") {
-                        let value = unsafe { std::str::from_utf8_unchecked(&header_ln[16..]) }
-                            .parse::<usize>();
-                        if value.is_err() {
-                            return Err(Error::new(ErrorKind::Other, "content-length not u64"));
-                        }
-                        content_len = Some(value.unwrap());
+
+                let utfln = unsafe { std::str::from_utf8_unchecked(&header_ln[..]) };
+                if next_line_begin == 0 {
+                    // Check for "HTTP/1.* 200 OK"
+                    if !utfln[..7].eq_ignore_ascii_case("HTTP/1.")
+                        || !utfln[8..].eq_ignore_ascii_case(" 200 OK")
+                    {
+                        return Err(Error::new(
+                            ErrorKind::Other,
+                            format!("got bad HTTP response: {}", utfln),
+                        ));
                     }
+                } else if utfln.eq_ignore_ascii_case("connection: close") {
+                    return Err(Error::new(ErrorKind::Other, "server closed connection"));
+                } else if header_ln.len() > 16
+                    && utfln[..16].eq_ignore_ascii_case("content-length: ")
+                {
+                    let value = utfln[16..].parse::<usize>();
+                    if value.is_err() {
+                        return Err(Error::new(ErrorKind::Other, "content-length not u64"));
+                    }
+                    content_len = Some(value.unwrap());
                 }
 
                 next_line_begin += idx + 2;
