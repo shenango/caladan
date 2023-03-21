@@ -267,6 +267,7 @@ static size_t ctx_rx_buffer_region(struct directpath_ctx *dp)
 
 static size_t ctx_tx_buffer_region(struct directpath_ctx *dp)
 {
+	return ctx_rx_buffer_region(dp);
 	size_t buflen = MBUF_DEFAULT_LEN;
 	buflen *= (1UL << DEFAULT_SQ_LOG_SZ) * 8 * dp->nr_qs;
 	return align_up(buflen, PGSIZE_2MB);
