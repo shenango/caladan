@@ -58,12 +58,13 @@ struct ksched_percpu {
 static DEFINE_PER_CPU(struct ksched_percpu, kp);
 
 enum {
-	PARKED = 0,
-	UNPARKED
+	PARKED = 1,
+	UNPARKED = 2
 };
 
 void mark_task_parked(struct task_struct *tsk)
 {
+	// TODO: this field removed in kernel 6.1
 	/* borrow the trace field here which is origally used by Ftrace */
 	tsk->trace = PARKED;
 }
