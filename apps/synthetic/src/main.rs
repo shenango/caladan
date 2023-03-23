@@ -809,7 +809,7 @@ fn run_client_worker(
 fn run_client(
     proto: Arc<Box<dyn LoadgenProtocol>>,
     backend: Backend,
-    addr: SocketAddrV4,
+    addrs: &Vec<SocketAddrV4>,
     nthreads: usize,
     tport: Transport,
     barrier_group: &mut Option<lockstep::Group>,
@@ -830,6 +830,7 @@ fn run_client(
             let wg = wg.clone();
             let wg_start = wg_start.clone();
             let schedules = schedules.clone();
+            let addr = addrs[i % addrs.len()];
 
             backend.spawn_thread(move || {
                 run_client_worker(
@@ -1002,6 +1003,7 @@ fn main() {
         .arg(
             Arg::with_name("ADDR")
                 .index(1)
+                .multiple(true)
                 .help("Address and port to listen on")
                 .required(true),
         )
@@ -1179,7 +1181,11 @@ fn main() {
         .args(&HttpProtocol::args())
         .get_matches();
 
-    let addr: SocketAddrV4 = FromStr::from_str(matches.value_of("ADDR").unwrap()).unwrap();
+    let addrs: Vec<SocketAddrV4> = matches
+        .values_of("ADDR")
+        .unwrap()
+        .map(|val| FromStr::from_str(val).unwrap())
+        .collect();
     let nthreads = value_t_or_exit!(matches, "threads", usize);
     let discard_pct = value_t_or_exit!(matches, "discard_pct", f32);
 
@@ -1250,19 +1256,19 @@ fn main() {
     match mode {
         "spawner-server" => match tport {
             Transport::Udp => {
-                backend.init_and_run(config, move || run_spawner_server(addr, &fwspec))
+                backend.init_and_run(config, move || run_spawner_server(addrs[0], &fwspec))
             }
-            Transport::Tcp => {
-                backend.init_and_run(config, move || run_tcp_server(backend, addr, fakeworker))
-            }
+            Transport::Tcp => backend.init_and_run(config, move || {
+                run_tcp_server(backend, addrs[0], fakeworker)
+            }),
         },
         "linux-server" => match tport {
             Transport::Udp => backend.init_and_run(config, move || {
-                run_linux_udp_server(backend, addr, nthreads, fakeworker)
+                run_linux_udp_server(backend, addrs[0], nthreads, fakeworker)
             }),
-            Transport::Tcp => {
-                backend.init_and_run(config, move || run_tcp_server(backend, addr, fakeworker))
-            }
+            Transport::Tcp => backend.init_and_run(config, move || {
+                run_tcp_server(backend, addrs[0], fakeworker)
+            }),
         },
         "local-client" => {
             backend.init_and_run(config, move || {
@@ -1325,9 +1331,12 @@ fn main() {
                     (_, Some(lockstep::Group::Client(ref _c))) => (),
                     ("memcached", _) => {
                         let proto = MemcachedProtocol::with_args(&matches, Transport::Tcp);
-                        if !run_memcached_preload(proto, backend, Transport::Tcp, addr, nthreads) {
-                            panic!("Could not preload memcached");
+                        for addr in &addrs {
+                            if !run_memcached_preload(proto, backend, Transport::Tcp, *addr, nthreads) {
+                                panic!("Could not preload memcached");
+                            }
                         }
+
                     },
                     _ => (),
                 };
@@ -1337,7 +1346,7 @@ fn main() {
                     run_client(
                         proto,
                         backend,
-                        addr,
+                        &addrs,
                         nthreads,
                         tport,
                         &mut barrier_group,
@@ -1365,7 +1374,7 @@ fn main() {
                         run_client(
                             proto.clone(),
                             backend,
-                            addr,
+                            &addrs,
                             nthreads,
                             tport,
                             &mut barrier_group,
@@ -1390,7 +1399,7 @@ fn main() {
                     if !run_client(
                         proto.clone(),
                         backend,
-                        addr,
+                        &addrs,
                         nthreads,
                         tport,
                         &mut barrier_group,
