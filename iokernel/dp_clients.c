@@ -125,6 +125,9 @@ static void dp_clients_remove_client(struct proc *p)
 
 	}
 
+	if (p->nr_overflows)
+		list_del(&p->overflow_link);
+
 	/* TODO: free queued packets/commands? */
 
 	/* release cores assigned to this runtime */

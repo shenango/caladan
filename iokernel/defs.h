@@ -162,6 +162,7 @@ struct proc {
 	size_t max_overflows;
 	size_t nr_overflows;
 	unsigned long *overflow_queue;
+	struct list_node overflow_link;
 
 	/* table of physical addresses for shared memory */
 	physaddr_t		page_paddrs[];

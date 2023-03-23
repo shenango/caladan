@@ -33,6 +33,7 @@ struct ias_data {
 	uint64_t		qdelay_us;
 	uint64_t		quantum_us;
 	struct list_node	all_link;
+	struct list_node	congested_link;
 	DEFINE_BITMAP(reserved_cores, NCPU);
 
 	/* thread usage limits */

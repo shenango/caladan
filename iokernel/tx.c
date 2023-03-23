@@ -21,6 +21,8 @@ struct thread *ts[NCPU];
 
 static struct rte_mempool *tx_mbuf_pool;
 
+static LIST_HEAD(overflow_procs);
+
 /*
  * Private data stored in egress mbufs, used to send completions to runtimes.
  */
@@ -134,6 +136,10 @@ bool tx_send_completion(void *obj)
 		log_warn("tx: Completion overflow queue is full");
 		return false;
 	}
+
+	if (!p->nr_overflows)
+		list_add(&overflow_procs, &p->overflow_link);
+
 	p->overflow_queue[p->nr_overflows++] = priv_data->completion_data;
 	log_debug_ratelimited("tx: failed to send completion to runtime");
 	STAT_INC(COMPLETION_ENQUEUED, -1);
@@ -162,17 +168,26 @@ static int drain_overflow_queue(struct proc *p, int n)
 
 bool tx_drain_completions(void)
 {
-	static unsigned long pos = 0;
-	unsigned long i;
 	size_t drained = 0;
-	struct proc *p;
+	struct proc *p, *p_next;
+	struct list_head done;
 
-	for (i = 0; i < dp.nr_clients && drained < IOKERNEL_OVERFLOW_BATCH_DRAIN; i++) {
-		p = dp.clients[(pos + i) % dp.nr_clients];
+	if (list_empty(&overflow_procs))
+		return false;
+
+	list_head_init(&done);
+
+	list_for_each_safe(&overflow_procs, p, p_next, overflow_link) {
 		drained += drain_overflow_queue(p, IOKERNEL_OVERFLOW_BATCH_DRAIN - drained);
+		list_del_from(&overflow_procs, &p->overflow_link);
+		if (p->nr_overflows)
+			list_add_tail(&done, &p->overflow_link);
+
+		if (drained >= IOKERNEL_OVERFLOW_BATCH_DRAIN)
+			break;
 	}
 
-	pos++;
+	list_append_list(&overflow_procs, &done);
 
 	STAT_INC(COMPLETION_DRAINED, drained);
 
