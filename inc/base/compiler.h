@@ -25,7 +25,6 @@
 #define __packed __attribute__((packed))
 #endif
 #define __notused __attribute__((unused))
-#define __used __attribute__((used))
 #ifndef __aligned
 #define __aligned(x) __attribute__((aligned(x)))
 #endif
