@@ -143,7 +143,8 @@ int mlx5_init_thread(void)
 		v->cq.cqes, (1 << hs->descriptor_log_size) * hs->nr_descriptors);
 	hs->parity_byte_offset = offsetof(struct mlx5_cqe64, op_own);
 	hs->parity_bit_mask = MLX5_CQE_OWNER_MASK;
-	hs->hwq_type = HWQ_MLX5;
+	hs->hwq_type = cfg_directpath_mode == DIRECTPATH_MODE_QUEUE_STEERING ?
+		HWQ_MLX5_QSTEER : HWQ_MLX5;
 	hs->consumer_idx = ptr_to_shmptr(&netcfg.tx_region, v->shadow_tail,
 	                                 sizeof(uint32_t));
 

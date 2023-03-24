@@ -31,7 +31,6 @@ struct iokernel_cfg {
 	float	ias_bw_limit; /* IAS bw limit, (MB/s) */
 	bool	no_hw_qdel; /* Disable use of hardware timestamps for qdelay */
 	bool	vfio_directpath; /* enable new directpath using vfio */
-	bool	no_perthread_rxdelay; /* RX delays are not accounted to threads */
 	bool	no_directpath_active_rss; /* vfio directpath: keep all qs active */
 };
 
@@ -390,9 +389,7 @@ extern void directpath_preallocate(bool use_rmp, unsigned int nrqs, unsigned int
 
 /* must be called from the dataplane thread */
 extern bool directpath_poll(void);
-extern void directpath_poll_thread_delay(struct proc *p, struct thread *th,
-                                  uint64_t *delay, uint64_t cur_tsc);
-extern void directpath_poll_proc(struct proc *p, uint64_t cur_tsc);
+extern void directpath_poll_proc(struct proc *p, uint64_t *delay_cycles, uint64_t cur_tsc);
 extern void directpath_notify_waking(struct proc *p, struct thread *th);
 extern void directpath_dataplane_notify_kill(struct proc *p);
 extern void directpath_dataplane_attach(struct proc *p);

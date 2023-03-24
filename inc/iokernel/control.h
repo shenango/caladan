@@ -17,7 +17,7 @@
  * struct control_hdr, please increment the version number!
  */
 
-#define CONTROL_HDR_VERSION 7
+#define CONTROL_HDR_VERSION 8
 
 /* The abstract namespace path for the control socket. */
 #define CONTROL_SOCK_PATH	"\0/control/iokernel.sock"
@@ -55,12 +55,12 @@ struct congestion_info {
 struct runtime_info {
 	struct congestion_info congestion;
 	uint64_t directpath_strides_posted;
-	unsigned int flow_tbl[NCPU];
 };
 
 enum {
 	HWQ_INVALID = 0,
 	HWQ_MLX5,
+	HWQ_MLX5_QSTEER,
 	HWQ_SPDK_NVME,
 	NR_HWQ,
 };

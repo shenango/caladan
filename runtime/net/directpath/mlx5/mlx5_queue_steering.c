@@ -13,7 +13,6 @@ static inline void assign_q(unsigned int qidx, unsigned int kidx)
 	rcu_hlist_del(&rxqs[qidx].link);
 	rcu_hlist_add_head(&rxqs[kidx].head, &rxqs[qidx].link);
 	queue_assignments[qidx] = kidx;
-	ACCESS_ONCE(runtime_info->flow_tbl[qidx]) = kidx;
 }
 
 static int mlx5_qs_steer(unsigned int *new_fg_assignment)

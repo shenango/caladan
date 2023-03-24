@@ -53,15 +53,91 @@ static void directpath_arm_queue(struct cq *cq, uint32_t cons_idx)
 	cq->state = RXQ_STATE_ARMED;
 }
 
-void directpath_poll_proc(struct proc *p, uint64_t cur_tsc)
+static uint32_t directpath_cq_cons_tail(struct cq *cq)
 {
-	struct cq *cq;
+	return be32toh(ACCESS_ONCE(cq->dbrec[0]));
+}
+
+static void directpath_poll_cq(struct directpath_ctx *ctx,
+                               unsigned int thread_idx, uint64_t parked_tsc,
+                               uint64_t *delay, uint64_t cur_tsc)
+{
+	uint32_t cur_tail;
+	struct cq *cq = &ctx->qps[thread_idx].rx_cq;
+	struct mlx5_cqe64 *cqe;
+
+	if (cq->state == RXQ_STATE_DISABLED || cq->state == RXQ_STATE_ARMED)
+		return;
+
+	cur_tail = directpath_cq_cons_tail(cq);
+	cqe = get_cqe(cq, cur_tail);
+
+	/* report the delay if a packet is waiting */
+	if (cqe) {
+		*delay = MAX(hw_timestamp_delay_us(cqe), *delay);
+		return;
+	}
+
+	/* thread is active; no changes to polling state */
+	if (!parked_tsc || cfg.no_directpath_active_rss)
+		return;
+
+	directpath_arm_queue(cq, cur_tail);
+	ctx->nr_armed++;
+	return;
+
+#if 0
+
+	/* check if an RSS update completed that disables this queue */
+	if (cq->state == RXQ_STATE_DISABLING) {
+		if (cq->disable_gen <= ctx->hw_rss_gen) {
+			cq->state = RXQ_STATE_DISABLED;
+			ctx->disabled_rx_count++;
+		}
+		return;
+	}
+
+	/*
+	 * disable this rx queue if:
+	 *	(1) it is not the last active queue
+	 *  (2) the corresponding thread has been asleep for QUEUE_DEMOTION_US
+	 */
+
+	if (ctx->active_rx_count == 1)
+		return;
+
+	if (parked_tsc + QUEUE_DEMOTION_US * cycles_per_us > cur_tsc)
+		return;
+
+	cq->disable_gen = ++ctx->sw_rss_gen;
+	cq->state = RXQ_STATE_DISABLING;
+	ctx->active_rx_count--;
+	bitmap_clear(ctx->active_rx_queues, thread_idx);
+#endif
+}
+
+void directpath_poll_proc(struct proc *p, uint64_t *delay_cycles, uint64_t cur_tsc)
+{
 	struct directpath_ctx *ctx = (struct directpath_ctx *)p->directpath_data;
+	struct thread *th;
+#if 0
+	struct cq *cq;
 	struct thread *lastth;
 	uint32_t cons_idx;
+#endif
+	uint64_t delay = 0;
+	unsigned int i;
 
-	if (ctx->fully_armed)
+	if (ctx->nr_armed == ctx->nr_qs)
 		return;
+
+	for (i = 0; i < ctx->nr_qs; i++) {
+		th = &p->threads[i];
+		directpath_poll_cq(ctx, i, th->active ? 0 : th->park_tsc, &delay, cur_tsc);
+	}
+
+	delay *= cycles_per_us;
+	*delay_cycles = MAX(*delay_cycles, delay);
 
 	if (ctx->hw_rss_gen < ctx->sw_rss_gen) {
 		if (!directpath_command_queued(ctx))
@@ -69,6 +145,7 @@ void directpath_poll_proc(struct proc *p, uint64_t cur_tsc)
 		return;
 	}
 
+#if 0
 	if (p->active_thread_count)
 		return;
 
@@ -84,7 +161,8 @@ void directpath_poll_proc(struct proc *p, uint64_t cur_tsc)
 	cq = &ctx->qps[lastth - p->threads].rx_cq;
 	cons_idx = ACCESS_ONCE(lastth->q_ptrs->directpath_rx_tail);
 	directpath_arm_queue(cq, cons_idx);
-	ctx->fully_armed = true;
+	ctx->nr_armed++;
+#endif
 }
 
 void directpath_handle_completion_eqe(struct mlx5_eqe *eqe)
@@ -99,9 +177,9 @@ void directpath_handle_completion_eqe(struct mlx5_eqe *eqe)
 	BUG_ON(!hwq_busy(h, ACCESS_ONCE(*h->consumer_idx)));
 #endif
 
-	BUG_ON(cq->state != RXQ_STATE_ARMED);
+	// BUG_ON(cq->state != RXQ_STATE_ARMED);
 	cq->state = RXQ_STATE_ACTIVE;
-	ctx->fully_armed = false;
+	ctx->nr_armed--;
 }
 
 void directpath_handle_cq_error_eqe(struct mlx5_eqe *eqe)
@@ -132,54 +210,6 @@ void directpath_notify_waking(struct proc *p, struct thread *th)
 	++ctx->sw_rss_gen;
 }
 
-void directpath_poll_thread_delay(struct proc *p, struct thread *th,
-                                  uint64_t *delay, uint64_t cur_tsc)
-{
-	uint32_t cur_tail, tidx = th - p->threads;
-	struct directpath_ctx *ctx = (struct directpath_ctx *)p->directpath_data;
-	struct cq *cq = &ctx->qps[tidx].rx_cq;
-	struct mlx5_cqe64 *cqe;
 
-	if (cq->state == RXQ_STATE_DISABLED || cq->state == RXQ_STATE_ARMED)
-		return;
 
-	cur_tail = ACCESS_ONCE(th->q_ptrs->directpath_rx_tail);
-	cqe = get_cqe(cq, cur_tail);
-
-	/* report the delay if a packet is waiting */
-	if (cqe) {
-		*delay = hw_timestamp_delay_us(cqe) * cycles_per_us;
-		return;
-	}
-
-	/* thread is active; no changes to polling state */
-	if (th->active || cfg.no_directpath_active_rss)
-		return;
-
-	/* check if an RSS update completed that disables this queue */
-	if (cq->state == RXQ_STATE_DISABLING) {
-		if (cq->disable_gen <= ctx->hw_rss_gen) {
-			cq->state = RXQ_STATE_DISABLED;
-			ctx->disabled_rx_count++;
-		}
-		return;
-	}
-
-	/*
-	 * disable this rx queue if:
-	 *	(1) it is not the last active queue
-	 *  (2) the corresponding thread has been asleep for QUEUE_DEMOTION_US
-	 */
-
-	if (ctx->active_rx_count == 1)
-		return;
-
-	if (th->park_tsc + QUEUE_DEMOTION_US * cycles_per_us > cur_tsc)
-		return;
-
-	cq->disable_gen = ++ctx->sw_rss_gen;
-	cq->state = RXQ_STATE_DISABLING;
-	ctx->active_rx_count--;
-	bitmap_clear(ctx->active_rx_queues, tidx);
-}
 #endif

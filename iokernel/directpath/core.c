@@ -191,14 +191,8 @@ static void qp_fill_iokspec(struct thread *th, struct qp *qp)
 {
 	struct hwq *h = &th->directpath_hwq;
 
-	h->descriptor_table = qp->rx_cq.buf;
-	h->descriptor_log_size = __builtin_ctzl(sizeof(struct mlx5_cqe64));
-	h->nr_descriptors = qp->rx_cq.cqe_cnt;
-	h->parity_byte_offset = offsetof(struct mlx5_cqe64, op_own);
-	h->parity_bit_mask = MLX5_CQE_OWNER_MASK;
-	h->hwq_type = HWQ_MLX5;
-	h->enabled = true;
-	h->consumer_idx = &th->q_ptrs->directpath_rx_tail;
+	h->hwq_type = HWQ_INVALID;
+	h->enabled = false;
 }
 
 static int setup_steering(void)

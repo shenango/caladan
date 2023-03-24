@@ -166,7 +166,6 @@ static int mlx5_init_fg_tables(void)
 			return ret;
 
 		fg_qp_assignment[i] = 0;
-		ACCESS_ONCE(runtime_info->flow_tbl[i]) = i;
 	}
 
 	return 0;

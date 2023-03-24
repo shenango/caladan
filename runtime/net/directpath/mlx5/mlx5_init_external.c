@@ -54,6 +54,9 @@ static int mlx5_init_ext_thread_rx(struct shm_region *reg,
 	if (unlikely(ret))
 		return ret;
 
+	/* alias shadow tail, scheduler does not use it for vfio directpath */
+	v->shadow_tail = &v->cq.head;
+
 	if (cfg_directpath_strided)
 		return 0;
 

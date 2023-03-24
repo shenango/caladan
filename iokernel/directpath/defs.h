@@ -98,9 +98,11 @@ struct directpath_ctx {
 	struct proc *p;
 
 	unsigned int kill:1;
-	unsigned int fully_armed:1;
 	unsigned int use_rmp:1;
 	unsigned int has_flow_rule:1;
+
+	uint32_t	nr_armed;
+	uint32_t	nr_qs;
 
 	/* command data */
 	int8_t command_slot;
@@ -144,7 +146,6 @@ struct directpath_ctx {
 	ssize_t *uarns;
 	size_t nr_alloc_uarn;
 
-	uint32_t nr_qs;
 	struct qp qps[];
 };
 

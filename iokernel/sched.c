@@ -348,7 +348,7 @@ static bool sched_queue_has_hw_timestamp(struct hwq *h)
 	if (!is_hw_timestamp_enabled())
 		return false;
 
-	return h->hwq_type == HWQ_MLX5;
+	return h->hwq_type == HWQ_MLX5 || h->hwq_type == HWQ_MLX5_QSTEER;
 }
 
 static void
@@ -361,15 +361,6 @@ sched_measure_hardware_delay(struct thread *th, struct hwq *h,
 
 	if (!h->enabled)
 		return;
-
-	if (h == &th->directpath_hwq && th->p->has_vfio_directpath) {
-		directpath_poll_thread_delay(th->p, th, delay_cycles, cur_tsc);
-		if (*delay_cycles) {
-			*has_work = true;
-			*standing_queue |= *delay_cycles >= IOKERNEL_POLL_INTERVAL * cycles_per_us;
-		}
-		return;
-	}
 
 	/* fast way to measuring queueing in MLX hardware queues */
 	if (sched_queue_has_hw_timestamp(h)) {
@@ -445,7 +436,7 @@ sched_measure_kthread_delay(struct thread *th, uint64_t *thread_delay,
                             uint64_t *rxq_delay, bool *has_work,
                             bool *standing_queue)
 {
-	uint32_t cur_tail, cur_head, last_head, last_tail, qidx;
+	uint32_t cur_tail, cur_head, last_head, last_tail;
 	uint64_t tmp;
 
 	/* UTHREAD: measure delay */
@@ -498,13 +489,14 @@ sched_measure_kthread_delay(struct thread *th, uint64_t *thread_delay,
 	 * DIRECTPATH: measure delay and update signals.
 	 * ignore the busy signal here.
 	 */
-	bool a, b;
-	tmp = 0;
-	sched_measure_hardware_delay(th, &th->directpath_hwq, true, &a, &b, &tmp);
-	qidx = ACCESS_ONCE(th->p->runtime_info->flow_tbl[th - th->p->threads]);
-	BUG_ON(qidx >= th->p->thread_count);
-	/* assign delay to the thread assigned to poll this queue */
-	rxq_delay[qidx] = MAX(rxq_delay[qidx], tmp);
+	if (th->directpath_hwq.hwq_type == HWQ_MLX5_QSTEER) {
+		bool a, b;
+		sched_measure_hardware_delay(th, &th->directpath_hwq, true, &a, &b, rxq_delay);
+	} else {
+		tmp = 0;
+		sched_measure_hardware_delay(th, &th->directpath_hwq, true, has_work, standing_queue, &tmp);
+		*thread_delay += tmp;
+	}
 
 	/* STORAGE: measure delay and update signals */
 	tmp = 0;
@@ -528,18 +520,10 @@ static void sched_report_metrics(struct proc *p, uint64_t delay)
 
 static void sched_measure_delay(struct proc *p)
 {
-	/* per-thread has-work-pending busy signal */
-	bool has_work_pending[p->thread_count];
-	/* per-thread standing queue signal */
-	bool standing_queue[p->thread_count];
 	struct delay_info dl;
-	/* per-thread direcpath delays, max delay among assigned qs */
-	uint64_t rxq_delay[p->thread_count];
-	/* per-thread delays (uthread + lrpc rxq + timer + storage) */
-	uint64_t total_delay[p->thread_count];
-	unsigned int i;
-
 	struct thread *th;
+	uint64_t rxq_delay = 0;
+	unsigned int i;
 
 	dl.has_work = false;
 	dl.standing_queue = false;
@@ -548,20 +532,33 @@ static void sched_measure_delay(struct proc *p)
 	dl.min_delay_us = UINT64_MAX;
 	dl.avg_delay_us = 0;
 
-	/* zero the rxq delays */
-	memset(rxq_delay, 0, sizeof(uint64_t) * p->thread_count);
-
 	uint64_t consumed_strides = 0;
 
 	/* detect per-kthread delay */
 	for (i = 0; i < p->thread_count; i++) {
-		has_work_pending[i] = standing_queue[i] = false;
-		total_delay[i] = 0;
-		sched_measure_kthread_delay(&p->threads[i],
-				  &total_delay[i], rxq_delay,
-				  &has_work_pending[i], &standing_queue[i]);
+		bool busy = false;
+		uint64_t delay = 0;
+		th = &p->threads[i];
+		sched_measure_kthread_delay(th, &delay, &rxq_delay, &busy,
+			                        &dl.standing_queue);
+
+		dl.has_work |= busy;
+		dl.parked_thread_busy |= busy && !th->active;
+		dl.max_delay_us = MAX(delay, dl.max_delay_us);
+		dl.avg_delay_us += delay;
+
+		if (th->active && delay < dl.min_delay_us) {
+			dl.min_delay_us = delay;
+			dl.min_delay_core = th->core;
+		}
+
+		sched_update_kthread_metrics(th, busy);
+
 		consumed_strides += ACCESS_ONCE(p->threads[i].q_ptrs->directpath_strides_consumed);
 	}
+
+	if (p->has_vfio_directpath)
+		directpath_poll_proc(p, &rxq_delay, cur_tsc);
 
 	uint64_t posted_strides = ACCESS_ONCE(p->runtime_info->directpath_strides_posted);
 
@@ -571,47 +568,18 @@ static void sched_measure_delay(struct proc *p)
 		STAT_INC(RX_REFILL, 1);
 	}
 
-	for (i = 0; i < p->thread_count; i++) {
-		th = &p->threads[i];
+	if (rxq_delay) {
+		dl.max_delay_us += rxq_delay;
+		dl.avg_delay_us += rxq_delay * p->thread_count;
+		dl.min_delay_us += rxq_delay;
 
-		if (cfg.no_perthread_rxdelay) {
-			rxq_delay[0] = MAX(rxq_delay[0], rxq_delay[i]);
-		} else {
-			/* finalize the total delay for this thread */
-			total_delay[i] += rxq_delay[i];
-
-			/* finalize has-work-pending signal by including rxq delays */
-			has_work_pending[i] |= rxq_delay[i] > 0;
-
-			/* finalize standing queue signal by including rxq delays */
-			standing_queue[i] |= rxq_delay[i] >= IOKERNEL_POLL_INTERVAL * cycles_per_us;
-		}
-
-		/* update delay metrics */
-		dl.has_work |= has_work_pending[i];
-		dl.parked_thread_busy |= has_work_pending[i] && !th->active;
-		dl.standing_queue |= standing_queue[i];
-		dl.max_delay_us = MAX(total_delay[i], dl.max_delay_us);
-		dl.avg_delay_us += total_delay[i];
-
-		if (th->active && total_delay[i] < dl.min_delay_us) {
-			dl.min_delay_us = total_delay[i];
-			dl.min_delay_core = th->core;
-		}
-
-		sched_update_kthread_metrics(th, standing_queue[i]);
-
+		dl.standing_queue |= rxq_delay >= IOKERNEL_POLL_INTERVAL * cycles_per_us;
+		dl.parked_thread_busy |= sched_threads_active(p) == 0;
 	}
 
 	/* don't report parked busy if no threads are active */
 	if (cfg.noidlefastwake && sched_threads_active(p) == 0)
 		dl.parked_thread_busy = false;
-
-	if (cfg.no_perthread_rxdelay) {
-		dl.max_delay_us += rxq_delay[0];
-		dl.avg_delay_us += rxq_delay[0] * p->thread_count;
-		dl.min_delay_us += rxq_delay[0];
-	}
 
 	/* convert the delays to us */
 	dl.max_delay_us /= (double)cycles_per_us;
@@ -712,8 +680,6 @@ void sched_poll(void)
 		for (i = 0; i < dp.nr_clients; i++) {
 			p = dp.clients[i];
 			sched_measure_delay(p);
-			if (p->has_vfio_directpath)
-				directpath_poll_proc(p, cur_tsc);
 		}
 	} else {
 		/* check if any idle directpath runtimes have received I/Os */
