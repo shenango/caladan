@@ -462,6 +462,11 @@ static void control_remove_client(struct proc *p)
 	if (p->attach_fail)
 		kill(p->pid, SIGINT);
 
+	if (!p->removed) {
+		epoll_ctl_del(p->control_fd);
+		close(p->control_fd);
+	}
+
 	control_destroy_proc(p);
 }
 

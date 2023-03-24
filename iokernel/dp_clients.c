@@ -15,7 +15,7 @@
 #include "defs.h"
 #include "sched.h"
 
-#define MAC_TO_PROC_ENTRIES	128
+#define MAC_TO_PROC_ENTRIES	IOKERNEL_MAX_PROC
 
 static struct lrpc_chan_out lrpc_data_to_control;
 static struct lrpc_chan_in lrpc_control_to_data;
