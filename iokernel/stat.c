@@ -26,9 +26,8 @@ static const char *stat_names[] = {
 	"LOOPS",
 	"TX_PULLED",
 	"TX_BACKPRESSURE",
-	"RQ_GRANT",
-	"RX_GRANT",
 	"SCHED_RUN",
+	"RX_REFILL",
 };
 
 BUILD_ASSERT(ARRAY_SIZE(stat_names) == NR_STATS);

@@ -193,7 +193,7 @@ static void qp_fill_iokspec(struct thread *th, struct qp *qp)
 
 	h->descriptor_table = qp->rx_cq.buf;
 	h->descriptor_log_size = __builtin_ctzl(sizeof(struct mlx5_cqe64));
-	h->nr_descriptors = 1UL << DEFAULT_CQ_LOG_SZ;
+	h->nr_descriptors = qp->rx_cq.cqe_cnt;
 	h->parity_byte_offset = offsetof(struct mlx5_cqe64, op_own);
 	h->parity_bit_mask = MLX5_CQE_OWNER_MASK;
 	h->hwq_type = HWQ_MLX5;
@@ -1022,6 +1022,8 @@ static int alloc_raw_ctx(unsigned int nrqs, bool use_rmp, struct directpath_ctx 
 		log_err("flow table exhausted!");
 		goto err;
 	}
+
+	bitmap_set(mac_used_entries, dp->flow_tbl_index);
 
 	init_obj.pd.in = dp->pd;
 	init_obj.pd.out = &pd_out;
