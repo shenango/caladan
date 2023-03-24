@@ -163,6 +163,8 @@ struct proc {
 	unsigned long *overflow_queue;
 	struct list_node overflow_link;
 
+	int				control_fd;
+
 	/* table of physical addresses for shared memory */
 	physaddr_t		page_paddrs[];
 };

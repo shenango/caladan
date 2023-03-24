@@ -9,7 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/eventfd.h>
-#include <sys/select.h>
+#include <sys/epoll.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -30,10 +30,12 @@
 #include "defs.h"
 #include "sched.h"
 
+#define EPOLL_CONTROLFD_COOKIE 0
+#define EPOLL_EFD_COOKIE 1
+
 static int controlfd;
-static int clientfds[IOKERNEL_MAX_PROC];
-static struct proc *clients[IOKERNEL_MAX_PROC];
-static int nr_clients;
+static int epoll_fd;
+static unsigned int nr_clients;
 struct lrpc_params lrpc_control_to_data_params;
 struct lrpc_params lrpc_data_to_control_params;
 int data_to_control_efd;
@@ -41,6 +43,32 @@ static struct lrpc_chan_out lrpc_control_to_data;
 static struct lrpc_chan_in lrpc_data_to_control;
 
 struct iokernel_info *iok_info;
+
+static int epoll_ctl_add(int fd, void *arg)
+{
+	struct epoll_event ev;
+
+	ev.events = EPOLLIN | EPOLLERR;
+	ev.data.fd = fd;
+	ev.data.ptr = arg;
+	if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fd, &ev) < 0) {
+		perror("epoll_ctl: EPOLL_CTL_ADD");
+		return -errno;
+	}
+
+	return 0;
+}
+
+
+static int epoll_ctl_del(int fd)
+{
+	if (epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, NULL) < 0) {
+		perror("epoll_ctl: EPOLL_CTL_DEL");
+		return -errno;
+	}
+
+	return 0;
+}
 
 static void *copy_shm_data(struct shm_region *r, shmptr_t ptr, size_t len)
 {
@@ -318,6 +346,7 @@ static void control_destroy_proc(struct proc *p)
 			log_warn("control: got ret %d when removing mac address", ret);
 	}
 
+	nr_clients--;
 	mem_unmap_shm(p->region.base);
 	free(p->overflow_queue);
 	free(p);
@@ -384,123 +413,86 @@ static void control_add_client(void)
 		}
 	}
 
+	ret = epoll_ctl_add(fd, p);
+	if (ret) {
+		log_err("control: failed to add proc to epoll set");
+		goto fail_destroy_proc;
+	}
 
 	if (!lrpc_send(&lrpc_control_to_data, DATAPLANE_ADD_CLIENT,
 			(unsigned long) p)) {
 		log_err("control: failed to inform dataplane of new client '%d'",
 				ucred.pid);
-		goto fail_destroy_proc;
+		goto fail_efd;
 	}
 
 	// TODO: a preallocation policy: for now just allocate another one like this
 	if (p->has_vfio_directpath)
 		directpath_preallocate(p->vfio_directpath_rmp, p->thread_count, 1);
 
-	clients[nr_clients] = p;
-	clientfds[nr_clients++] = fd;
+	nr_clients++;
+	p->control_fd = fd;
 	return;
 
+fail_efd:
+	epoll_ctl_del(fd);
 fail_destroy_proc:
 	control_destroy_proc(p);
 fail:
 	close(fd);
 }
 
-static void control_instruct_dataplane_to_remove_client(int fd)
+static void control_instruct_dataplane_to_remove_client(struct proc *p)
 {
-	int i;
+	p->removed = true;
 
-	for (i = 0; i < nr_clients; i++) {
-		if (clientfds[i] == fd)
-			break;
-	}
-
-	if (i == nr_clients) {
-		WARN();
-		return;
-	}
-
-	clients[i]->removed = true;
 	if (!lrpc_send(&lrpc_control_to_data, DATAPLANE_REMOVE_CLIENT,
-			(unsigned long) clients[i])) {
+			(unsigned long)p)) {
 		log_err("control: failed to inform dataplane of removed client");
+	} else {
+		/* remove fd from set once we have notified dataplane */
+		epoll_ctl_del(p->control_fd);
+		close(p->control_fd);
 	}
 }
 
 static void control_remove_client(struct proc *p)
 {
-	int i;
-
-	for (i = 0; i < nr_clients; i++) {
-		if (clients[i] == p)
-			break;
-	}
-
-	if (i == nr_clients) {
-		WARN();
-		return;
-	}
-
 	/* client failed to attach to scheduler, notify with signal */
 	if (p->attach_fail)
 		kill(p->pid, SIGINT);
 
 	control_destroy_proc(p);
-	clients[i] = clients[nr_clients - 1];
-
-	close(clientfds[i]);
-	clientfds[i] = clientfds[nr_clients - 1];
-	nr_clients--;
 }
 
 static void control_loop(void)
 {
-	fd_set readset;
-	int maxfd, i, nrdy;
+	int ret;
 	uint64_t cmd, efdval;
 	unsigned long payload;
 	struct proc *p;
+	struct epoll_event ev;
 
 	pthread_barrier_wait(&init_barrier);
 
 	while (1) {
-		maxfd = MAX(controlfd, data_to_control_efd);
-		FD_ZERO(&readset);
-		FD_SET(controlfd, &readset);
-		FD_SET(data_to_control_efd, &readset);
+		ret = epoll_wait(epoll_fd, &ev, 1, -1);
+		while (ret == -1 && errno == EINTR)
+			ret = epoll_wait(epoll_fd, &ev, 1, -1);
 
-		for (i = 0; i < nr_clients; i++) {
-			if (clients[i]->removed)
-				continue;
-
-			FD_SET(clientfds[i], &readset);
-			maxfd = (clientfds[i] > maxfd) ? clientfds[i] : maxfd;
+		if (ret != 1) {
+			log_err("control: epoll_wait got %d (errno %d)", ret, errno);
+			exit(1);
 		}
 
-		nrdy = select(maxfd + 1, &readset, NULL, NULL, NULL);
-		while (nrdy == -1 && errno == EINTR)
-			nrdy = select(maxfd + 1, &readset, NULL, NULL, NULL);
-		if (nrdy == -1) {
-			log_err("control: select() failed [%s]",
-				strerror(errno));
-			BUG();
-		}
-
-		for (i = 0; i <= maxfd && nrdy > 0; i++) {
-			if (!FD_ISSET(i, &readset))
-				continue;
-
-			if (i == data_to_control_efd) {
-				/* do nothing */
-			} else if (i == controlfd) {
-				/* accept a new connection */
-				control_add_client();
-			} else {
-				/* close an existing connection */
-				control_instruct_dataplane_to_remove_client(i);
-			}
-
-			nrdy--;
+		if (ev.data.u64 == EPOLL_EFD_COOKIE) {
+			/* do nothing */
+		} else if (ev.data.fd == EPOLL_CONTROLFD_COOKIE) {
+			/* accept a new connection */
+			control_add_client();
+		} else {
+			p = (struct proc *)ev.data.ptr;
+			control_instruct_dataplane_to_remove_client(p);
 		}
 
 		do {
@@ -603,6 +595,9 @@ static int control_init_dataplane_comm(void)
 	if (data_to_control_efd < 0)
 		return -errno;
 
+	if (epoll_ctl_add(data_to_control_efd, (void *)EPOLL_EFD_COOKIE))
+		return -1;
+
 	return 0;
 
 fail_free_wb_in:
@@ -675,6 +670,15 @@ int control_init(void)
 		close(sfd);
 		return -errno;
 	}
+
+	epoll_fd = epoll_create1(0);
+	if (epoll_fd < 0) {
+		log_err("control: failed to create epoll fd");
+		return -1;
+	}
+
+	if (epoll_ctl_add(sfd, EPOLL_CONTROLFD_COOKIE))
+		return -1;
 
 	ret = control_init_dataplane_comm();
 	if (ret < 0) {
