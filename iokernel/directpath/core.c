@@ -308,14 +308,13 @@ static size_t estimate_region_size(struct directpath_ctx *dp)
 	wasted += align_up(total, PGSIZE_2MB) - total;
 	total = align_up(total, PGSIZE_2MB);
 	total += ctx_rx_buffer_region(dp);
-	log_info("allocating %lu bytes for rx buf pool", ctx_rx_buffer_region(dp));
+	log_debug("allocating %lu bytes for rx buf pool", ctx_rx_buffer_region(dp));
 
 	wasted += align_up(total, PGSIZE_2MB) - total;
 	total = align_up(total, PGSIZE_2MB);
 	total += ctx_tx_buffer_region(dp);
-	log_info("allocating %lu bytes for tx buf pool", ctx_tx_buffer_region(dp));
-
-	log_info("reg size %lu, wasted %lu", total, wasted);
+	log_debug("allocating %lu bytes for tx buf pool", ctx_tx_buffer_region(dp));
+	log_debug("reg size %lu, wasted %lu", total, wasted);
 
 	return total;
 }
@@ -820,9 +819,6 @@ static int allocate_user_memory(struct directpath_ctx *dp)
 		log_err("bad mmap");
 		return -errno;
 	}
-
-	// probably unnecessary
-	memset(dp->region.base, 0, dp->region.len);
 
 	dp->max_doorbells = ctx_max_doorbells(dp);
 	dp->doorbells_allocated = 0;

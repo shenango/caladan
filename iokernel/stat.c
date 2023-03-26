@@ -28,6 +28,7 @@ static const char *stat_names[] = {
 	"TX_BACKPRESSURE",
 	"SCHED_RUN",
 	"RX_REFILL",
+	"DIRECTPATH_EVENTS",
 };
 
 BUILD_ASSERT(ARRAY_SIZE(stat_names) == NR_STATS);

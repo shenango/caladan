@@ -8,6 +8,8 @@
 #include "defs.h"
 #include "mlx5_ifc.h"
 
+#include "../defs.h"
+
 struct eq main_eq;
 
 static void *monitor_ev(void *arg)
@@ -73,21 +75,21 @@ static int create_eq(struct eq *eq)
 	DEVX_SET(eqc, eqc, uar_page, eq->uar->page_id);
 	DEVX_SET(eqc, eqc, intr, eq->vec->vector);
 
-	#define EQ_MASK_NBITS 256
-	DEFINE_BITMAP(events, EQ_MASK_NBITS);
-	bitmap_init(events, EQ_MASK_NBITS, false);
+	DEFINE_BITMAP(events, MLX5_EVENT_TYPE_MAX);
+	bitmap_init(events, MLX5_EVENT_TYPE_MAX, false);
 
 	bitmap_set(events, MLX5_EVENT_TYPE_SQ_DRAINED);
 	bitmap_set(events, MLX5_EVENT_TYPE_SRQ_LAST_WQE);
 	bitmap_set(events, MLX5_EVENT_TYPE_SRQ_RQ_LIMIT);
 	bitmap_set(events, MLX5_EVENT_TYPE_CQ_ERROR);
+	bitmap_set(events, MLX5_EVENT_TYPE_SRQ_CATAS_ERROR);
+	bitmap_set(events, MLX5_EVENT_TYPE_DB_BF_CONGESTION);
+	bitmap_set(events, MLX5_EVENT_TYPE_CMD);
+
 	bitmap_set(events, MLX5_EVENT_TYPE_WQ_CATAS_ERROR);
 	bitmap_set(events, MLX5_EVENT_TYPE_WQ_INVAL_REQ_ERROR);
 	bitmap_set(events, MLX5_EVENT_TYPE_WQ_ACCESS_ERROR);
-	bitmap_set(events, MLX5_EVENT_TYPE_SRQ_CATAS_ERROR);
-	bitmap_set(events, MLX5_EVENT_TYPE_DB_BF_CONGESTION);
 	bitmap_set(events, MLX5_EVENT_TYPE_STALL_EVENT);
-	bitmap_set(events, MLX5_EVENT_TYPE_CMD);
 
 	for (i = 0; i < 4; i++)
 		DEVX_ARRAY_SET64(create_eq_in, in, event_bitmask, i,
@@ -168,8 +170,10 @@ bool directpath_events_poll(void)
 		eq->cons_idx++;
 	}
 
-	if (i > 0)
+	if (i > 0) {
+		STAT_INC(DIRECTPATH_EVENTS, i);
 		eq_update_ci(eq, 0);
+	}
 
 	return i > 0;
 }

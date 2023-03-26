@@ -85,6 +85,7 @@ struct thread_metrics {
 struct thread {
 	bool			active;
 	pid_t			tid;
+	uint64_t		next_poll_tsc;
 	struct proc		*p;
 	struct lrpc_chan_out	rxq;
 	struct lrpc_chan_in	txpktq;
@@ -100,7 +101,7 @@ struct thread {
 	unsigned int		ts_idx;
 	uint32_t		last_yield_rcu_gen;
 	uint64_t		wake_gen;
-	uint64_t		park_tsc;
+	uint64_t		change_tsc;
 
 	struct hwq		directpath_hwq;
 	struct hwq		storage_hwq;
@@ -110,6 +111,26 @@ struct thread {
 	/* useful metrics for scheduling policies */
 	struct thread_metrics	metrics;
 };
+
+static inline void thread_enable_sched_poll(struct thread *th)
+{
+	th->next_poll_tsc = 0;
+}
+
+static inline void thread_set_next_poll(struct thread *th, uint64_t tsc)
+{
+	th->next_poll_tsc = tsc;
+}
+
+static inline void thread_disable_sched_poll(struct thread *th)
+{
+	th->next_poll_tsc = UINT64_MAX;
+}
+
+static inline bool thread_sched_should_poll(struct thread *th, uint64_t now)
+{
+	return th->next_poll_tsc <= now;
+}
 
 static inline bool hwq_busy(struct hwq *h, uint32_t cq_idx)
 {
@@ -128,10 +149,11 @@ struct proc {
 	pid_t			pid;
 	struct shm_region	region;
 
+	struct ref		ref;
+
 	unsigned int		has_directpath:1;
 	unsigned int		has_vfio_directpath:1;
 	unsigned int		vfio_directpath_rmp:1;
-	struct ref		ref;
 	unsigned int		kill:1;       /* the proc is being torn down */
 	unsigned int		attach_fail:1;
 	unsigned int 		removed:1;
@@ -139,6 +161,7 @@ struct proc {
 	unsigned long		policy_data;
 	unsigned long		directpath_data;
 	float			load;
+	uint64_t		next_poll_tsc;
 
 	/* scheduler data */
 	struct sched_spec	sched_cfg;
@@ -168,6 +191,21 @@ struct proc {
 	/* table of physical addresses for shared memory */
 	physaddr_t		page_paddrs[];
 };
+
+static inline void proc_enable_sched_poll(struct proc *p)
+{
+	p->next_poll_tsc = 0;
+}
+
+static inline void proc_set_next_poll(struct proc *p, uint64_t tsc)
+{
+	p->next_poll_tsc = tsc;
+}
+
+static inline void proc_disable_sched_poll(struct proc *p)
+{
+	p->next_poll_tsc = UINT64_MAX;
+}
 
 extern void proc_release(struct ref *r);
 
@@ -312,6 +350,8 @@ enum {
 
 	RX_REFILL,
 
+	DIRECTPATH_EVENTS,
+
 	NR_STATS,
 
 };
@@ -391,7 +431,7 @@ extern void directpath_preallocate(bool use_rmp, unsigned int nrqs, unsigned int
 
 /* must be called from the dataplane thread */
 extern bool directpath_poll(void);
-extern void directpath_poll_proc(struct proc *p, uint64_t *delay_cycles, uint64_t cur_tsc);
+extern bool directpath_poll_proc(struct proc *p, uint64_t *delay_cycles, uint64_t cur_tsc);
 extern void directpath_notify_waking(struct proc *p, struct thread *th);
 extern void directpath_dataplane_notify_kill(struct proc *p);
 extern void directpath_dataplane_attach(struct proc *p);
@@ -418,7 +458,7 @@ static inline int directpath_get_clock(unsigned int *f, ...)
 }
 
 static inline void directpath_poll_thread_delay(struct proc *p, ...) {}
-static inline void directpath_poll_proc(struct proc *p, uint64_t cur_tsc) {}
+static inline bool directpath_poll_proc(struct proc *p, uint64_t *delay_cycles, uint64_t cur_tsc) { return true; }
 static inline void directpath_notify_waking(struct proc *p, struct thread *th) {}
 
 #endif

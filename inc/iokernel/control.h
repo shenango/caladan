@@ -6,6 +6,7 @@
 
 #include <sys/types.h>
 
+#include <base/atomic.h>
 #include <base/bitmap.h>
 #include <base/limits.h>
 #include <base/pci.h>
@@ -55,6 +56,7 @@ struct congestion_info {
 struct runtime_info {
 	struct congestion_info congestion;
 	uint64_t directpath_strides_posted;
+	atomic64_t directpath_strides_consumed;
 };
 
 enum {

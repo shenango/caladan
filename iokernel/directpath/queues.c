@@ -6,11 +6,13 @@
 #include <util/udma_barrier.h>
 
 #include "../defs.h"
+#include "../sched.h"
 #include "../hw_timestamp.h"
 #include "defs.h"
 #include "mlx5_ifc.h"
 
 #define QUEUE_DEMOTION_US 500
+#define QUEUE_PROMOTION_US 100
 
 static struct mlx5_cqe64 *get_cqe(struct cq *cq, uint32_t idx)
 {
@@ -23,14 +25,19 @@ static struct mlx5_cqe64 *get_cqe(struct cq *cq, uint32_t idx)
 	return NULL;
 }
 
-static void directpath_arm_queue(struct cq *cq, uint32_t cons_idx)
+static inline uint32_t directpath_cq_cons_tail(struct cq *cq)
+{
+	return be32toh(ACCESS_ONCE(cq->dbrec[0]));
+}
+
+static void directpath_arm_queue(struct directpath_ctx *ctx, struct cq *cq, uint32_t cons_idx)
 {
 	uint64_t doorbell;
 	uint32_t sn;
 	uint32_t ci;
 	uint32_t cmd;
 
-	BUG_ON(cq->state != RXQ_STATE_ACTIVE);
+	assert(!cq->armed);
 
 	sn  = cq->arm_sn++ & 3;
 	ci  = cons_idx & 0xffffff;
@@ -50,119 +57,104 @@ static void directpath_arm_queue(struct cq *cq, uint32_t cons_idx)
 	mmio_write64_be(main_eq.uar->base_addr + MLX5_CQ_DOORBELL, htobe64(doorbell));
 	mmio_flush_writes();
 
-	cq->state = RXQ_STATE_ARMED;
-}
-
-static uint32_t directpath_cq_cons_tail(struct cq *cq)
-{
-	return be32toh(ACCESS_ONCE(cq->dbrec[0]));
-}
-
-static void directpath_poll_cq(struct directpath_ctx *ctx,
-                               unsigned int thread_idx, uint64_t parked_tsc,
-                               uint64_t *delay, uint64_t cur_tsc)
-{
-	uint32_t cur_tail;
-	struct cq *cq = &ctx->qps[thread_idx].rx_cq;
-	struct mlx5_cqe64 *cqe;
-
-	if (cq->state == RXQ_STATE_DISABLED || cq->state == RXQ_STATE_ARMED)
-		return;
-
-	cur_tail = directpath_cq_cons_tail(cq);
-	cqe = get_cqe(cq, cur_tail);
-
-	/* report the delay if a packet is waiting */
-	if (cqe) {
-		*delay = MAX(hw_timestamp_delay_us(cqe), *delay);
-		return;
-	}
-
-	/* thread is active; no changes to polling state */
-	if (!parked_tsc || cfg.no_directpath_active_rss)
-		return;
-
-	directpath_arm_queue(cq, cur_tail);
+	cq->armed = true;
 	ctx->nr_armed++;
-	return;
+}
 
-#if 0
+static void directpath_enable_queue(struct directpath_ctx *ctx, unsigned int idx)
+{
+	struct cq *cq = &ctx->qps[idx].rx_cq;
 
-	/* check if an RSS update completed that disables this queue */
-	if (cq->state == RXQ_STATE_DISABLING) {
-		if (cq->disable_gen <= ctx->hw_rss_gen) {
-			cq->state = RXQ_STATE_DISABLED;
-			ctx->disabled_rx_count++;
-		}
-		return;
-	}
+	if (cq->state == RXQ_STATE_DISABLED)
+		ctx->disabled_rx_count--;
 
-	/*
-	 * disable this rx queue if:
-	 *	(1) it is not the last active queue
-	 *  (2) the corresponding thread has been asleep for QUEUE_DEMOTION_US
-	 */
+	cq->state = RXQ_STATE_ACTIVE;
+	ctx->active_rx_count++;
+	bitmap_set(ctx->active_rx_queues, idx);
+	++ctx->sw_rss_gen;
+}
 
-	if (ctx->active_rx_count == 1)
-		return;
-
-	if (parked_tsc + QUEUE_DEMOTION_US * cycles_per_us > cur_tsc)
-		return;
+static void directpath_disable_queue(struct directpath_ctx *ctx, unsigned int idx)
+{
+	struct cq *cq = &ctx->qps[idx].rx_cq;
 
 	cq->disable_gen = ++ctx->sw_rss_gen;
 	cq->state = RXQ_STATE_DISABLING;
 	ctx->active_rx_count--;
-	bitmap_clear(ctx->active_rx_queues, thread_idx);
-#endif
+	bitmap_clear(ctx->active_rx_queues, idx);
 }
 
-void directpath_poll_proc(struct proc *p, uint64_t *delay_cycles, uint64_t cur_tsc)
+static void directpath_queue_update_state(struct directpath_ctx *ctx,
+                                          struct thread *th, unsigned int idx,
+                                          uint64_t cur_tsc)
+{
+	struct cq *cq = &ctx->qps[idx].rx_cq;
+
+	if (cfg.no_directpath_active_rss)
+		return;
+
+	if (cq->state == RXQ_STATE_DISABLING &&
+	    cq->disable_gen <= ctx->hw_rss_gen) {
+		cq->state = RXQ_STATE_DISABLED;
+		ctx->disabled_rx_count++;
+	}
+
+	if (th->active) {
+		if (cq->state != RXQ_STATE_ACTIVE &&
+		    cur_tsc - th->change_tsc > QUEUE_PROMOTION_US * cycles_per_us)
+			directpath_enable_queue(ctx, idx);
+	} else {
+		if (ctx->active_rx_count > 1 &&
+		    cq->state == RXQ_STATE_ACTIVE &&
+		    cur_tsc - th->change_tsc > QUEUE_DEMOTION_US * cycles_per_us)
+			directpath_disable_queue(ctx, idx);
+	}
+}
+
+static void directpath_poll_cq(struct directpath_ctx *ctx,
+                               unsigned int thread_idx, struct thread *th,
+                               uint64_t *delay, uint64_t cur_tsc)
+{
+	struct cq *cq = &ctx->qps[thread_idx].rx_cq;
+	struct mlx5_cqe64 *cqe = NULL;
+	uint32_t cons_idx;
+
+	if (!cq->armed) {
+		/* report the delay if a packet is waiting */
+		cons_idx = directpath_cq_cons_tail(cq);
+		cqe = get_cqe(cq, cons_idx);
+		if (cqe)
+			*delay = MAX(hw_timestamp_delay_us(cqe), *delay);
+		else
+			directpath_arm_queue(ctx, cq, cons_idx);
+	}
+
+	directpath_queue_update_state(ctx, th, thread_idx, cur_tsc);
+}
+
+bool directpath_poll_proc(struct proc *p, uint64_t *delay_cycles, uint64_t cur_tsc)
 {
 	struct directpath_ctx *ctx = (struct directpath_ctx *)p->directpath_data;
 	struct thread *th;
-#if 0
-	struct cq *cq;
-	struct thread *lastth;
-	uint32_t cons_idx;
-#endif
 	uint64_t delay = 0;
 	unsigned int i;
 
-	if (ctx->nr_armed == ctx->nr_qs)
-		return;
+	if (ctx->nr_armed == ctx->nr_qs && ctx->active_rx_count == 1)
+		return true;
 
 	for (i = 0; i < ctx->nr_qs; i++) {
 		th = &p->threads[i];
-		directpath_poll_cq(ctx, i, th->active ? 0 : th->park_tsc, &delay, cur_tsc);
+		directpath_poll_cq(ctx, i, th, &delay, cur_tsc);
 	}
 
 	delay *= cycles_per_us;
 	*delay_cycles = MAX(*delay_cycles, delay);
 
-	if (ctx->hw_rss_gen < ctx->sw_rss_gen) {
-		if (!directpath_command_queued(ctx))
-			directpath_run_commands(ctx);
-		return;
-	}
+	if (ctx->hw_rss_gen < ctx->sw_rss_gen && !directpath_command_queued(ctx))
+		directpath_run_commands(ctx);
 
-#if 0
-	if (p->active_thread_count)
-		return;
+	return false;
 
-	if (ctx->disabled_rx_count != ctx->nr_qs - 1)
-		return;
-
-	lastth = p->active_threads[0];
-	if (lastth->park_tsc + QUEUE_DEMOTION_US * cycles_per_us > cur_tsc)
-		return;
-
-	return;
-
-	cq = &ctx->qps[lastth - p->threads].rx_cq;
-	cons_idx = ACCESS_ONCE(lastth->q_ptrs->directpath_rx_tail);
-	directpath_arm_queue(cq, cons_idx);
-	ctx->nr_armed++;
-#endif
 }
 
 void directpath_handle_completion_eqe(struct mlx5_eqe *eqe)
@@ -170,15 +162,12 @@ void directpath_handle_completion_eqe(struct mlx5_eqe *eqe)
 	uint32_t cqn = be32toh(eqe->data.comp.cqn);
 	struct cq *cq = cqn_to_cq_map[cqn];
 	struct directpath_ctx *ctx = container_of(cq, struct directpath_ctx, qps[cq->qp_idx].rx_cq);
-#if 0
 	struct proc *p = ctx->p;
-	struct thread *th = &p->threads[cq->qp_idx];
-	struct hwq *h = &th->directpath_hwq;
-	BUG_ON(!hwq_busy(h, ACCESS_ONCE(*h->consumer_idx)));
-#endif
 
-	// BUG_ON(cq->state != RXQ_STATE_ARMED);
-	cq->state = RXQ_STATE_ACTIVE;
+	if (!sched_threads_active(p))
+		sched_add_core(p);
+
+	cq->armed = false;
 	ctx->nr_armed--;
 }
 
@@ -192,24 +181,6 @@ void directpath_handle_cq_error_eqe(struct mlx5_eqe *eqe)
 	kill(p->pid, SIGINT);
 }
 
-void directpath_notify_waking(struct proc *p, struct thread *th)
-{
-	uint32_t tidx = th - p->threads;
-	struct directpath_ctx *ctx = (struct directpath_ctx *)p->directpath_data;
-	struct cq *cq = &ctx->qps[tidx].rx_cq;
-
-	if (cq->state == RXQ_STATE_ACTIVE || cq->state == RXQ_STATE_ARMED)
-		return;
-
-	if (cq->state == RXQ_STATE_DISABLED)
-		ctx->disabled_rx_count--;
-
-	cq->state = RXQ_STATE_ACTIVE;
-	ctx->active_rx_count++;
-	bitmap_set(ctx->active_rx_queues, tidx);
-	++ctx->sw_rss_gen;
-}
-
-
+void directpath_notify_waking(struct proc *p, struct thread *th) {}
 
 #endif

@@ -223,7 +223,7 @@ static int simple_notify_core_needed(struct proc *p)
 	return simple_add_kthread(p);
 }
 
-static void simple_notify_congested(struct proc *p, struct delay_info *delay)
+static bool simple_notify_congested(struct proc *p, struct delay_info *delay)
 {
 	struct simple_data *sd = (struct simple_data *)p->policy_data;
 	int ret;
@@ -237,26 +237,27 @@ static void simple_notify_congested(struct proc *p, struct delay_info *delay)
 	/* do nothing if we woke up a core during the last interval */
 	if (sd->waking) {
 		sd->waking = false;
-		return;
+		return false;
 	}
 
 	/* check if congested */
 	if (!congested) {
 		simple_unmark_congested(sd);
-		return;
+		return false;
 	}
 
 	/* do nothing if already marked as congested */
 	if (sd->is_congested)
-		return;
+		return false;
 
 	/* try to add an additional core right away */
 	ret = simple_add_kthread(p);
 	if (ret == 0)
-		return;
+		return false;
 
 	/* otherwise mark the process as congested, cores can be added later */
 	simple_mark_congested(sd);
+	return false;
 }
 
 static struct simple_data *simple_choose_kthread(unsigned int core)

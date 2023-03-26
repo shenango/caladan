@@ -57,7 +57,6 @@ enum {
 	RXQ_STATE_ACTIVE, /* packets may be flowing to this queue, needs polling */
 	RXQ_STATE_DISABLING, /* RSS update in flight to disable this queue */
 	RXQ_STATE_DISABLED, /* queue fully disabled */
-	RXQ_STATE_ARMED, /* queue enabled, first packet will generate an event */
 };
 
 struct cq {
@@ -69,6 +68,7 @@ struct cq {
 	uint8_t arm_sn;
 	uint8_t qp_idx;
 	uint8_t state;
+	bool armed;
 	struct mlx5dv_devx_obj *obj;
 };
 

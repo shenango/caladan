@@ -29,11 +29,12 @@ struct ias_data {
 	unsigned int		is_congested:1;
 	unsigned int		is_bwlimited:1;
 	unsigned int		is_lc:1;
-	unsigned int		idx; /* a unique index */
+	unsigned int		is_starved:1;
 	uint64_t		qdelay_us;
 	uint64_t		quantum_us;
 	struct list_node	all_link;
 	struct list_node	congested_link;
+	struct list_node	starved_link;
 	DEFINE_BITMAP(reserved_cores, NCPU);
 
 	/* thread usage limits */

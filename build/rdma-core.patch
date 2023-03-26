@@ -197,7 +197,7 @@ index 0bc8b5d9..00efb0ce 100644
  	.get_byte_mask			= &dr_ste_v1_get_byte_mask,
  	.set_ctrl_always_hit_htbl	= &dr_ste_v1_set_ctrl_always_hit_htbl,
 diff --git a/providers/mlx5/libmlx5.map b/providers/mlx5/libmlx5.map
-index 8eeb261b..90b6e604 100644
+index 8eeb261b..2ba9c69f 100644
 --- a/providers/mlx5/libmlx5.map
 +++ b/providers/mlx5/libmlx5.map
 @@ -105,6 +105,9 @@ MLX5_1.10 {
@@ -218,15 +218,29 @@ index 8eeb261b..90b6e604 100644
 +		mlx5_vfio_post_cmd_db;
 +		mlx5_vfio_post_cmd_fast;
 +		mlx5_vfio_cmd_slot_alloc;
-+		mlx5_vfio_cmd_slot_get_fd;
++		mlx5_vfio_deliver_event;
 +		mlx5_vfio_get_clock;
 +		mlx5_access_reg;
  } MLX5_1.23;
 diff --git a/providers/mlx5/mlx5_vfio.c b/providers/mlx5/mlx5_vfio.c
-index fa19f2a9..658315ad 100644
+index fa19f2a9..7f24b270 100644
 --- a/providers/mlx5/mlx5_vfio.c
 +++ b/providers/mlx5/mlx5_vfio.c
-@@ -524,7 +524,7 @@ static int mlx5_vfio_wait_event(struct mlx5_vfio_context *ctx,
+@@ -436,6 +436,13 @@ static int mlx5_vfio_cmd_comp(struct mlx5_vfio_context *ctx, unsigned long slot)
+ 	return 0;
+ }
+ 
++int mlx5_vfio_deliver_event(struct ibv_context *ibctx, unsigned int slot)
++{
++	struct mlx5_vfio_context *ctx = to_mvfio_ctx(ibctx);
++	assert(ctx->cmd.cmds[slot].comp_func);
++	return ctx->cmd.cmds[slot].comp_func(ctx, slot);
++}
++
+ static int mlx5_vfio_process_cmd_eqe(struct mlx5_vfio_context *ctx,
+ 				     struct mlx5_eqe *eqe)
+ {
+@@ -524,7 +531,7 @@ static int mlx5_vfio_wait_event(struct mlx5_vfio_context *ctx,
  
  	while (true) {
  		err = poll(fds, 2, -1);
@@ -235,7 +249,7 @@ index fa19f2a9..658315ad 100644
  			mlx5_err(ctx->dbg_fp, "mlx5_vfio_wait_event, poll failed, errno=%d\n", errno);
  			return errno;
  		}
-@@ -599,28 +599,105 @@ static int mlx5_vfio_cmd_prep_out(struct mlx5_vfio_context *ctx,
+@@ -599,28 +606,92 @@ static int mlx5_vfio_cmd_prep_out(struct mlx5_vfio_context *ctx,
  				  struct mlx5_cmd_msg *cmd_out,
  				  struct mlx5_cmd_layout *cmd_lay, int olen)
  {
@@ -320,19 +334,6 @@ index fa19f2a9..658315ad 100644
 +	return 0;
 +}
 +
-+
-+int mlx5_vfio_cmd_slot_get_fd(struct ibv_context *ibctx, uint32_t slot)
-+{
-+	struct mlx5_vfio_context *ctx = to_mvfio_ctx(ibctx);
-+	struct mlx5_vfio_cmd_slot *cmd_slot;
-+
-+	if (slot >= MLX5_MAX_COMMANDS)
-+		return -EINVAL;
-+
-+	return ctx->cmd.cmds[slot].completion_event_fd;
-+}
-+
-+
 +int mlx5_vfio_cmd_slot_alloc(struct ibv_context *ibctx, uint32_t *slot_out, struct mlx5_cmd_layout **cmd_lay_out)
 +{
 +	static uint32_t next_slot = 1;
@@ -353,7 +354,7 @@ index fa19f2a9..658315ad 100644
  	return 0;
  }
  
-@@ -1131,6 +1208,17 @@ static void mlx5_vfio_uninit_bar0(struct mlx5_vfio_context *ctx)
+@@ -1131,6 +1202,17 @@ static void mlx5_vfio_uninit_bar0(struct mlx5_vfio_context *ctx)
  	munmap(ctx->bar_map, ctx->bar_map_size);
  }
  
@@ -371,7 +372,7 @@ index fa19f2a9..658315ad 100644
  static int mlx5_vfio_init_bar0(struct mlx5_vfio_context *ctx)
  {
  	struct vfio_region_info reg = { .argsz = sizeof(reg) };
-@@ -1147,6 +1235,7 @@ static int mlx5_vfio_init_bar0(struct mlx5_vfio_context *ctx)
+@@ -1147,6 +1229,7 @@ static int mlx5_vfio_init_bar0(struct mlx5_vfio_context *ctx)
  	if (base == MAP_FAILED)
  		return -1;
  
@@ -379,7 +380,7 @@ index fa19f2a9..658315ad 100644
  	ctx->bar_map = (struct mlx5_init_seg *)base;
  	ctx->bar_map_size = reg.size;
  	return 0;
-@@ -1707,6 +1796,17 @@ out:
+@@ -1707,6 +1790,17 @@ out:
  	return err;
  }
  
@@ -397,7 +398,7 @@ index fa19f2a9..658315ad 100644
  static int mlx5_vfio_get_caps_mode(struct mlx5_vfio_context *ctx,
  				   enum mlx5_cap_type cap_type,
  				   enum mlx5_cap_mode cap_mode)
-@@ -2592,8 +2692,9 @@ _vfio_devx_umem_reg(struct ibv_context *context,
+@@ -2592,8 +2686,9 @@ _vfio_devx_umem_reg(struct ibv_context *context,
  
  	iova_page_shift = ilog32(vfio_umem->iova_size - 1);
  	num_pas = 1;
@@ -410,7 +411,7 @@ index fa19f2a9..658315ad 100644
  	}
  
 diff --git a/providers/mlx5/mlx5dv.h b/providers/mlx5/mlx5dv.h
-index 163aab7b..5e510aa7 100644
+index 163aab7b..6c1dc965 100644
 --- a/providers/mlx5/mlx5dv.h
 +++ b/providers/mlx5/mlx5dv.h
 @@ -1710,6 +1710,20 @@ int mlx5dv_vfio_get_events_fd(struct ibv_context *ibctx);
@@ -419,7 +420,7 @@ index 163aab7b..5e510aa7 100644
  
 +
 +struct mlx5_cmd_layout;
-+extern int mlx5_vfio_cmd_slot_get_fd(struct ibv_context *ibctx, uint32_t slot);
++extern int mlx5_vfio_deliver_event(struct ibv_context *ibctx, unsigned int slot);
 +extern int mlx5_vfio_cmd_slot_alloc(struct ibv_context *ibctx, uint32_t *slot_out, struct mlx5_cmd_layout **cmd_lay_out);
 +extern int mlx5_vfio_get_clock(struct ibv_context *ibctx, unsigned int *frequency_khz, void **core_clock);
 +extern int mlx5_vfio_post_cmd_fast(struct ibv_context *ibctx, void *in,

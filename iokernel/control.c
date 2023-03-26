@@ -32,6 +32,7 @@
 
 #define EPOLL_CONTROLFD_COOKIE 0
 #define EPOLL_EFD_COOKIE 1
+#define CTL_SOCK_BACKLOG 4096
 
 static int controlfd;
 static int epoll_fd;
@@ -670,7 +671,7 @@ int control_init(void)
 		return -errno;
 	}
 
-	if (listen(sfd, 100) == -1) {
+	if (listen(sfd, CTL_SOCK_BACKLOG) == -1) {
 		log_err("control: listen() failed[%s]", strerror(errno));
 		close(sfd);
 		return -errno;

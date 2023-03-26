@@ -194,6 +194,20 @@ static inline void flows_notify_waking(void) {}
 static inline void flows_notify_parking(bool voluntary) {}
 #endif
 
+static void merge_directpath_counters(void)
+{
+	struct kthread *k = myk();
+	uint64_t tmp;
+
+	tmp = k->q_ptrs->directpath_strides_consumed;
+
+	if (!tmp)
+		return;
+
+	k->q_ptrs->directpath_strides_consumed = 0;
+	atomic64_fetch_and_add(&runtime_info->directpath_strides_consumed, tmp);
+}
+
 /*
  * kthread_park_now - block this kthread until the iokernel wakes it up.
  *
@@ -204,6 +218,8 @@ void kthread_park_now(void)
 	assert_preempt_disabled();
 
 	atomic_sub_and_fetch(&runningks, 1);
+
+	merge_directpath_counters();
 
 	flows_notify_parking(false);
 
@@ -244,6 +260,8 @@ void kthread_park(void)
 
 	// Drop lock
 	spin_unlock(&k->lock);
+
+	merge_directpath_counters();
 
 	flows_notify_parking(!preempt_cede_needed(k));
 

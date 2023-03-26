@@ -48,8 +48,11 @@ struct sched_ops {
 	 *
 	 * This notifier informs the scheduler of when processes become
 	 * congested or uncongested, driving core allocation decisions.
+	 *
+	 * The scheduler returns true if the proc does not need to be polled again
+	 * until woken.
 	 */
-	void (*notify_congested)(struct proc *p, struct delay_info *delay);
+	bool (*notify_congested)(struct proc *p, struct delay_info *delay);
 
 	/**
 	 * notify_core_needed - notifies the scheduler that a core is needed

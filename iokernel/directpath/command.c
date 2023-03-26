@@ -10,7 +10,7 @@
 
 #include "defs.h"
 
-#define NR_CMD_SLOTS 16
+#define NR_CMD_SLOTS 30
 #define VFIO_RESERVED_SLOTS ((1 << 0) | (1 << 31))
 
 enum mlx5_cmd_type {
@@ -47,9 +47,6 @@ static unsigned long free_slot_bitmap;
 static unsigned long pending_slots;
 
 static LIST_HEAD(slot_waiters);
-
-static int slot0_fd;
-static int slot31_fd;
 
 static void command_submit_final(uint32_t *in, size_t ilen, size_t olen,
                                  struct cmd_slot *s, int cmd_type)
@@ -165,14 +162,17 @@ static struct cmd_slot *command_slot_alloc(struct directpath_ctx *ctx)
 	ctx->command_slot = slot;
 	s->cur_ctx = ctx;
 	s->cmd_type = MLX5_CMD_EMPTY;
-	proc_get(ctx->p);
 	return s;
 }
 
-static bool command_ctx_run_next(struct directpath_ctx *ctx, struct cmd_slot *s)
+static bool command_ctx_run(struct directpath_ctx *ctx)
 {
+	struct cmd_slot *s;
+
 	if (unlikely(ctx->kill)) {
 		if (ctx->has_flow_rule) {
+			s = command_slot_alloc(ctx);
+			assert(s);
 			command_tear_down_flow_rule(ctx, s);
 			return true;
 		}
@@ -180,11 +180,15 @@ static bool command_ctx_run_next(struct directpath_ctx *ctx, struct cmd_slot *s)
 	}
 
 	if (unlikely(!ctx->has_flow_rule)) {
+		s = command_slot_alloc(ctx);
+		assert(s);
 		command_install_flow_rule(ctx, s);
 		return true;
 	}
 
 	if (ctx->hw_rss_gen < ctx->sw_rss_gen) {
+		s = command_slot_alloc(ctx);
+		assert(s);
 		command_rss_update(ctx, s);
 		return true;
 	}
@@ -194,38 +198,29 @@ static bool command_ctx_run_next(struct directpath_ctx *ctx, struct cmd_slot *s)
 
 static void command_slot_cleanup(struct cmd_slot *s)
 {
-	BUG_ON(!s->cur_ctx);
+	struct directpath_ctx *ctx = s->cur_ctx;
+
+	BUG_ON(!ctx);
 
 	if (s->cmd_type == MLX5_CMD_RSS_UPDATE)
-		s->cur_ctx->hw_rss_gen = s->submitted_rss_gen;
-
-	// TODO: prevent starvation for waiters
-	if (command_ctx_run_next(s->cur_ctx, s))
-		return;
-
-	s->cur_ctx->command_slot = COMMAND_SLOT_UNALLOCATED;
-	proc_put(s->cur_ctx->p);
+		ctx->hw_rss_gen = s->submitted_rss_gen;
 
 	s->cur_ctx = NULL;
 	bitmap_set(&free_slot_bitmap, s - slots);
+
+	/* place context at back of queue */
+	list_add_tail(&slot_waiters, &ctx->command_slot_wait_link);
+	ctx->command_slot = COMMAND_SLOT_WAITING;
 }
 
 void directpath_run_commands(struct directpath_ctx *ctx)
 {
-	struct cmd_slot *s;
-
 	if (directpath_command_queued(ctx))
 		return;
 
-	s = command_slot_alloc(ctx);
-	if (!s) {
-		list_add_tail(&slot_waiters, &ctx->command_slot_wait_link);
-		ctx->command_slot = COMMAND_SLOT_WAITING;
-		return;
-	}
-
-	if (unlikely(!command_ctx_run_next(ctx, s)))
-		command_slot_cleanup(s);
+	list_add_tail(&slot_waiters, &ctx->command_slot_wait_link);
+	ctx->command_slot = COMMAND_SLOT_WAITING;
+	proc_get(ctx->p);
 }
 
 void directpath_dataplane_notify_kill(struct proc *p)
@@ -250,18 +245,16 @@ void directpath_handle_cmd_eqe(struct mlx5_eqe *eqe)
 	struct cmd_slot *s;
 	struct mlx5_eqe_cmd *cmd_eqe = &eqe->data.cmd;
 	unsigned long vector = be32toh(cmd_eqe->vector);
-	uint64_t val;
 
 	/* notify vfio driver if any of its commands completed */
 	if (unlikely(vector & VFIO_RESERVED_SLOTS)) {
-		val = 1;
 		if (vector & (1 << 0))
-			WARN_ON(write(slot0_fd, &val, sizeof(val)) != sizeof(val));
+			mlx5_vfio_deliver_event(vfcontext, 0);
 
 		if (vector & (1 << 31))
-			WARN_ON(write(slot31_fd, &val, sizeof(val)) != sizeof(val));
+			mlx5_vfio_deliver_event(vfcontext, 31);
 
-		log_warn_ratelimited("proxying commands to rdma-core vfio driver");
+		log_debug_ratelimited("proxying commands to rdma-core vfio driver");
 	}
 
 	/* mask slots used by vfio driver */
@@ -282,16 +275,16 @@ bool directpath_commands_poll(void)
 {
 	bool work_done = false;
 	struct directpath_ctx *ctx;
-	struct cmd_slot *s;
 
 	// bounded by NR_CMD_SLOTS
 	while (!list_empty(&slot_waiters) && free_slot_bitmap != 0) {
 		ctx = list_pop(&slot_waiters, struct directpath_ctx, command_slot_wait_link);
-		s = command_slot_alloc(ctx);
-		BUG_ON(!s);
-		BUG_ON(!command_ctx_run_next(ctx, s));
-
-		work_done = true;
+		if (command_ctx_run(ctx)) {
+			work_done = true;
+		} else {
+			ctx->command_slot = COMMAND_SLOT_UNALLOCATED;
+			proc_put(ctx->p);
+		}
 	}
 
 	// write doorbell vector with pending command slots
@@ -324,18 +317,6 @@ int directpath_commands_init(void)
 		s = &slots[slot];
 		s->cmd_lay = cmd_lay;
 		bitmap_set(&free_slot_bitmap, slot);
-	}
-
-	slot0_fd = mlx5_vfio_cmd_slot_get_fd(vfcontext, 0);
-	if (slot0_fd < 0) {
-		log_err("failed to get slot0_fd");
-		return slot0_fd;
-	}
-
-	slot31_fd = mlx5_vfio_cmd_slot_get_fd(vfcontext, 31);
-	if (slot31_fd < 0) {
-		log_err("failed to get slot31_fd");
-		return slot31_fd;
 	}
 
 	return 0;

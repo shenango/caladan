@@ -56,6 +56,7 @@ const struct sched_ops *sched_ops;
 /* current hardware timestamp */
 static uint64_t cur_tsc;
 
+
 /**
  * sched_steer_flows - redirects flows to active kthreads
  * @p: the proc for which to reallocate flows
@@ -102,6 +103,9 @@ static void sched_enable_kthread(struct thread *th, unsigned int core)
 	struct proc *p = th->p;
 
 	ACCESS_ONCE(th->q_ptrs->curr_grant_gen) = ++th->wake_gen;
+	thread_enable_sched_poll(th);
+	proc_enable_sched_poll(p);
+	th->change_tsc = cur_tsc;
 	th->active = true;
 	th->core = core;
 	list_del_from(&p->idle_threads, &th->idle_link);
@@ -119,12 +123,12 @@ static void sched_disable_kthread(struct thread *th)
 	struct proc *p = th->p;
 
 	th->active = false;
+	th->change_tsc = cur_tsc;
 	p->active_threads[th->at_idx] = p->active_threads[--p->active_thread_count];
 	p->active_threads[th->at_idx]->at_idx = th->at_idx;
 	list_add(&p->idle_threads, &th->idle_link);
 	if (!p->has_directpath)
 		sched_steer_flows(p);
-	th->park_tsc = cur_tsc;
 	if (lrpc_empty(&th->txpktq))
 		unpoll_thread(th);
 }
@@ -434,7 +438,7 @@ sched_update_kthread_metrics(struct thread *th, bool work_pending)
 static void
 sched_measure_kthread_delay(struct thread *th, uint64_t *thread_delay,
                             uint64_t *rxq_delay, bool *has_work,
-                            bool *standing_queue)
+                            bool *standing_queue, uint64_t *next_timer)
 {
 	uint32_t cur_tail, cur_head, last_head, last_tail;
 	uint64_t tmp;
@@ -478,7 +482,7 @@ sched_measure_kthread_delay(struct thread *th, uint64_t *thread_delay,
 	 *thread_delay += calc_delay_tsc(th->rxq_busy_since);
 
 	/* TIMER: measure delay and update signals */
-	tmp = ACCESS_ONCE(*th->timer_heap.next_tsc);
+	tmp = *next_timer = ACCESS_ONCE(*th->timer_heap.next_tsc);
 	if (tmp <= cur_tsc) {
 		*has_work = true;
 		*standing_queue |= tmp + IOKERNEL_POLL_INTERVAL * cycles_per_us < cur_tsc;
@@ -518,11 +522,16 @@ static void sched_report_metrics(struct proc *p, uint64_t delay)
 	ACCESS_ONCE(info->delay_us) = delay;
 }
 
+static bool sched_proc_can_unpoll(struct proc *p)
+{
+	return !p->has_directpath || p->has_vfio_directpath;
+}
+
 static void sched_measure_delay(struct proc *p)
 {
 	struct delay_info dl;
 	struct thread *th;
-	uint64_t rxq_delay = 0;
+	uint64_t rxq_delay = 0, consumed_strides, posted_strides, next_poll_tsc;
 	unsigned int i;
 
 	dl.has_work = false;
@@ -532,15 +541,28 @@ static void sched_measure_delay(struct proc *p)
 	dl.min_delay_us = UINT64_MAX;
 	dl.avg_delay_us = 0;
 
-	uint64_t consumed_strides = 0;
+	if (p->next_poll_tsc > cur_tsc)
+		return;
+
+	next_poll_tsc = UINT64_MAX;
+	consumed_strides = atomic64_read(&p->runtime_info->directpath_strides_consumed);
 
 	/* detect per-kthread delay */
 	for (i = 0; i < p->thread_count; i++) {
 		bool busy = false;
-		uint64_t delay = 0;
+		uint64_t delay = 0, next_timer_tsc;
 		th = &p->threads[i];
+
+		if (!thread_sched_should_poll(th, cur_tsc)) {
+			next_poll_tsc = MIN(next_poll_tsc, th->next_poll_tsc);
+			continue;
+		}
+
 		sched_measure_kthread_delay(th, &delay, &rxq_delay, &busy,
-			                        &dl.standing_queue);
+			                        &dl.standing_queue, &next_timer_tsc);
+
+		if (th->active)
+			consumed_strides += ACCESS_ONCE(th->q_ptrs->directpath_strides_consumed);
 
 		dl.has_work |= busy;
 		dl.parked_thread_busy |= busy && !th->active;
@@ -554,13 +576,17 @@ static void sched_measure_delay(struct proc *p)
 
 		sched_update_kthread_metrics(th, busy);
 
-		consumed_strides += ACCESS_ONCE(p->threads[i].q_ptrs->directpath_strides_consumed);
+		if (!th->active && !busy && sched_proc_can_unpoll(p)) {
+			thread_set_next_poll(th, next_timer_tsc);
+			next_poll_tsc = MIN(next_poll_tsc, next_timer_tsc);
+		}
 	}
 
+	bool directpath_armed = true;
 	if (p->has_vfio_directpath)
-		directpath_poll_proc(p, &rxq_delay, cur_tsc);
+		directpath_armed = directpath_poll_proc(p, &rxq_delay, cur_tsc);
 
-	uint64_t posted_strides = ACCESS_ONCE(p->runtime_info->directpath_strides_posted);
+	posted_strides = ACCESS_ONCE(p->runtime_info->directpath_strides_posted);
 
 	if (posted_strides &&
 	    posted_strides - consumed_strides < DIRECTPATH_STRIDE_REFILL_THRESH_HI) {
@@ -570,12 +596,18 @@ static void sched_measure_delay(struct proc *p)
 
 	if (rxq_delay) {
 		dl.max_delay_us += rxq_delay;
-		dl.avg_delay_us += rxq_delay * p->thread_count;
+		dl.avg_delay_us += rxq_delay * sched_threads_active(p);
 		dl.min_delay_us += rxq_delay;
 
+		dl.has_work = true;
 		dl.standing_queue |= rxq_delay >= IOKERNEL_POLL_INTERVAL * cycles_per_us;
 		dl.parked_thread_busy |= sched_threads_active(p) == 0;
 	}
+
+	/* when possible, defer polling this proc until the next timer */
+	if (sched_threads_active(p) == 0 && !dl.has_work &&
+	    directpath_armed && sched_proc_can_unpoll(p))
+	    proc_set_next_poll(p, next_poll_tsc);
 
 	/* don't report parked busy if no threads are active */
 	if (cfg.noidlefastwake && sched_threads_active(p) == 0)
@@ -584,13 +616,14 @@ static void sched_measure_delay(struct proc *p)
 	/* convert the delays to us */
 	dl.max_delay_us /= (double)cycles_per_us;
 	dl.min_delay_us /= (double)cycles_per_us;
-	dl.avg_delay_us /= (double)(cycles_per_us * p->thread_count);
+	dl.avg_delay_us /= (double)(cycles_per_us * sched_threads_active(p));
 
 	/* report delay back to runtime */
 	sched_report_metrics(p, dl.max_delay_us);
 
 	/* notify the scheduler policy of the current delay */
-	sched_ops->notify_congested(p, &dl);
+	if (sched_ops->notify_congested(p, &dl))
+		proc_disable_sched_poll(p);
 }
 
 /*
@@ -603,9 +636,6 @@ static void sched_detect_io_for_idle_runtime(struct proc *p)
 	bool busy = false, standing_queue;
 	int i;
 	uint64_t delay;
-
-	if (cfg.noidlefastwake)
-		return;
 
 	for (i = 0; i < p->thread_count; i++) {
 		th = &p->threads[i];
@@ -681,10 +711,12 @@ void sched_poll(void)
 			p = dp.clients[i];
 			sched_measure_delay(p);
 		}
-	} else {
+	} else if (!cfg.noidlefastwake) {
 		/* check if any idle directpath runtimes have received I/Os */
 		for (i = 0; i < dp.nr_clients; i++) {
 			p = dp.clients[i];
+			if (p->has_vfio_directpath)
+				continue;
 			if (p->has_directpath && sched_threads_active(p) == 0)
 				sched_detect_io_for_idle_runtime(p);
 		}
@@ -753,6 +785,11 @@ void sched_poll(void)
  */
 int sched_add_core(struct proc *p)
 {
+	if (cfg.noidlefastwake) {
+		proc_enable_sched_poll(p);
+		return 0;
+	}
+
 	return sched_ops->notify_core_needed(p);
 }
 
