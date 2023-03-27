@@ -281,10 +281,6 @@ static struct proc *control_create_proc(mem_key_t key, size_t len,
 		if (ret)
 			goto fail;
 
-		th->timer_heap.next_tsc = shmptr_to_ptr(&reg, s->timer_heap.next_tsc, sizeof(uint64_t));
-		if (!th->timer_heap.next_tsc)
-			goto fail;
-
 		th->tid = s->tid;
 		th->p = p;
 		th->at_idx = UINT_MAX;

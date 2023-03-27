@@ -72,9 +72,6 @@ struct hwq {
 	uint64_t		busy_since;
 };
 
-struct timer {
-	uint64_t		*next_tsc;
-};
 
 struct thread_metrics {
 	uint32_t		uthread_elapsed_us;
@@ -105,7 +102,6 @@ struct thread {
 
 	struct hwq		directpath_hwq;
 	struct hwq		storage_hwq;
-	struct timer		timer_heap;
 	struct list_node	idle_link;
 
 	/* useful metrics for scheduling policies */

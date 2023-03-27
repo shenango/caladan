@@ -482,7 +482,7 @@ sched_measure_kthread_delay(struct thread *th, uint64_t *thread_delay,
 	 *thread_delay += calc_delay_tsc(th->rxq_busy_since);
 
 	/* TIMER: measure delay and update signals */
-	tmp = *next_timer = ACCESS_ONCE(*th->timer_heap.next_tsc);
+	tmp = *next_timer = ACCESS_ONCE(th->q_ptrs->next_timer_tsc);
 	if (tmp <= cur_tsc) {
 		*has_work = true;
 		*standing_queue |= tmp + IOKERNEL_POLL_INTERVAL * cycles_per_us < cur_tsc;

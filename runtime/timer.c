@@ -301,7 +301,6 @@ static void timer_softirq(void *arg)
 int timer_init_thread(void)
 {
 	struct kthread *k = myk();
-	struct timer_spec *ts = &iok.threads[k->kthread_idx].timer_heap;
 	thread_t *th;
 
 	k->timers = aligned_alloc(CACHE_LINE_SIZE,
@@ -316,9 +315,5 @@ int timer_init_thread(void)
 
 	k->timer_softirq = th;
 	k->q_ptrs->next_timer_tsc = UINT64_MAX;
-	ts->next_tsc = ptr_to_shmptr(&netcfg.tx_region,
-			    &k->q_ptrs->next_timer_tsc, sizeof(uint64_t));
-	ts->timer_resolution = cycles_per_us;
-
 	return 0;
 }

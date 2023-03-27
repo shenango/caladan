@@ -18,7 +18,7 @@
  * struct control_hdr, please increment the version number!
  */
 
-#define CONTROL_HDR_VERSION 8
+#define CONTROL_HDR_VERSION 9
 
 /* The abstract namespace path for the control socket. */
 #define CONTROL_SOCK_PATH	"\0/control/iokernel.sock"
@@ -77,12 +77,6 @@ struct hardware_queue_spec {
 	uint32_t		hwq_type;
 };
 
-struct timer_spec {
-	shmptr_t		next_tsc;
-	unsigned long		timer_resolution;
-};
-
-
 /* describes a runtime kernel thread */
 struct thread_spec {
 	struct queue_spec	rxq;
@@ -94,7 +88,6 @@ struct thread_spec {
 
 	struct hardware_queue_spec	direct_rxq;
 	struct hardware_queue_spec	storage_hwq;
-	struct timer_spec		timer_heap;
 };
 
 enum {
