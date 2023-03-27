@@ -21,6 +21,7 @@
 #define POLL_EQ_BATCH_SIZE 32
 
 extern struct ibv_context *vfcontext;
+extern int page_cmd_efd;
 
 extern int events_init(void);
 

@@ -2,6 +2,7 @@
 
 #include <base/bitmap.h>
 #include <poll.h>
+#include <sys/eventfd.h>
 #include <util/udma_barrier.h>
 #include <util/mmio.h>
 
@@ -12,16 +13,25 @@
 
 struct eq main_eq;
 
+int page_cmd_efd;
+
 static void *monitor_ev(void *arg)
 {
+	size_t val;
 	int pollfd = mlx5dv_vfio_get_events_fd(vfcontext);
 	BUG_ON(pollfd < 0);
 
-	struct pollfd fd =
-		{ .fd = pollfd, .events = POLLIN };
+	struct pollfd fds[2] = {
+		{ .fd = pollfd, .events = POLLIN },
+		{ .fd = page_cmd_efd, .events = POLLIN}
+	};
 
 	while (true) {
-		if (poll(&fd, 1, -1) > 0) {
+		if (poll(fds, 2, -1) > 0) {
+
+			while (read(page_cmd_efd, &val, sizeof(val)) == sizeof(val))
+				mlx5_vfio_deliver_event(vfcontext, 31);
+
 			mlx5dv_vfio_process_events(vfcontext);
 			log_debug("vfio: polled some events");
 		}
@@ -182,6 +192,10 @@ int events_init(void)
 {
 	int ret;
 	pthread_t mon_thread;
+
+	page_cmd_efd = eventfd(0, EFD_NONBLOCK | EFD_SEMAPHORE);
+	if (page_cmd_efd < 0)
+		return -1;
 
 	ret = pthread_create(&mon_thread, NULL, monitor_ev, NULL);
 	if (ret) {

@@ -242,6 +242,7 @@ void directpath_dataplane_attach(struct proc *p)
 void directpath_handle_cmd_eqe(struct mlx5_eqe *eqe)
 {
 	int pos;
+	ssize_t ret;
 	struct cmd_slot *s;
 	struct mlx5_eqe_cmd *cmd_eqe = &eqe->data.cmd;
 	unsigned long vector = be32toh(cmd_eqe->vector);
@@ -251,8 +252,10 @@ void directpath_handle_cmd_eqe(struct mlx5_eqe *eqe)
 		if (vector & (1 << 0))
 			mlx5_vfio_deliver_event(vfcontext, 0);
 
-		if (vector & (1 << 31))
-			mlx5_vfio_deliver_event(vfcontext, 31);
+		if (vector & (1 << 31)) {
+			ret = write(page_cmd_efd, &(uint64_t){ 1 }, sizeof(uint64_t));
+			WARN_ON_ONCE(ret != sizeof(uint64_t));
+		}
 
 		log_debug_ratelimited("proxying commands to rdma-core vfio driver");
 	}
