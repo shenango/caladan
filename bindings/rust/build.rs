@@ -14,11 +14,27 @@ fn main() {
     println!("cargo:rustc-link-lib=static=base");
     println!("cargo:rustc-link-lib=static=net");
     println!("cargo:rustc-link-lib=static=runtime");
-    println!("cargo:rustc-flags=-L ../..");
+    let manifest_path: PathBuf = std::env::var("CARGO_MANIFEST_DIR")
+        .unwrap()
+        .parse()
+        .unwrap();
+    // the parent/parent is bindings/rust
+    let lib_search_path = manifest_path.parent().unwrap().parent().unwrap();
+    println!("cargo:rustc-flags=-L {}", lib_search_path.to_str().unwrap());
+    let link_script_path = manifest_path
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("base/base.ld");
+    println!(
+        "cargo:rustc-link-arg=-T{}",
+        link_script_path.to_str().unwrap()
+    );
 
     // consult shared.mk for other libraries... sorry y'all.
     let output = Command::new("make")
-        .args(&[
+        .args([
             "-f",
             "../../Makefile",
             "print-RUNTIME_LIBS",
