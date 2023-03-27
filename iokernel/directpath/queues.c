@@ -49,14 +49,9 @@ static void directpath_arm_queue(struct directpath_ctx *ctx, struct cq *cq, uint
 
 	cq->dbrec[1] = htobe32(sn << 28 | cmd | ci);
 
-	/*
-	 * Make sure that the doorbell record in host memory is
-	 * written before ringing the doorbell via PCI WC MMIO.
-	 */
-	mmio_wc_start();
+	barrier();
 	mmio_write64_be(main_eq.uar->base_addr + MLX5_CQ_DOORBELL, htobe64(doorbell));
-	mmio_flush_writes();
-
+	barrier();
 	cq->armed = true;
 	ctx->nr_armed++;
 }

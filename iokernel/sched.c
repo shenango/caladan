@@ -113,9 +113,10 @@ static void sched_enable_kthread(struct thread *th, unsigned int core)
 	p->active_threads[p->active_thread_count++] = th;
 	if (!p->has_directpath)
 		sched_steer_flows(p);
-	poll_thread(th);
 	if (p->has_vfio_directpath)
 		directpath_notify_waking(p, th);
+	else
+		poll_thread(th);
 }
 
 static void sched_disable_kthread(struct thread *th)
@@ -129,7 +130,7 @@ static void sched_disable_kthread(struct thread *th)
 	list_add(&p->idle_threads, &th->idle_link);
 	if (!p->has_directpath)
 		sched_steer_flows(p);
-	if (lrpc_empty(&th->txpktq))
+	if (!p->has_vfio_directpath && lrpc_empty(&th->txpktq))
 		unpoll_thread(th);
 }
 
