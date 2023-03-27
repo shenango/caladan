@@ -175,6 +175,7 @@ __sched_run(struct core_state *s, struct thread *th, unsigned int core)
 	if (!s->idle && s->cur_th != NULL) {
 		ACCESS_ONCE(s->cur_th->q_ptrs->cede_gen) = s->cur_th->wake_gen;
 		ksched_enqueue_intr(core, KSCHED_INTR_CEDE);
+		STAT_INC(PREEMPT, 1);
 	}
 
 	/* finally request that the new kthread run on this core */
@@ -659,6 +660,10 @@ static int sched_try_fast_rewake(struct thread *th)
 	if (unlikely(th->p->kill))
 		return -EINVAL;
 
+	/* don't rewake if we requeested a cede */
+	if (th->q_ptrs->park_gen == th->wake_gen)
+		return -EINVAL;
+
 	/*
 	 * If the kthread has yielded voluntarily but still has pending I/O
 	 * requests in flight, we can just wake it back up directly without
@@ -746,6 +751,7 @@ void sched_poll(void)
 					ACCESS_ONCE(s->cur_th->q_ptrs->cede_gen) =
 						s->cur_th->wake_gen;
 				ksched_enqueue_intr(core, KSCHED_INTR_CEDE);
+				STAT_INC(PREEMPT, 1);
 				ksched_run(core, th ? th->tid : 0);
 				s->last_th = s->cur_th;
 				s->cur_th = th;

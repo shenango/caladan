@@ -263,7 +263,7 @@ static inline void unpoll_thread(struct thread *th)
 /*
  * Communication between control plane and data-plane in the I/O kernel
  */
-#define CONTROL_DATAPLANE_QUEUE_SIZE	128
+#define CONTROL_DATAPLANE_QUEUE_SIZE	IOKERNEL_MAX_PROC
 struct lrpc_params {
 	struct lrpc_msg *buffer;
 	uint32_t *wb;
@@ -343,6 +343,7 @@ enum {
 	TX_BACKPRESSURE,
 
 	SCHED_RUN,
+	PREEMPT,
 
 	RX_REFILL,
 

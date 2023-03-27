@@ -27,6 +27,7 @@ static const char *stat_names[] = {
 	"TX_PULLED",
 	"TX_BACKPRESSURE",
 	"SCHED_RUN",
+	"PREEMPT",
 	"RX_REFILL",
 	"DIRECTPATH_EVENTS",
 };
