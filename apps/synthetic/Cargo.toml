@@ -20,3 +20,4 @@ shenango = { path = "../../bindings/rust" }
 debug=false
 panic = "abort"
 
+[workspace]

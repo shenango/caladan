@@ -1,5 +1,4 @@
 #![feature(integer_atomics)]
-#![feature(nll)]
 #![feature(test)]
 #[macro_use]
 extern crate clap;
