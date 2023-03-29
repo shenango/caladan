@@ -401,7 +401,15 @@ done:
 
 static int ias_notify_core_needed(struct proc *p)
 {
+	int ret;
 	struct ias_data *sd = (struct ias_data *)p->policy_data;
+
+	if (list_empty(&starved_procs)) {
+		ret = ias_add_kthread(sd);
+		if (!ret)
+			return 0;
+	}
+
 	ias_mark_congested(sd);
 	return 0;
 }
@@ -461,8 +469,10 @@ static struct ias_data *ias_choose_kthread(unsigned int core)
 
 	/* feed starving LCs first */
 	sd = list_top(&starved_procs, struct ias_data, starved_link);
-	if (sd)
+	if (sd) {
+		assert(sd->threads_active == 0);
 		return sd;
+	}
 
 	list_for_each(&congested_procs, sd, congested_link) {
 		/* check if we're constrained by the thread limit */
@@ -554,6 +564,7 @@ static void ias_sched_poll(uint64_t now, int idle_cnt, bitmap_ptr_t idle)
 #ifdef IAS_DEBUG
 	static uint64_t debug_ts = 0;
 #endif
+	struct ias_data *sd;
 	unsigned int core;
 
 	now_us = now;
@@ -580,6 +591,12 @@ static void ias_sched_poll(uint64_t now, int idle_cnt, bitmap_ptr_t idle)
 		if (!cfg.noht)
 			ias_ht_poll();
 		ias_ts_poll();
+
+		/* try to add a core to a starved proc */
+		if (!list_empty(&starved_procs)) {
+			sd = list_top(&starved_procs, struct ias_data, starved_link);
+			ias_add_kthread(sd);
+		}
 	}
 
 #ifdef IAS_DEBUG

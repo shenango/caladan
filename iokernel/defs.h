@@ -203,6 +203,12 @@ static inline void proc_disable_sched_poll(struct proc *p)
 	p->next_poll_tsc = UINT64_MAX;
 }
 
+
+static inline bool proc_sched_should_poll(struct proc *p, uint64_t now)
+{
+	return p->next_poll_tsc <= now;
+}
+
 extern void proc_release(struct ref *r);
 
 /**

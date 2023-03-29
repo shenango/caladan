@@ -543,7 +543,7 @@ static void sched_measure_delay(struct proc *p)
 	dl.min_delay_us = UINT64_MAX;
 	dl.avg_delay_us = 0;
 
-	if (p->next_poll_tsc > cur_tsc)
+	if (!proc_sched_should_poll(p, cur_tsc))
 		return;
 
 	next_poll_tsc = UINT64_MAX;
