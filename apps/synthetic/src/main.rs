@@ -840,7 +840,7 @@ fn run_client(
         })
         .collect();
 
-    backend.sleep(Duration::from_secs(10));
+    backend.sleep(Duration::from_secs(1));
     wg.wait();
 
     if let Some(ref mut g) = *barrier_group {
