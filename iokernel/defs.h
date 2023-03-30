@@ -152,7 +152,8 @@ struct proc {
 	unsigned int		vfio_directpath_rmp:1;
 	unsigned int		kill:1;       /* the proc is being torn down */
 	unsigned int		attach_fail:1;
-	unsigned int 		removed:1;
+	unsigned int		removed:1;
+	unsigned int		started:1;
 	struct runtime_info	*runtime_info;
 	unsigned long		policy_data;
 	unsigned long		directpath_data;

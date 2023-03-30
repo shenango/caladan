@@ -117,6 +117,9 @@ static void sched_enable_kthread(struct thread *th, unsigned int core)
 		directpath_notify_waking(p, th);
 	else
 		poll_thread(th);
+
+	if (unlikely(!p->started))
+		p->started = true;
 }
 
 static void sched_disable_kthread(struct thread *th)
@@ -526,6 +529,9 @@ static void sched_report_metrics(struct proc *p, uint64_t delay)
 
 static bool sched_proc_can_unpoll(struct proc *p)
 {
+	if (unlikely(!p->started))
+		return false;
+
 	return !p->has_directpath || p->has_vfio_directpath;
 }
 
