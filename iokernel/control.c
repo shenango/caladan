@@ -423,10 +423,6 @@ static void control_add_client(void)
 		goto fail_efd;
 	}
 
-	// TODO: a preallocation policy: for now just allocate another one like this
-	if (p->has_vfio_directpath)
-		directpath_preallocate(p->vfio_directpath_rmp, p->thread_count, 1);
-
 	nr_clients++;
 	p->control_fd = fd;
 	return;
@@ -476,6 +472,11 @@ static void control_loop(void)
 	struct epoll_event ev;
 
 	pthread_barrier_wait(&init_barrier);
+
+	if (cfg.vfio_directpath) {
+		directpath_preallocate(true, 8, 512);
+		log_info("control: preallocated 512 8-thread directpath contexts");
+	}
 
 	while (1) {
 		ret = epoll_wait(epoll_fd, &ev, 1, -1);
