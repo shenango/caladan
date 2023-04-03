@@ -42,7 +42,7 @@ extern uint32_t nr_vfio_prealloc;
  * Constant limits
  */
 
-#define IOKERNEL_MAX_PROC		1024
+#define IOKERNEL_MAX_PROC		2048
 #define IOKERNEL_NUM_MBUFS		(8192 * 16)
 #define IOKERNEL_NUM_COMPLETIONS	32767
 #define IOKERNEL_OVERFLOW_BATCH_DRAIN	64
