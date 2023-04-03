@@ -23,7 +23,7 @@ static off_t bar_offs;
 static size_t bar_map_size;
 static int bar_fd;
 
-#define MAX_PREALLOC 128
+#define MAX_PREALLOC 16384
 static struct directpath_ctx *preallocated_ctx[MAX_PREALLOC];
 static unsigned int nr_prealloc;
 

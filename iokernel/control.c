@@ -473,9 +473,9 @@ static void control_loop(void)
 
 	pthread_barrier_wait(&init_barrier);
 
-	if (cfg.vfio_directpath) {
-		directpath_preallocate(true, 8, 512);
-		log_info("control: preallocated 512 8-thread directpath contexts");
+	if (cfg.vfio_directpath && nr_vfio_prealloc) {
+		directpath_preallocate(true, 8, nr_vfio_prealloc);
+		log_info("control: preallocated %u 8-thread directpath contexts", nr_vfio_prealloc);
 	}
 
 	while (1) {

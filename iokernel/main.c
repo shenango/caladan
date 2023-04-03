@@ -18,6 +18,7 @@
 struct iokernel_cfg cfg;
 struct dataplane dp;
 
+uint32_t nr_vfio_prealloc;
 bool stat_logging;
 bool allowed_cores_supplied;
 DEFINE_BITMAP(input_allowed_cores, NCPU);
@@ -185,6 +186,12 @@ int main(int argc, char *argv[])
 			stat_logging = true;
 		} else if (!strcmp(argv[i], "selfpair")) {
 			cfg.ias_prefer_selfpair = true;
+		} else if (!strcmp(argv[i], "vfioprealloc")) {
+			if (i == argc - 1) {
+				fprintf(stderr, "missing vfioprealloc argument\n");
+				return -EINVAL;
+			}
+			nr_vfio_prealloc = atoi(argv[++i]);
 		} else if (!strcmp(argv[i], "vfio")) {
 #ifndef DIRECTPATH
 			log_err("please recompile with CONFIG_DIRECTPATH=y");
