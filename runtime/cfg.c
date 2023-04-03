@@ -14,8 +14,9 @@
 
 #include "defs.h"
 
-int arp_static_count = 0;
-struct cfg_arp_static_entry static_entries[MAX_ARP_STATIC_ENTRIES];
+static size_t arp_static_sz;
+size_t arp_static_count;
+struct cfg_arp_static_entry *static_entries;
 int preferred_socket = 0;
 
 /*
@@ -259,6 +260,13 @@ static int parse_watchdog_flag(const char *name, const char *val)
 static int parse_static_arp_entry(const char *name, const char *val)
 {
 	int ret;
+
+	if (arp_static_sz == arp_static_count) {
+		arp_static_sz = MAX(32, (arp_static_count + 1) * 2);
+		static_entries = reallocarray(static_entries, arp_static_sz, sizeof(*static_entries));
+		if (!static_entries)
+			return -ENOMEM;
+	}
 
 	ret = str_to_ip(val, &static_entries[arp_static_count].ip);
 	if (ret) {
