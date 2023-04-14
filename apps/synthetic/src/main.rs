@@ -1272,7 +1272,7 @@ fn main() {
         },
         "local-client" => {
             backend.init_and_run(config, move || {
-                println!("Distribution, Target, Actual, Dropped, Never Sent, Median, 90th, 99th, 99.9th, 99.99th, Start");
+                println!("Distribution, Target, Actual, Dropped, Never Sent, Median, 90th, 99th, 99.9th, 99.99th, Start, StartTsc");
                 if dowarmup {
                     for packets_per_second in (1..3).map(|i| i * 100000) {
                         let sched = gen_classic_packet_schedule(
@@ -1326,7 +1326,7 @@ fn main() {
                     .unwrap()
                 });
 
-                println!("Distribution, Target, Actual, Dropped, Never Sent, Median, 90th, 99th, 99.9th, 99.99th, Start");
+                println!("Distribution, Target, Actual, Dropped, Never Sent, Median, 90th, 99th, 99.9th, 99.99th, Start, StartTsc");
                 match (matches.value_of("protocol").unwrap(), &barrier_group) {
                     (_, Some(lockstep::Group::Client(ref _c))) => (),
                     ("memcached", _) => {
