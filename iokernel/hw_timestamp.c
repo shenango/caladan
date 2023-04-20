@@ -160,10 +160,6 @@ int hw_timestamp_init(void)
 
 	hca_core_clock = mlx5_ctx.hca_core_clock;
 
-	ret = nl_init();
-	if (ret)
-		log_warn("failed to initialize netlink sockets");
-
 	return 0;
 }
 

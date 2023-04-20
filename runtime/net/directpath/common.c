@@ -10,7 +10,6 @@
 
 /* configuration options */
 struct pci_addr nic_pci_addr;
-static bool cfg_pci_addr_specified;
 int cfg_directpath_mode = DIRECTPATH_MODE_DISABLED;
 
 struct mempool directpath_buf_mp;
@@ -33,13 +32,7 @@ int directpath_parse_arg(const char *name, const char *val)
 
 static int parse_directpath_pci(const char *name, const char *val)
 {
-	int ret;
-
-	ret = pci_str_to_addr(val, &nic_pci_addr);
-	if (ret)
-		return ret;
-
-	cfg_pci_addr_specified = true;
+	log_warn("WARNING: directpath_pci is ignored, using pci address from the IOKernel");
 	return 0;
 }
 
@@ -97,11 +90,9 @@ int directpath_init(void)
 	if (ret)
 		return ret;
 
-	if (!cfg_pci_addr_specified)
-		memcpy(&nic_pci_addr, &iok.iok_info->directpath_pci, sizeof(nic_pci_addr));
+	memcpy(&nic_pci_addr, &iok.iok_info->directpath_pci, sizeof(nic_pci_addr));
 
-	log_info("directpath: using pci address%s: %04hx:%02hhx:%02hhx.%hhd",
-	         cfg_pci_addr_specified ? "" : " from iokernel",
+	log_info("directpath: using pci address from iokernel: %04hx:%02hhx:%02hhx.%hhd",
 	         nic_pci_addr.domain, nic_pci_addr.bus,
 	         nic_pci_addr.slot, nic_pci_addr.func);
 

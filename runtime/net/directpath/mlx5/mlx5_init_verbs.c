@@ -116,7 +116,7 @@ static int mlx5_verbs_setup_rss(void)
 {
 	int i;
 	struct ibv_wq *ind_tbl[2048];
-	struct ibv_flow *eth_flow;
+	struct ibv_flow *tcp_flow, *other_flow;
 	struct ibv_qp *tcp_qp, *other_qp;
 	struct ibv_rwq_ind_table *rwq_ind_table;
 
@@ -173,8 +173,8 @@ static int mlx5_verbs_setup_rss(void)
 	/* Route TCP packets for our MAC address to the QP with TCP RSS configuration */
 	struct raw_eth_flow_attr {
 		struct ibv_flow_attr attr;
-		struct ibv_flow_spec_eth spec_eth;
-		struct ibv_flow_spec_tcp_udp spec_tcp;
+		struct ibv_flow_spec_ipv4 spec_ipv4;
+		struct ibv_flow_spec_tcp_udp spec_l4;
 	} __attribute__((packed)) flow_attr = {
 		.attr = {
 			.comp_mask = 0,
@@ -185,60 +185,39 @@ static int mlx5_verbs_setup_rss(void)
 			.port = PORT_NUM,
 			.flags = 0,
 		},
-		.spec_eth = {
-			.type = IBV_FLOW_SPEC_ETH,
-			.size = sizeof(struct ibv_flow_spec_eth),
+		.spec_ipv4 = {
+			.type = IBV_FLOW_SPEC_IPV4,
+			.size = sizeof(struct ibv_flow_spec_ipv4),
 			.val = {
-				.src_mac = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
-				.ether_type = 0,
-				.vlan_tag = 0,
+				.src_ip = 0,
+				.dst_ip = hton32(netcfg.addr),
 			},
 			.mask = {
-				.dst_mac = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF},
-				.src_mac = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
-				.ether_type = 0,
-				.vlan_tag = 0,
+				.src_ip = 0,
+				.dst_ip = 0xffffffff,
 			}
 		},
-		.spec_tcp = {
+		.spec_l4 = {
 			.type = IBV_FLOW_SPEC_TCP,
 			.size = sizeof(struct ibv_flow_spec_tcp_udp),
 			.val = {0},
 			.mask = {0},
 		},
 	};
-	memcpy(&flow_attr.spec_eth.val.dst_mac, netcfg.mac.addr, 6);
+
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Waddress-of-packed-member"
-	eth_flow = ibv_create_flow(tcp_qp, &flow_attr.attr);
-	if (!eth_flow)
-		return -errno;
-
-	/* Route other unicast packets to the QP with the UDP RSS configuration */
-	flow_attr.attr.num_of_specs = 1;
-	eth_flow = ibv_create_flow(other_qp, &flow_attr.attr);
-	if (!eth_flow)
-		return -errno;
-
-	/* Route broadcst packets to our set of RX work queues */
-	memset(&flow_attr.spec_eth.val.dst_mac, 0xff, 6);
-	eth_flow = ibv_create_flow(other_qp, &flow_attr.attr);
+	struct ibv_flow_attr *attr = &flow_attr.attr;
 #pragma GCC diagnostic pop
-	if (!eth_flow)
+
+	tcp_flow = ibv_create_flow(tcp_qp, attr);
+	if (!tcp_flow)
 		return -errno;
 
-	/* Route multicast traffic to our RX queues */
-	struct ibv_flow_attr mc_attr = {
-		.comp_mask = 0,
-		.type = IBV_FLOW_ATTR_MC_DEFAULT,
-		.size = sizeof(mc_attr),
-		.priority = 0,
-		.num_of_specs = 0,
-		.port = PORT_NUM,
-		.flags = 0,
-	};
-	eth_flow = ibv_create_flow(other_qp, &mc_attr);
-	if (!eth_flow)
+	/* Route UDP packets to the QP with the UDP RSS configuration */
+	flow_attr.spec_l4.type = IBV_FLOW_SPEC_UDP;
+	other_flow = ibv_create_flow(other_qp, attr);
+	if (!other_flow)
 		return -errno;
 
 	net_ops.get_flow_affinity = mlx5_rss_flow_affinity;

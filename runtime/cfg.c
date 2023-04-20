@@ -226,10 +226,8 @@ static int parse_runtime_quantum_us(const char *name, const char *val)
 
 static int parse_mac_address(const char *name, const char *val)
 {
-	int ret = str_to_mac(val, &netcfg.mac);
-	if (ret)
-		log_err("Could not parse mac address: %s", val);
-	return ret;
+	log_warn("specifying mac address is deprecated.");
+	return 0;
 }
 
 static int parse_mtu(const char *num, const char *val)

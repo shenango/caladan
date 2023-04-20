@@ -405,7 +405,7 @@ static void net_tx_raw(struct mbuf *m)
 
 	/* drain pending overflow packets first */
 	if (unlikely(!mbufq_empty(&k->txpktq_overflow))) {
-                if (net_tx_drain_overflow()) {
+		if (net_tx_drain_overflow()) {
 			mbufq_push_tail(&k->txpktq_overflow, m);
 			STAT(TXQ_OVERFLOW)++;
 			putk();

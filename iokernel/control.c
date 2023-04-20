@@ -247,9 +247,9 @@ static struct proc *control_create_proc(mem_key_t key, size_t len,
 	p->removed = false;
 	p->sched_cfg = hdr.sched_cfg;
 	p->thread_count = hdr.thread_count;
-	if (eth_addr_is_multicast(&hdr.mac) || eth_addr_is_zero(&hdr.mac))
+	if (!hdr.ip_addr)
 		goto fail;
-	p->mac = hdr.mac;
+	p->ip_addr = hdr.ip_addr;
 	p->runtime_info = shmptr_to_ptr(&reg, hdr.runtime_info,
 					   sizeof(*p->runtime_info));
 	if (!p->runtime_info)
@@ -333,15 +333,8 @@ fail:
 
 static void control_destroy_proc(struct proc *p)
 {
-	int ret;
-
-	if (p->has_vfio_directpath) {
+	if (p->has_vfio_directpath)
 		release_directpath_ctx(p);
-	} else if (!cfg.vfio_directpath) {
-		ret = nl_remove_mac_address(&p->mac);
-		if (unlikely(ret))
-			log_warn("control: got ret %d when removing mac address", ret);
-	}
 
 	nr_clients--;
 	mem_unmap_shm(p->region.base);
@@ -400,12 +393,6 @@ static void control_add_client(void)
 		ret = control_setup_directpath(p, fd);
 		if (ret) {
 			log_err("control: failed to setup directpath queues");
-			goto fail_destroy_proc;
-		}
-	} else if (!cfg.vfio_directpath) {
-		ret = nl_register_mac_address(&p->mac);
-		if (ret) {
-			log_err("control: failed to register mac address with netlink");
 			goto fail_destroy_proc;
 		}
 	}

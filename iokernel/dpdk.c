@@ -113,6 +113,7 @@ static inline int dpdk_port_init(uint8_t port, struct rte_mempool *mbuf_pool)
 	if (is_mlx5) {
 		nb_rxd = MLX5_RX_RING_SIZE;
 		nb_txd = MLX5_TX_RING_SIZE;
+		port_conf.lpbk_mode = 1;
 	}
 
 	/* Configure the Ethernet device. */
@@ -153,6 +154,7 @@ static inline int dpdk_port_init(uint8_t port, struct rte_mempool *mbuf_pool)
 	/* Display the port MAC address. */
 	struct rte_ether_addr addr;
 	rte_eth_macaddr_get(port, &addr);
+	memcpy(&iok_info->host_mac, &addr, sizeof(iok_info->host_mac));
 	log_info("dpdk: driver: %s port %u MAC: %02" PRIx8 " %02" PRIx8 " %02" PRIx8
 			" %02" PRIx8 " %02" PRIx8 " %02" PRIx8 "",
 			dev_info.driver_name, (unsigned)port,

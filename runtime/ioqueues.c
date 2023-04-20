@@ -58,24 +58,6 @@ uint64_t cfg_ht_punish_us;
 uint64_t cfg_qdelay_us = 10;
 uint64_t cfg_quantum_us = 100;
 
-static int generate_random_mac(struct eth_addr *mac)
-{
-	int fd, ret;
-	fd = open("/dev/urandom", O_RDONLY);
-	if (fd < 0)
-		return -1;
-
-	ret = read(fd, mac, sizeof(*mac));
-	close(fd);
-	if (ret != sizeof(*mac))
-		return -1;
-
-	mac->addr[0] &= ~ETH_ADDR_GROUP;
-	mac->addr[0] |= ETH_ADDR_LOCAL_ADMIN;
-
-	return 0;
-}
-
 // Could be a macro really, this is totally static :/
 static size_t estimate_shm_space(void)
 {
@@ -199,6 +181,7 @@ int ioqueues_init_early(void)
 	}
 
 	iok.iok_info = (struct iokernel_info *)shbuf;
+	memcpy(&netcfg.mac, &iok.iok_info->host_mac, sizeof(netcfg.mac));
 	return 0;
 }
 
@@ -208,22 +191,10 @@ int ioqueues_init_early(void)
  */
 int ioqueues_init(void)
 {
-	bool has_mac = false;
-	int i, ret;
+	int i;
 	struct thread_spec *ts;
 
-	for (i = 0; i < ARRAY_SIZE(netcfg.mac.addr); i++)
-		has_mac |= netcfg.mac.addr[i] != 0;
-
-	if (!has_mac) {
-		ret = generate_random_mac(&netcfg.mac);
-		if (ret < 0)
-			return ret;
-	}
-
-	BUILD_ASSERT(sizeof(netcfg.mac) >= sizeof(mem_key_t));
-	iok.key = *(mem_key_t*)(&netcfg.mac);
-	iok.key = rand_crc32c(iok.key);
+	iok.key = rand_crc32c(netcfg.addr);
 
 	/* map ingress memory */
 	netcfg.rx_region.base =
@@ -379,7 +350,7 @@ int ioqueues_register_iokernel(void)
 	/* TODO: overestimating is okay, but fix this later */
 	hdr->egress_buf_count = div_up(iok.tx_len, net_get_mtu() + MBUF_HEAD_LEN);
 	hdr->thread_count = maxks;
-	hdr->mac = netcfg.mac;
+	hdr->ip_addr = netcfg.addr;
 
 	hdr->request_directpath_queues = cfg_request_hardware_queues;
 

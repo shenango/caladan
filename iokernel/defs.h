@@ -176,7 +176,7 @@ struct proc {
 	unsigned int		next_thread_rr; // for spraying join requests/overflow completions
 
 	/* network data */
-	struct eth_addr		mac;
+	uint32_t		ip_addr;
 
 	/* Overfloq queue for completion data */
 	size_t max_overflows;
@@ -307,7 +307,7 @@ struct dataplane {
 
 	struct proc		*clients[IOKERNEL_MAX_PROC];
 	int			nr_clients;
-	struct rte_hash		*mac_to_proc;
+	struct rte_hash		*ip_to_proc;
 	struct rte_device	*device;
 };
 

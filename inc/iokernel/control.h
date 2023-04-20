@@ -18,7 +18,7 @@
  * struct control_hdr, please increment the version number!
  */
 
-#define CONTROL_HDR_VERSION 9
+#define CONTROL_HDR_VERSION 10
 
 /* The abstract namespace path for the control socket. */
 #define CONTROL_SOCK_PATH	"\0/control/iokernel.sock"
@@ -122,7 +122,7 @@ struct control_hdr {
 	unsigned int		request_directpath_queues;
 	unsigned long		egress_buf_count;
 	shmptr_t		runtime_info;
-	struct eth_addr		mac;
+	uint32_t		ip_addr;
 	struct sched_spec	sched_cfg;
 	shmptr_t		thread_specs;
 };
@@ -133,6 +133,7 @@ struct iokernel_info {
 	unsigned char		rss_key[40];
 	struct pci_addr		directpath_pci;
 	int			cycles_per_us;
+	struct eth_addr		host_mac;
 };
 
 BUILD_ASSERT(sizeof(struct iokernel_info) <= IOKERNEL_INFO_SIZE);

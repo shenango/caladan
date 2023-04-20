@@ -15,7 +15,7 @@
 #include "defs.h"
 #include "sched.h"
 
-#define MAC_TO_PROC_ENTRIES	IOKERNEL_MAX_PROC
+#define IP_TO_PROC_ENTRIES	IOKERNEL_MAX_PROC
 
 static struct lrpc_chan_out lrpc_data_to_control;
 static struct lrpc_chan_in lrpc_control_to_data;
@@ -39,11 +39,19 @@ static void dp_clients_add_client(struct proc *p)
 		return;
 	}
 
-	if (!p->has_directpath) {
-		ret = rte_hash_add_key_data(dp.mac_to_proc, &p->mac.addr[0], p);
-		if (ret < 0)
-			log_err("dp_clients: failed to add MAC to hash table in add_client");
+	ret = rte_hash_lookup(dp.ip_to_proc, &p->ip_addr);
+	if (ret != -ENOENT) {
+		log_err("Duplicate IP address detected.");
+		goto fail;
+	}
 
+	ret = rte_hash_add_key_data(dp.ip_to_proc, &p->ip_addr, p);
+	if (ret < 0) {
+		log_err("dp_clients: failed to add IP to hash table in add_client");
+		goto fail;
+	}
+
+	if (!p->has_directpath) {
 		ret = rte_extmem_register(p->region.base, p->region.len, NULL, 0, PGSIZE_2MB);
 		if (ret < 0) {
 			log_err("dp_clients: failed to register extmem for client");
@@ -105,12 +113,12 @@ static void dp_clients_remove_client(struct proc *p)
 	dp.clients[i] = dp.clients[dp.nr_clients - 1];
 	dp.nr_clients--;
 
-	if (!p->has_directpath) {
-		ret = rte_hash_del_key(dp.mac_to_proc, &p->mac.addr[0]);
-		if (ret < 0)
-			log_err("dp_clients: failed to remove MAC from hash table in remove "
-					"client");
+	ret = rte_hash_del_key(dp.ip_to_proc, &p->ip_addr);
+	if (ret < 0)
+		log_err("dp_clients: failed to remove IP from hash table in remove "
+		        "client");
 
+	if (!p->has_directpath) {
 		if (!p->attach_fail) {
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
@@ -194,16 +202,16 @@ int dp_clients_init(void)
 
 	dp.nr_clients = 0;
 
-	/* initialize the hash table for mapping MACs to runtimes */
-	hash_params.name = "mac_to_proc_hash_table";
-	hash_params.entries = MAC_TO_PROC_ENTRIES;
-	hash_params.key_len = ETH_ADDR_LEN;
+	/* initialize the hash table for mapping IPs to runtimes */
+	hash_params.name = "ip_to_proc_hash_table";
+	hash_params.entries = IP_TO_PROC_ENTRIES;
+	hash_params.key_len = sizeof(uint32_t);
 	hash_params.hash_func = rte_jhash;
 	hash_params.hash_func_init_val = 0;
 	hash_params.socket_id = rte_socket_id();
-	dp.mac_to_proc = rte_hash_create(&hash_params);
-	if (dp.mac_to_proc == NULL) {
-		log_err("dp_clients: failed to create MAC to proc hash table");
+	dp.ip_to_proc = rte_hash_create(&hash_params);
+	if (dp.ip_to_proc == NULL) {
+		log_err("dp_clients: failed to create IP to proc hash table");
 		return -1;
 	}
 
