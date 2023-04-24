@@ -40,6 +40,12 @@
 #define CORE_PERF_GLOBAL_CTRL_ENABLE_PMC_0 (0x1)
 #define CORE_PERF_GLOBAL_CTRL_ENABLE_PMC_1 (0x2)
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6,1,0)
+#define PF__HOLE__00004000 0x00004000
+#endif
+
+#define PF_KSCHED_PARKED PF__HOLE__00004000
+
 /* the character device that provides the ksched IOCTL interface */
 static struct cdev ksched_cdev;
 
@@ -57,27 +63,19 @@ struct ksched_percpu {
 /* per-cpu data to coordinate context switching and signal delivery */
 static DEFINE_PER_CPU(struct ksched_percpu, kp);
 
-enum {
-	PARKED = 1,
-	UNPARKED = 2
-};
-
 void mark_task_parked(struct task_struct *tsk)
 {
-	// TODO: this field removed in kernel 6.1
-	/* borrow the trace field here which is origally used by Ftrace */
-	tsk->trace = PARKED;
+	tsk->flags |= PF_KSCHED_PARKED;
 }
 
-bool try_mark_task_unparked(struct task_struct *tsk) {
-	bool success = false;
-
-	if (tsk->trace == PARKED) {
-		success = true;
-		tsk->trace = UNPARKED;
+bool try_mark_task_unparked(struct task_struct *tsk)
+{
+	if ((tsk->flags & PF_KSCHED_PARKED) > 0) {
+		tsk->flags &= ~PF_KSCHED_PARKED;
+		return true;
 	}
 
-	return success;
+	return false;
 }
 
 /**
