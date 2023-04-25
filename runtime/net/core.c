@@ -492,7 +492,6 @@ static int net_tx_local_loopback(struct mbuf *m_in, uint8_t proto)
 	m->csum_type = CHECKSUM_TYPE_UNNECESSARY;
 	m->release = (void (*)(struct mbuf *))sfree;
 
-	mbuf_mark_network_offset(m);
 	mbuf_pull_hdr(m, struct ip_hdr);
 	switch(proto) {
 		case IPPROTO_UDP:
@@ -534,6 +533,7 @@ int net_tx_ip(struct mbuf *m, uint8_t proto, uint32_t daddr)
 
 	/* prepend the IP header */
 	net_push_iphdr(m, proto, daddr);
+	mbuf_mark_network_offset(m);
 
 	/* route loopbacks */
 	if (daddr == netcfg.addr)
