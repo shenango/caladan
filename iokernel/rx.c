@@ -107,42 +107,37 @@ static void rx_one_pkt(struct rte_mbuf *buf)
 		  PRIx8 " %02" PRIx8 " %02" PRIx8 " %02" PRIx8,
 		  ptr_dst_addr->addr_bytes[0], ptr_dst_addr->addr_bytes[1],
 		  ptr_dst_addr->addr_bytes[2], ptr_dst_addr->addr_bytes[3],
-		  ptr_dst_addr->addr_bytes[4], ptr_dst_addr->addr_bytes[5]);
+	  ptr_dst_addr->addr_bytes[4], ptr_dst_addr->addr_bytes[5]);
 
-	/* handle unicast destinations (send to a single runtime) */
-	if (likely(rte_is_unicast_ether_addr(ptr_dst_addr) ||
-		       rte_is_broadcast_ether_addr(ptr_dst_addr))) {
+	ether_type = rte_be_to_cpu_16(ptr_mac_hdr->ether_type);
 
-		ether_type = rte_be_to_cpu_16(ptr_mac_hdr->ether_type);
-
-		if (likely(ether_type == ETHTYPE_IP)) {
-			iphdr = rte_pktmbuf_mtod_offset(buf, struct rte_ipv4_hdr *,
-				sizeof(*ptr_mac_hdr));
-			dst_ip = rte_be_to_cpu_32(iphdr->dst_addr);
-		} else if (ether_type == ETHTYPE_ARP) {
-			arphdr = rte_pktmbuf_mtod_offset(buf, struct rte_arp_hdr *,
-				sizeof(*ptr_mac_hdr));
-			dst_ip = rte_be_to_cpu_32(arphdr->arp_data.arp_tip);
-		} else {
-			log_debug("unrecognized ether type");
-			goto fail_free;
-		}
-
-		/* lookup runtime by IP in hash table */
-		ret = rte_hash_lookup_data(dp.ip_to_proc, &dst_ip, (void **)&p);
-		if (unlikely(ret < 0)) {
-			STAT_INC(RX_UNREGISTERED_MAC, 1);
-			goto fail_free;
-		}
-
-		net_hdr = rx_prepend_rx_preamble(buf);
-		if (!rx_send_pkt_to_runtime(p, net_hdr)) {
-			STAT_INC(RX_UNICAST_FAIL, 1);
-			goto fail_free;
-		}
-
-		return;
+	if (likely(ether_type == ETHTYPE_IP)) {
+		iphdr = rte_pktmbuf_mtod_offset(buf, struct rte_ipv4_hdr *,
+			sizeof(*ptr_mac_hdr));
+		dst_ip = rte_be_to_cpu_32(iphdr->dst_addr);
+	} else if (ether_type == ETHTYPE_ARP) {
+		arphdr = rte_pktmbuf_mtod_offset(buf, struct rte_arp_hdr *,
+			sizeof(*ptr_mac_hdr));
+		dst_ip = rte_be_to_cpu_32(arphdr->arp_data.arp_tip);
+	} else {
+		log_debug("unrecognized ether type");
+		goto fail_free;
 	}
+
+	/* lookup runtime by IP in hash table */
+	ret = rte_hash_lookup_data(dp.ip_to_proc, &dst_ip, (void **)&p);
+	if (unlikely(ret < 0)) {
+		STAT_INC(RX_UNREGISTERED_MAC, 1);
+		goto fail_free;
+	}
+
+	net_hdr = rx_prepend_rx_preamble(buf);
+	if (!rx_send_pkt_to_runtime(p, net_hdr)) {
+		STAT_INC(RX_UNICAST_FAIL, 1);
+		goto fail_free;
+	}
+
+	return;
 
 fail_free:
 	/* anything else */
