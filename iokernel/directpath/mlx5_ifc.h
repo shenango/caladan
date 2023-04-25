@@ -813,6 +813,22 @@ struct mlx5_ifc_dr_match_param_bits {
 	struct mlx5_ifc_dr_match_set_misc5_bits misc5;
 };
 
+
+enum dr_matcher_criteria {
+	DR_MATCHER_CRITERIA_EMPTY		= 0,
+	DR_MATCHER_CRITERIA_OUTER		= 1 << 0,
+};
+
+union match {
+	struct {
+		size_t size;
+		/**< Size of match value. Do NOT split size and key! */
+		uint32_t buf[DEVX_ST_SZ_DW(dr_match_param)];
+		/**< Matcher value. This value is used as the mask or as a key. */
+	};
+	struct mlx5dv_flow_match_parameters params;
+};
+
 struct mlx5_ifc_flow_table_prop_layout_bits {
 	u8         ft_support[0x1];
 	u8         flow_tag[0x1];

@@ -40,10 +40,6 @@ extern struct cq *cqn_to_cq_map[MAX_CQ];
 
 // Flow steering
 #define FLOW_TBL_TYPE 0x0
-#define FLOW_TBL_LOG_ENTRIES 12
-#define FLOW_TBL_NR_ENTRIES (1 << FLOW_TBL_LOG_ENTRIES)
-extern uint32_t table_number;
-extern uint32_t flow_group_number;
 
 struct eq {
 	uint32_t eqn;
@@ -100,7 +96,6 @@ struct directpath_ctx {
 
 	unsigned int kill:1;
 	unsigned int use_rmp:1;
-	unsigned int has_flow_rule:1;
 
 	uint32_t	nr_armed;
 	uint32_t	nr_qs;
@@ -120,9 +115,6 @@ struct directpath_ctx {
 	/* cold data */
 	struct ibv_pd *pd;
 	uint32_t pdn;
-	uint32_t tdn;
-	uint32_t tisn;
-	uint32_t tirn;
 
 	int memfd;
 	struct shm_region region;
@@ -138,7 +130,6 @@ struct directpath_ctx {
 	struct mlx5dv_devx_obj *tis_obj;
 	struct mlx5dv_devx_obj *rqt_obj;
 	struct mlx5dv_devx_obj *td_obj;
-	int flow_tbl_index;
 
 	struct ibv_mr *mreg;
 
@@ -146,6 +137,9 @@ struct directpath_ctx {
 
 	ssize_t *uarns;
 	size_t nr_alloc_uarn;
+
+	struct mlx5dv_dr_action *fwd_action;
+	struct mlx5dv_dr_rule		*fwd_rule;
 
 	struct qp qps[];
 };

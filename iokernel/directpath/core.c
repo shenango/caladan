@@ -10,6 +10,7 @@
 #include <unistd.h>
 
 #include <iokernel/directpath.h>
+#include <net/ip.h>
 
 #include "../defs.h"
 #include "mlx5_ifc.h"
@@ -28,21 +29,12 @@ static struct directpath_ctx *preallocated_ctx[MAX_PREALLOC];
 static unsigned int nr_prealloc;
 
 /* flow steering stuff */
-static DEFINE_BITMAP(mac_used_entries, FLOW_TBL_NR_ENTRIES);
 static struct mlx5dv_devx_obj *root_flow_tbl;
 static struct mlx5dv_devx_obj *root_flow_group;
-uint32_t table_number;
-uint32_t flow_group_number;
-
-#define TIME_OP(opn, x) do { \
-	uint64_t t = rdtsc(); \
-	barrier(); \
-	x; \
-	barrier(); \
-	uint64_t a = rdtsc(); \
-	log_err("%s took %0.2f micros", opn, (double)(a - t) / (double)cycles_per_us); \
-	} while (0);
-
+static struct mlx5dv_dr_domain *dr_dmn;
+static struct mlx5dv_dr_matcher *matcher;
+static struct mlx5dv_dr_table *main_sw_tbl;
+static struct mlx5dv_devx_obj *root_flow_rule;
 
 struct ibv_context *vfcontext;
 struct cq *cqn_to_cq_map[MAX_CQ];
@@ -144,6 +136,8 @@ static int directpath_query_nic_vport(void)
 	log_info("directpath: mac %02X:%02X:%02X:%02X:%02X:%02X", mac_addr[0], mac_addr[1],
 		     mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
 
+	memcpy(&iok_info->host_mac, mac_addr, sizeof(iok_info->host_mac));
+
 	log_info("directpath: promisc mc: %d", DEVX_GET(nic_vport_context, nic_vport_ctx, promisc_mc));
 	log_info("directpath: mtu: %d", DEVX_GET(nic_vport_context, nic_vport_ctx, mtu));
 
@@ -195,50 +189,131 @@ static void qp_fill_iokspec(struct thread *th, struct qp *qp)
 	h->enabled = false;
 }
 
-static int setup_steering(void)
+static int setup_hardware_root_table(uint32_t *table_number)
 {
 	uint32_t in[DEVX_ST_SZ_DW(create_flow_table_in)] = {0};
 	uint32_t out[DEVX_ST_SZ_DW(create_flow_table_out)] = {0};
-
-	uint32_t infg[DEVX_ST_SZ_DW(create_flow_group_in)] = {0};
-	uint32_t outfg[DEVX_ST_SZ_DW(create_flow_group_out)] = {0};
-
 	void *ftc;
 
-	DEVX_SET(create_flow_table_in, in, opcode, MLX5_CMD_OP_CREATE_FLOW_TABLE);
 
-	DEVX_SET(create_flow_table_in, in, table_type, FLOW_TBL_TYPE /* NIC RX */); // 0x4 /* ESW FDB */); // todo?
+	DEVX_SET(create_flow_table_in, in, opcode, MLX5_CMD_OP_CREATE_FLOW_TABLE);
+	DEVX_SET(create_flow_table_in, in, table_type, FLOW_TBL_TYPE /* NIC RX */);
 	ftc = DEVX_ADDR_OF(create_flow_table_in, in, flow_table_context);
 
-	DEVX_SET(flow_table_context, ftc, table_miss_action, 0); // ??
+	DEVX_SET(flow_table_context, ftc, table_miss_action, 0);
 	DEVX_SET(flow_table_context, ftc, level, 0);
-	DEVX_SET(flow_table_context, ftc, log_size, 12);
+	DEVX_SET(flow_table_context, ftc, log_size, 0);
 
-	root_flow_tbl = mlx5dv_devx_obj_create(vfcontext, in, sizeof(in), out, sizeof(out));
+	root_flow_tbl = mlx5dv_devx_obj_create(vfcontext, in, sizeof(in), out,
+		sizeof(out));
 	if (!root_flow_tbl) {
-		LOG_CMD_FAIL("failed to create root flow tbl", create_flow_table_out, out);
+		LOG_CMD_FAIL("failed to create root flow tbl", create_flow_table_out,
+			out);
 		return -1;
 	}
 
-	table_number = DEVX_GET(create_flow_table_out, out, table_id);
+	*table_number = DEVX_GET(create_flow_table_out, out, table_id);
 
-	DEVX_SET(create_flow_group_in, infg, opcode, MLX5_CMD_OP_CREATE_FLOW_GROUP);
-	DEVX_SET(create_flow_group_in, infg, table_type, FLOW_TBL_TYPE); //0x4
-	DEVX_SET(create_flow_group_in, infg, table_id, table_number);
-	DEVX_SET(create_flow_group_in, infg, start_flow_index, 0);
-	DEVX_SET(create_flow_group_in, infg, end_flow_index, (1 << 12) - 1);
+	return 0;
+}
 
-	DEVX_SET(create_flow_group_in, infg, match_criteria_enable, (1 << 0));
-	DEVX_SET(create_flow_group_in, infg, match_criteria.outer_headers.dmac_47_16, __devx_mask(32));
-	DEVX_SET(create_flow_group_in, infg, match_criteria.outer_headers.dmac_15_0, __devx_mask(16));
+static int setup_hardware_flow_group(uint32_t table_number, uint32_t *group_id)
+{
+	uint32_t in[DEVX_ST_SZ_DW(create_flow_group_in)] = {0};
+	uint32_t out[DEVX_ST_SZ_DW(create_flow_group_out)] = {0};
 
-	root_flow_group = mlx5dv_devx_obj_create(vfcontext, infg, sizeof(infg), outfg, sizeof(outfg));
+	DEVX_SET(create_flow_group_in, in, opcode, MLX5_CMD_OP_CREATE_FLOW_GROUP);
+	DEVX_SET(create_flow_group_in, in, table_type, FLOW_TBL_TYPE);
+	DEVX_SET(create_flow_group_in, in, table_id, table_number);
+	DEVX_SET(create_flow_group_in, in, match_criteria_enable, 0);
+
+	root_flow_group = mlx5dv_devx_obj_create(vfcontext, in, sizeof(in),
+		out, sizeof(out));
 	if (!root_flow_group) {
-		LOG_CMD_FAIL("flow group", create_flow_group_out, outfg);
+		LOG_CMD_FAIL("flow group", create_flow_group_out, out);
 		return -1;
 	}
 
-	flow_group_number = DEVX_GET(create_flow_group_out, outfg, group_id);
+	*group_id = DEVX_GET(create_flow_group_out, out, group_id);
+	return 0;
+}
+
+static int setup_hardware_sw_rule(uint32_t root_tbl_id, uint32_t group_id,
+	                              uint32_t sw_table_id)
+{
+	uint32_t in[DEVX_ST_SZ_DW(set_fte_in) + DEVX_ST_SZ_DW(dest_format)] = {};
+	uint32_t out[DEVX_ST_SZ_DW(set_fte_out)];
+	void *in_flow_context;
+	uint8_t *in_dests;
+
+	/* set root h/w-managed flow table to send all packets to the s/w table */
+	DEVX_SET(set_fte_in, in, opcode, MLX5_CMD_OP_SET_FLOW_TABLE_ENTRY);
+	DEVX_SET(set_fte_in, in, table_type, FLOW_TBL_TYPE);
+	DEVX_SET(set_fte_in, in, table_id, root_tbl_id);
+	DEVX_SET(set_fte_in, in, flow_index, 0);
+
+	in_flow_context = DEVX_ADDR_OF(set_fte_in, in, flow_context);
+	DEVX_SET(flow_context, in_flow_context, group_id, group_id);
+	DEVX_SET(flow_context, in_flow_context, action,
+		MLX5_FLOW_CONTEXT_ACTION_FWD_DEST);
+	DEVX_SET(flow_context, in_flow_context, destination_list_size, 1);
+	in_dests = DEVX_ADDR_OF(flow_context, in_flow_context, destination);
+	DEVX_SET(dest_format, in_dests, destination_type, MLX5_FLOW_DEST_TYPE_FT);
+	DEVX_SET(dest_format, in_dests, destination_id, sw_table_id);
+
+	root_flow_rule = mlx5dv_devx_obj_create(vfcontext, in, sizeof(in), out,
+		sizeof(out));
+	if (!root_flow_rule) {
+		LOG_CMD_FAIL("flow group", set_fte_out, out);
+		return -1;
+	}
+
+	return 0;
+}
+
+static int setup_steering(void)
+{
+	int ret;
+	uint32_t root_tbl_number, root_fg_id;
+	union match mask = {0};
+
+	/* setup direct flow steering */
+	dr_dmn = mlx5dv_dr_domain_create(vfcontext, MLX5DV_DR_DOMAIN_TYPE_NIC_RX);
+	if (!dr_dmn)
+		return errno ? -errno : -1;
+
+	/* create the main s/w-managed flow table */
+	main_sw_tbl = mlx5dv_dr_table_create(dr_dmn, 1);
+	if (!main_sw_tbl)
+		return errno ? -errno : -1;
+
+	/* create the matcher that runtime rules will use */
+	mask.size = DEVX_ST_SZ_BYTES(dr_match_param);
+	DEVX_SET(fte_match_param, mask.buf,
+		     outer_headers.dst_ipv4_dst_ipv6.ipv4_layout.ipv4, __devx_mask(32));
+	DEVX_SET(fte_match_param, mask.buf, outer_headers.ethertype,
+		     __devx_mask(16));
+	DEVX_SET(fte_match_param, mask.buf, outer_headers.ip_version, IPVERSION);
+
+	matcher = mlx5dv_dr_matcher_create(main_sw_tbl, 0,
+		                               DR_MATCHER_CRITERIA_OUTER, &mask.params);
+	if (!matcher)
+		return errno ? -errno : -1;
+
+	/* setup and chain the hardware tables to this software table */
+	ret = setup_hardware_root_table(&root_tbl_number);
+	if (ret)
+		return ret;
+
+	ret = setup_hardware_flow_group(root_tbl_number, &root_fg_id);
+	if (ret)
+		return ret;
+
+	ret = setup_hardware_sw_rule(root_tbl_number, root_fg_id,
+		                         mlx5dv_dr_table_get_id(main_sw_tbl));
+	if (ret)
+		return ret;
+
 	return 0;
 }
 
@@ -378,6 +453,7 @@ static int activate_rq(struct qp *qp, uint32_t rqn)
 	return 0;
 }
 
+
 static int activate_sq(struct qp *qp)
 {
 	int ret;
@@ -401,7 +477,7 @@ static int activate_sq(struct qp *qp)
 	return 0;
 }
 
-static int alloc_td(struct directpath_ctx *dp)
+static int alloc_td(struct directpath_ctx *dp, uint32_t *tdn)
 {
 	uint32_t in[DEVX_ST_SZ_DW(alloc_transport_domain_in)] = {0};
 	uint32_t out[DEVX_ST_SZ_DW(alloc_transport_domain_out)] = {0};
@@ -414,11 +490,11 @@ static int alloc_td(struct directpath_ctx *dp)
 		return -1;
 	}
 
-	dp->tdn = DEVX_GET(alloc_transport_domain_out, out, transport_domain);
+	*tdn = DEVX_GET(alloc_transport_domain_out, out, transport_domain);
 	return 0;
 }
 
-static int create_tis(struct directpath_ctx *dp)
+static int create_tis(struct directpath_ctx *dp, uint32_t tdn, uint32_t *tisn)
 {
 	uint32_t in[DEVX_ST_SZ_DW(create_tis_in)] = {0};
 	uint32_t out[DEVX_ST_SZ_DW(create_tis_out)] = {0};
@@ -428,7 +504,7 @@ static int create_tis(struct directpath_ctx *dp)
 	ctx = DEVX_ADDR_OF(create_tis_in, in, ctx);
 
 	DEVX_SET(tisc, ctx, tls_en, 0);
-	DEVX_SET(tisc, ctx, transport_domain, dp->tdn);
+	DEVX_SET(tisc, ctx, transport_domain, tdn);
 
 	dp->tis_obj = mlx5dv_devx_obj_create(vfcontext, in, sizeof(in), out, sizeof(out));
 	if (!dp->tis_obj) {
@@ -436,12 +512,13 @@ static int create_tis(struct directpath_ctx *dp)
 		return -1;
 	}
 
-	dp->tisn = DEVX_GET(create_tis_out, out, tisn);
+	*tisn = DEVX_GET(create_tis_out, out, tisn);
 
 	return 0;
 }
 
-static int fill_wqc(struct directpath_ctx *dp, struct qp *qp, struct wq *wq, void *wqc, uint32_t log_nr_wqe, bool is_rq)
+static int fill_wqc(struct directpath_ctx *dp, struct qp *qp, struct wq *wq,
+	void *wqc, uint32_t log_nr_wqe, bool is_rq)
 {
 	int ret;
 	size_t wqe_cnt = 1UL << log_nr_wqe;
@@ -490,7 +567,8 @@ static int fill_wqc(struct directpath_ctx *dp, struct qp *qp, struct wq *wq, voi
 	return 0;
 }
 
-static int create_sq(struct directpath_ctx *dp, struct qp *qp, uint32_t log_nr_wqe)
+static int create_sq(struct directpath_ctx *dp, struct qp *qp,
+	uint32_t log_nr_wqe, uint32_t tisn)
 {
 	int ret;
 	uint32_t in[DEVX_ST_SZ_DW(create_sq_in)] = {0};
@@ -502,7 +580,7 @@ static int create_sq(struct directpath_ctx *dp, struct qp *qp, uint32_t log_nr_w
 
 	DEVX_SET(sqc, sqc, cqn, qp->tx_cq.cqn);
 	DEVX_SET(sqc, sqc, tis_lst_sz, 1);
-	DEVX_SET(sqc, sqc, tis_num_0, dp->tisn);
+	DEVX_SET(sqc, sqc, tis_num_0, tisn);
 
 	wqc = DEVX_ADDR_OF(sqc, sqc, wq);
 	ret = fill_wqc(dp, qp, &qp->tx_wq, wqc, log_nr_wqe, false);
@@ -728,7 +806,7 @@ static int create_rqt(struct directpath_ctx *dp)
 	return 0;
 }
 
-static int create_tir(struct directpath_ctx *dp)
+static int create_tir(struct directpath_ctx *dp, uint32_t tdn)
 {
 	uint32_t in[DEVX_ST_SZ_DW(create_tir_in)] = {0};
 	uint32_t out[DEVX_ST_SZ_DW(create_tir_out)] = {0};
@@ -745,7 +823,7 @@ static int create_tir(struct directpath_ctx *dp)
 	DEVX_SET(tirc, tir_ctx, rx_hash_fn, 2 /* TOEPLITZ */);
 	DEVX_SET(tirc, tir_ctx, self_lb_block, 0); // TODO?
 
-	DEVX_SET(tirc, tir_ctx, transport_domain, dp->tdn);
+	DEVX_SET(tirc, tir_ctx, transport_domain, tdn);
 
 	BUILD_ASSERT(DEVX_FLD_SZ_BYTES(tirc, rx_hash_toeplitz_key) == sizeof(rss_key));
 	memcpy(DEVX_ADDR_OF(tirc, tir_ctx, rx_hash_toeplitz_key), rss_key, sizeof(rss_key));
@@ -761,7 +839,11 @@ static int create_tir(struct directpath_ctx *dp)
 		return -1;
 	}
 
-	dp->tirn = DEVX_GET(create_tir_out, out, tirn);
+	dp->fwd_action = mlx5dv_dr_action_create_dest_devx_tir(dp->tir_obj);
+	if (!dp->fwd_action) {
+		log_err("failed to create fwd action %d", errno);
+		return -1;
+	}
 
 	return 0;
 }
@@ -874,8 +956,17 @@ static void free_ctx(struct directpath_ctx *ctx)
 			log_warn("couldn't free MR");
 	}
 
-	if (ctx->flow_tbl_index != FLOW_TBL_NR_ENTRIES)
-		bitmap_clear(mac_used_entries, ctx->flow_tbl_index);
+	if (ctx->fwd_rule) {
+		ret = mlx5dv_dr_rule_destroy(ctx->fwd_rule);
+		if (ret)
+			log_warn("failed to destroy flow rule");
+	}
+
+	if (ctx->fwd_action) {
+		ret = mlx5dv_dr_action_destroy(ctx->fwd_action);
+		if (ret)
+			log_warn("failed to destroy dr action");
+	}
 
 	if (ctx->tir_obj) {
 		ret = mlx5dv_devx_obj_destroy(ctx->tir_obj);
@@ -980,6 +1071,7 @@ static int alloc_raw_ctx(unsigned int nrqs, bool use_rmp, struct directpath_ctx 
 {
 	int ret = 0;
 	uint32_t i;
+	uint32_t tisn, tdn;
 	size_t lg_cq_sz;
 	struct directpath_ctx *dp;
 	struct mlx5dv_pd pd_out;
@@ -993,7 +1085,6 @@ static int alloc_raw_ctx(unsigned int nrqs, bool use_rmp, struct directpath_ctx 
 
 	memset(dp, 0, sizeof(*dp) + nrqs * sizeof(struct qp));
 	dp->memfd = -1;
-	dp->flow_tbl_index = FLOW_TBL_NR_ENTRIES;
 	dp->command_slot = COMMAND_SLOT_UNALLOCATED;
 	dp->region.base = MAP_FAILED;
 	dp->nr_qs = nrqs;
@@ -1005,15 +1096,6 @@ static int alloc_raw_ctx(unsigned int nrqs, bool use_rmp, struct directpath_ctx 
 	dp->pd = ibv_alloc_pd(vfcontext);
 	if (!dp->pd)
 		goto err;
-
-	dp->flow_tbl_index =
-		bitmap_find_next_cleared(mac_used_entries, FLOW_TBL_NR_ENTRIES, 0);
-	if (dp->flow_tbl_index == FLOW_TBL_NR_ENTRIES) {
-		log_err("flow table exhausted!");
-		goto err;
-	}
-
-	bitmap_set(mac_used_entries, dp->flow_tbl_index);
 
 	init_obj.pd.in = dp->pd;
 	init_obj.pd.out = &pd_out;
@@ -1028,11 +1110,11 @@ static int alloc_raw_ctx(unsigned int nrqs, bool use_rmp, struct directpath_ctx 
 	if (ret)
 		goto err;
 
-	ret = alloc_td(dp);
+	ret = alloc_td(dp, &tdn);
 	if (ret)
 		goto err;
 
-	ret = create_tis(dp);
+	ret = create_tis(dp, tdn, &tisn);
 	if (ret)
 		goto err;
 
@@ -1079,7 +1161,7 @@ static int alloc_raw_ctx(unsigned int nrqs, bool use_rmp, struct directpath_ctx 
 		if (ret)
 			goto err;
 
-		ret = create_sq(dp, &dp->qps[i], DEFAULT_SQ_LOG_SZ);
+		ret = create_sq(dp, &dp->qps[i], DEFAULT_SQ_LOG_SZ, tisn);
 		if (ret)
 			goto err;
 	}
@@ -1088,7 +1170,7 @@ static int alloc_raw_ctx(unsigned int nrqs, bool use_rmp, struct directpath_ctx 
 	if (ret)
 		goto err;
 
-	ret = create_tir(dp);
+	ret = create_tir(dp, tdn);
 	if (ret)
 		goto err;
 
@@ -1139,6 +1221,8 @@ int alloc_directpath_ctx(struct proc *p, bool use_rmp,
 	int ret;
 	unsigned int i;
 	struct directpath_ctx *dp = NULL;
+	struct mlx5dv_dr_action *action[1];
+	static union match mask;
 
 	for (i = 0; i < nr_prealloc; i++) {
 		if (preallocated_ctx[i]->nr_qs == p->thread_count &&
@@ -1162,6 +1246,17 @@ int alloc_directpath_ctx(struct proc *p, bool use_rmp,
 	/* fill info for iokernel polling */
 	for (i = 0; i < p->thread_count; i++)
 		qp_fill_iokspec(&p->threads[i], &dp->qps[i]);
+
+	mask.size = DEVX_ST_SZ_BYTES(dr_match_param);
+	DEVX_SET(fte_match_param, mask.buf, outer_headers.ethertype, ETHTYPE_IP);
+	DEVX_SET(fte_match_param, mask.buf, outer_headers.ip_version, 4);
+	DEVX_SET(fte_match_param, mask.buf,
+		outer_headers.dst_ipv4_dst_ipv6.ipv4_layout.ipv4, p->ip_addr);
+
+	action[0] = dp->fwd_action;
+	dp->fwd_rule = mlx5dv_dr_rule_create(matcher, &mask.params, 1, action);
+	if (unlikely(!dp->fwd_rule))
+		log_warn("warning: unable to create traffic rule for new proc");
 
 	directpath_get_spec(dp, spec_out, memfd_out, barfd_out);
 	return 0;
@@ -1191,21 +1286,24 @@ int directpath_init(void)
 	}
 
 	vfcontext = ibv_open_device(dev_list[0]);
-	BUG_ON(!vfcontext);
+	if (!vfcontext) {
+		log_err("enable to initialize vfio context: %d", errno);
+		return errno ? -errno : -1;
+	}
 
 	ret = directpath_commands_init();
 	if (ret)
 		return ret;
 
-	ret = setup_steering();
-	if (ret) {
-		log_err("failed to init steering %d", ret);
-		return ret;
-	}
-
 	ret = directpath_setup_port();
 	if (ret) {
 		log_err("failed to setup port");
+		return ret;
+	}
+
+	ret = setup_steering();
+	if (ret) {
+		log_err("failed to setup direct steering");
 		return ret;
 	}
 

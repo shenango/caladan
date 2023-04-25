@@ -16,8 +16,6 @@
 enum mlx5_cmd_type {
 	MLX5_CMD_EMPTY = 0,
 	MLX5_CMD_RSS_UPDATE,
-	MLX5_CMD_INSTALL_FLOW_RULE,
-	MLX5_CMD_REMOVE_FLOW_RULE,
 };
 
 struct mlx5_cmd_layout {
@@ -57,55 +55,6 @@ static void command_submit_final(uint32_t *in, size_t ilen, size_t olen,
 
 	s->cmd_type = cmd_type;
 	bitmap_set(&pending_slots, s - slots);
-}
-
-
-static void command_tear_down_flow_rule(struct directpath_ctx *ctx, struct cmd_slot *s)
-{
-	static uint32_t in[DEVX_ST_SZ_DW(delete_fte_in)];
-
-	DEVX_SET(delete_fte_in, in, opcode, MLX5_CMD_OP_DELETE_FLOW_TABLE_ENTRY);
-	DEVX_SET(delete_fte_in, in, flow_index, ctx->flow_tbl_index);
-
-	DEVX_SET(delete_fte_in, in, table_type, FLOW_TBL_TYPE);
-	DEVX_SET(delete_fte_in, in, table_id, table_number);
-
-	ctx->has_flow_rule = false;
-	proc_put(ctx->p);
-
-	command_submit_final(in, sizeof(in), DEVX_ST_SZ_BYTES(delete_fte_out),
-	                     s, MLX5_CMD_REMOVE_FLOW_RULE);
-}
-
-static void command_install_flow_rule(struct directpath_ctx *ctx, struct cmd_slot *s)
-{
-	static uint32_t in[DEVX_ST_SZ_DW(set_fte_in) + DEVX_ST_SZ_DW(dest_format)];
-	void *in_flow_context;
-	uint8_t *in_dests;
-
-	DEVX_SET(set_fte_in, in, opcode, MLX5_CMD_OP_SET_FLOW_TABLE_ENTRY);
-	DEVX_SET(set_fte_in, in, table_type, FLOW_TBL_TYPE);
-	DEVX_SET(set_fte_in, in, table_id, table_number);
-	DEVX_SET(set_fte_in, in, flow_index, ctx->flow_tbl_index);
-
-	in_flow_context = DEVX_ADDR_OF(set_fte_in, in, flow_context);
-	DEVX_SET(flow_context, in_flow_context, group_id, flow_group_number);
-	DEVX_SET(flow_context, in_flow_context, action, (1 << 2));
-
-	void *addr = DEVX_ADDR_OF(flow_context, in_flow_context,
-	                          match_value.outer_headers.dmac_47_16);
-	memcpy(addr, &ctx->p->mac, sizeof(ctx->p->mac));
-
-	DEVX_SET(flow_context, in_flow_context, destination_list_size, 1);
-	in_dests = DEVX_ADDR_OF(flow_context, in_flow_context, destination);
-	DEVX_SET(dest_format, in_dests, destination_type, MLX5_FLOW_DEST_TYPE_TIR);
-	DEVX_SET(dest_format, in_dests, destination_id, ctx->tirn);
-
-	// take an extra reference for this flow rule
-	proc_get(ctx->p);
-	ctx->has_flow_rule = true;
-	command_submit_final(in, sizeof(in), DEVX_ST_SZ_BYTES(set_fte_out),
-	                     s, MLX5_CMD_INSTALL_FLOW_RULE);
 }
 
 static void command_rss_update(struct directpath_ctx *ctx, struct cmd_slot *s)
@@ -169,22 +118,8 @@ static bool command_ctx_run(struct directpath_ctx *ctx)
 {
 	struct cmd_slot *s;
 
-	if (unlikely(ctx->kill)) {
-		if (ctx->has_flow_rule) {
-			s = command_slot_alloc(ctx);
-			assert(s);
-			command_tear_down_flow_rule(ctx, s);
-			return true;
-		}
+	if (unlikely(ctx->kill))
 		return false;
-	}
-
-	if (unlikely(!ctx->has_flow_rule)) {
-		s = command_slot_alloc(ctx);
-		assert(s);
-		command_install_flow_rule(ctx, s);
-		return true;
-	}
 
 	if (ctx->hw_rss_gen < ctx->sw_rss_gen) {
 		s = command_slot_alloc(ctx);
