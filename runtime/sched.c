@@ -919,6 +919,12 @@ int thread_spawn_main(thread_fn_t fn, void *arg)
 	return 0;
 }
 
+void thread_free(thread_t *th)
+{
+	stack_free(th->stack);
+	tcache_free(perthread_ptr(thread_pt), th);
+}
+
 static void thread_finish_exit(void)
 {
 	struct thread *th = thread_self();
@@ -929,8 +935,7 @@ static void thread_finish_exit(void)
 	if (unlikely(th->main_thread))
 		init_shutdown(EXIT_SUCCESS);
 
-	stack_free(th->stack);
-	tcache_free(perthread_ptr(thread_pt), th);
+	thread_free(th);
 
 	spin_lock(&myk()->lock);
 	schedule();

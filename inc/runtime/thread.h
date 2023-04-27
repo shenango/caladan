@@ -52,6 +52,7 @@ extern void thread_ready_head(thread_t *thread);
 extern thread_t *thread_create(thread_fn_t fn, void *arg);
 extern thread_t *thread_create_with_buf(thread_fn_t fn, void **buf, size_t len);
 extern void thread_set_fsbase(thread_t *th, uint64_t fsbase);
+extern void thread_free(thread_t *th);
 
 DECLARE_PERTHREAD(thread_t *, __self);
 DECLARE_PERTHREAD_ALIAS(thread_t * const, __self, __const_self);
