@@ -460,11 +460,6 @@ static void control_loop(void)
 
 	pthread_barrier_wait(&init_barrier);
 
-	if (cfg.vfio_directpath && nr_vfio_prealloc) {
-		directpath_preallocate(true, 8, nr_vfio_prealloc);
-		log_info("control: preallocated %u 8-thread directpath contexts", nr_vfio_prealloc);
-	}
-
 	while (1) {
 		ret = epoll_wait(epoll_fd, &ev, 1, -1);
 		while (ret == -1 && errno == EINTR)

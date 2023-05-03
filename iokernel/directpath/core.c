@@ -665,6 +665,23 @@ bool directpath_poll(void)
 	return work_done;
 }
 
+static void *directpath_init_thread_poll(void *arg)
+{
+	volatile bool *stop = (volatile bool *)arg;
+
+	struct timespec tv = {
+		.tv_sec = 0,
+		.tv_nsec = 10000000
+	};
+
+	while (!*stop) {
+		directpath_events_poll();
+		nanosleep(&tv, NULL);
+	}
+
+	return NULL;
+}
+
 static int create_rqt(struct directpath_ctx *dp)
 {
 	size_t inlen;
@@ -1147,8 +1164,10 @@ int alloc_directpath_ctx(struct proc *p, bool use_rmp,
 int directpath_init(void)
 {
 	int ret;
+	pthread_t temp_poll_thread;
 	struct mlx5dv_vfio_context_attr vfattr;
 	struct ibv_device **dev_list;
+	volatile bool poll_thread_stop = false;
 
 	if (!cfg.vfio_directpath)
 		return 0;
@@ -1198,6 +1217,24 @@ int directpath_init(void)
 	ret = events_init();
 	if (ret)
 		return ret;
+
+	/* spawn a temporary thread to poll the eq so we can still issue commands */
+	ret = pthread_create(&temp_poll_thread, NULL, directpath_init_thread_poll,
+		                 (void *)&poll_thread_stop);
+	if (ret)
+		return ret;
+
+	ret = directpath_arp_server_init();
+	if (ret)
+		return ret;
+
+	if (nr_vfio_prealloc) {
+		directpath_preallocate(true, 8, nr_vfio_prealloc);
+		log_info("control: preallocated %u 8-thread directpath contexts", nr_vfio_prealloc);
+	}
+
+	poll_thread_stop = true;
+	pthread_join(temp_poll_thread, NULL);
 
 	export_fd(vfcontext, &bar_fd, &bar_offs, &bar_map_size);
 
