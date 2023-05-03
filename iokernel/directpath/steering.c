@@ -12,7 +12,7 @@
 #include "defs.h"
 #include "mlx5_ifc.h"
 
-static bool use_legacy_steering = true;
+static const bool use_legacy_steering = false;
 
 // Flow steering
 #define FLOW_TBL_TYPE 0x0
@@ -21,8 +21,8 @@ static bool use_legacy_steering = true;
 BUILD_ASSERT(IOKERNEL_MAX_PROC <= FLOW_TBL_NR_ENTRIES);
 
 /* flow steering stuff */
-static struct mlx5dv_devx_obj *root_flow_tbl;
-static struct mlx5dv_devx_obj *root_flow_group;
+struct mlx5dv_devx_obj *root_flow_tbl;
+struct mlx5dv_devx_obj *root_flow_group;
 static struct mlx5dv_dr_domain *dr_dmn;
 static struct mlx5dv_dr_matcher *matcher;
 static struct mlx5dv_dr_table *main_sw_tbl;
@@ -67,7 +67,12 @@ static int setup_hardware_flow_group(uint32_t table_number, uint32_t *group_id)
 	DEVX_SET(create_flow_group_in, in, opcode, MLX5_CMD_OP_CREATE_FLOW_GROUP);
 	DEVX_SET(create_flow_group_in, in, table_type, FLOW_TBL_TYPE);
 	DEVX_SET(create_flow_group_in, in, table_id, table_number);
-	DEVX_SET(create_flow_group_in, in, match_criteria_enable, 0);
+	DEVX_SET(create_flow_group_in, in, match_criteria_enable, DR_MATCHER_CRITERIA_OUTER);
+	DEVX_SET(create_flow_group_in, in, start_flow_index, 0);
+	DEVX_SET(create_flow_group_in, in, end_flow_index, 1);
+
+	DEVX_SET(create_flow_group_in, in, match_criteria.outer_headers.ethertype,
+		     __devx_mask(16));
 
 	root_flow_group = mlx5dv_devx_obj_create(vfcontext, in, sizeof(in),
 		out, sizeof(out));
@@ -134,6 +139,9 @@ static int setup_hardware_sw_rule(uint32_t root_tbl_id, uint32_t group_id,
 	in_dests = DEVX_ADDR_OF(flow_context, in_flow_context, destination);
 	DEVX_SET(dest_format, in_dests, destination_type, MLX5_FLOW_DEST_TYPE_FT);
 	DEVX_SET(dest_format, in_dests, destination_id, sw_table_id);
+
+	DEVX_SET(flow_context, in_flow_context, match_value.outer_headers.ethertype,
+		ETHTYPE_IP);
 
 	root_flow_rule = mlx5dv_devx_obj_create(vfcontext, in, sizeof(in), out,
 		sizeof(out));
@@ -247,7 +255,7 @@ int directpath_setup_steering(void)
 	uint32_t root_tbl_number, root_fg_id;
 	union match mask = {0};
 
-	root_flow_tbl = create_hardware_table(0, 0);
+	root_flow_tbl = create_hardware_table(0, 1);
 	if (!root_flow_tbl)
 		return -1;
 
@@ -258,7 +266,8 @@ int directpath_setup_steering(void)
 
 	if (!use_legacy_steering) {
 		/* setup direct flow steering */
-		dr_dmn = mlx5dv_dr_domain_create(vfcontext, MLX5DV_DR_DOMAIN_TYPE_NIC_RX);
+		dr_dmn = mlx5dv_dr_domain_create(vfcontext,
+			                             MLX5DV_DR_DOMAIN_TYPE_NIC_RX);
 		if (!dr_dmn)
 			return errno ? -errno : -1;
 
@@ -270,13 +279,16 @@ int directpath_setup_steering(void)
 		/* create the matcher that runtime rules will use */
 		mask.size = DEVX_ST_SZ_BYTES(dr_match_param);
 		DEVX_SET(fte_match_param, mask.buf,
-			     outer_headers.dst_ipv4_dst_ipv6.ipv4_layout.ipv4, __devx_mask(32));
+			     outer_headers.dst_ipv4_dst_ipv6.ipv4_layout.ipv4,
+			     __devx_mask(32));
 		DEVX_SET(fte_match_param, mask.buf, outer_headers.ethertype,
 			     __devx_mask(16));
-		DEVX_SET(fte_match_param, mask.buf, outer_headers.ip_version, IPVERSION);
+		DEVX_SET(fte_match_param, mask.buf, outer_headers.ip_version,
+			     IPVERSION);
 
 		matcher = mlx5dv_dr_matcher_create(main_sw_tbl, 0,
-			                               DR_MATCHER_CRITERIA_OUTER, &mask.params);
+			                               DR_MATCHER_CRITERIA_OUTER,
+			                               &mask.params);
 		if (!matcher)
 			return errno ? -errno : -1;
 

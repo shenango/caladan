@@ -222,6 +222,10 @@ static void net_rx_one(struct mbuf *m)
 		net_rx_trans(m);
 		break;
 
+	case IPPROTO_DIRECTPATH_ARP_ENCAP:
+		net_rx_arp(m);
+		break;
+
 	default:
 		goto drop;
 	}

@@ -14,17 +14,6 @@
 #define QUEUE_DEMOTION_US 500
 #define QUEUE_PROMOTION_US 100
 
-static struct mlx5_cqe64 *get_cqe(struct cq *cq, uint32_t idx)
-{
-	struct mlx5_cqe64 *cqe = &cq->buf[idx & (cq->cqe_cnt - 1)];
-
-	if ((mlx5dv_get_cqe_opcode(cqe) != MLX5_CQE_INVALID) &
-	    !((cqe->op_own & MLX5_CQE_OWNER_MASK) ^ !!(idx & (cq->cqe_cnt))))
-		return cqe;
-
-	return NULL;
-}
-
 static inline uint32_t directpath_cq_cons_tail(struct cq *cq)
 {
 	return be32toh(ACCESS_ONCE(cq->dbrec[0]));

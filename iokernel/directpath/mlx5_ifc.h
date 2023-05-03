@@ -136,6 +136,7 @@ enum {
 	MLX5_CMD_OP_DELETE_FLOW_TABLE_ENTRY = 0x938,
 	MLX5_CMD_OP_CREATE_FLOW_COUNTER = 0x939,
 	MLX5_CMD_OP_DEALLOC_FLOW_COUNTER = 0x93a,
+	MLX5_CMD_OP_QUERY_FLOW_COUNTER = 0x93b,
 	MLX5_CMD_OP_ALLOC_PACKET_REFORMAT_CONTEXT = 0x93d,
 	MLX5_CMD_OP_DEALLOC_PACKET_REFORMAT_CONTEXT = 0x93e,
 	MLX5_CMD_OP_ALLOC_MODIFY_HEADER_CONTEXT = 0x940,
@@ -3274,6 +3275,35 @@ enum reformat_type {
 	MLX5_REFORMAT_TYPE_L2_TO_L2_TUNNEL = 0x2,
 	MLX5_REFORMAT_TYPE_L3_TUNNEL_TO_L2 = 0x3,
 	MLX5_REFORMAT_TYPE_L2_TO_L3_TUNNEL = 0x4,
+};
+
+struct mlx5_ifc_traffic_counter_bits {
+	u8 packets[0x40];
+	u8 octets[0x40];
+};
+
+
+struct mlx5_ifc_query_flow_counter_out_bits {
+	u8 status[0x8];
+	u8 reserved_at_8[0x18];
+	u8 syndrome[0x20];
+	u8 reserved_at_40[0x40];
+	struct mlx5_ifc_traffic_counter_bits flow_statistics[];
+};
+
+
+struct mlx5_ifc_query_flow_counter_in_bits {
+	u8 opcode[0x10];
+	u8 reserved_at_10[0x10];
+	u8 reserved_at_20[0x10];
+	u8 op_mod[0x10];
+	u8 reserved_at_40[0x20];
+	u8 mkey[0x20];
+	u8 address[0x40];
+	u8 clear[0x1];
+	u8 dump_to_memory[0x1];
+	u8 num_of_counters[0x1e];
+	u8 flow_counter_id[0x20];
 };
 
 struct mlx5_ifc_alloc_flow_counter_in_bits {

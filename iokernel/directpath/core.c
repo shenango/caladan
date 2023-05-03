@@ -662,6 +662,8 @@ bool directpath_poll(void)
 
 	work_done |= directpath_commands_poll();
 
+	work_done |= directpath_arp_poll();
+
 	return work_done;
 }
 

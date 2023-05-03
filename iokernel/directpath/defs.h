@@ -45,6 +45,9 @@ extern int alloc_raw_ctx(unsigned int nrqs, bool use_rmp,
 extern struct cq *cqn_to_cq_map[MAX_CQ];
 extern struct mlx5dv_devx_uar *admin_uar;
 
+extern struct mlx5dv_devx_obj *root_flow_tbl;
+extern struct mlx5dv_devx_obj *root_flow_group;
+
 // Flow steering
 #define FLOW_TBL_TYPE 0x0
 
@@ -55,6 +58,10 @@ struct eq {
 	struct mlx5dv_devx_eq *eq;
 	struct mlx5dv_devx_msi_vector *vec;
 };
+
+extern bool directpath_arp_poll(void);
+extern int directpath_arp_server_init(void);
+
 
 enum {
 	RXQ_STATE_ACTIVE, /* packets may be flowing to this queue, needs polling */
@@ -155,6 +162,17 @@ struct directpath_ctx {
 static inline bool directpath_command_queued(struct directpath_ctx *ctx)
 {
 	return ctx->command_slot >= COMMAND_SLOT_WAITING;
+}
+
+static inline struct mlx5_cqe64 *get_cqe(struct cq *cq, uint32_t idx)
+{
+	struct mlx5_cqe64 *cqe = &cq->buf[idx & (cq->cqe_cnt - 1)];
+
+	if ((mlx5dv_get_cqe_opcode(cqe) != MLX5_CQE_INVALID) &
+	    !((cqe->op_own & MLX5_CQE_OWNER_MASK) ^ !!(idx & (cq->cqe_cnt))))
+		return cqe;
+
+	return NULL;
 }
 
 

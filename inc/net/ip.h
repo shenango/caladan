@@ -346,6 +346,7 @@ struct ip_pseudo {
 #define	IPPROTO_PFSYNC		240		/* PFSYNC */
 #define	IPPROTO_RESERVED_253	253		/* Reserved */
 #define	IPPROTO_RESERVED_254	254		/* Reserved */
+#define	IPPROTO_DIRECTPATH_ARP_ENCAP	252 /* custom encapsulated ARP packet */
 /* 255: Reserved */
 /* BSD Private, local use, namespace incursion, no longer used */
 #define	IPPROTO_OLD_DIVERT	254		/* OLD divert pseudo-proto */
