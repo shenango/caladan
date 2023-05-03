@@ -1,0 +1,52 @@
+From f793f54d9865e63c04885f9ef816239ac58ee3ba Mon Sep 17 00:00:00 2001
+From: Josh Fried <joshuafried@gmail.com>
+Date: Thu, 27 Apr 2023 11:52:00 -0400
+Subject: [PATCH 4/4] expose object id
+
+---
+ providers/mlx5/libmlx5.map | 1 +
+ providers/mlx5/mlx5.c      | 5 +++++
+ providers/mlx5/mlx5dv.h    | 1 +
+ 3 files changed, 7 insertions(+)
+
+diff --git a/providers/mlx5/libmlx5.map b/providers/mlx5/libmlx5.map
+index 375d2b38..a4f5fc07 100644
+--- a/providers/mlx5/libmlx5.map
++++ b/providers/mlx5/libmlx5.map
+@@ -239,4 +239,5 @@ MLX5_1.24 {
+ 		mlx5_vfio_get_clock;
+ 		mlx5_access_reg;
+ 		mlx5dv_dr_table_get_id;
++		mlx5_devx_get_obj_id;
+ } MLX5_1.23;
+diff --git a/providers/mlx5/mlx5.c b/providers/mlx5/mlx5.c
+index 827712e0..242e553c 100644
+--- a/providers/mlx5/mlx5.c
++++ b/providers/mlx5/mlx5.c
+@@ -247,6 +247,11 @@ int mlx5_cmd_status_to_err(uint8_t status)
+ 	}
+ }
+ 
++uint32_t mlx5_devx_get_obj_id(struct mlx5dv_devx_obj *obj)
++{
++	return obj->object_id;
++}
++
+ int mlx5_get_cmd_status_err(int err, void *out)
+ {
+ 	if (err == EREMOTEIO)
+diff --git a/providers/mlx5/mlx5dv.h b/providers/mlx5/mlx5dv.h
+index 7371b1a2..111493e6 100644
+--- a/providers/mlx5/mlx5dv.h
++++ b/providers/mlx5/mlx5dv.h
+@@ -2219,6 +2219,7 @@ struct mlx5dv_devx_msi_vector {
+ };
+ 
+ extern uint32_t mlx5dv_dr_table_get_id(struct mlx5dv_dr_table *tbl);
++extern uint32_t mlx5_devx_get_obj_id(struct mlx5dv_devx_obj *obj);
+ 
+ struct mlx5dv_devx_msi_vector *
+ mlx5dv_devx_alloc_msi_vector(struct ibv_context *ibctx);
+-- 
+2.34.1
+

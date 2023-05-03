@@ -34,6 +34,9 @@ extern bool directpath_commands_poll(void);
 extern bool directpath_events_poll(void);
 extern int directpath_commands_init(void);
 extern void directpath_run_commands(struct directpath_ctx *ctx);
+extern int directpath_setup_steering(void);
+extern int directpath_steering_attach(struct directpath_ctx *ctx);
+extern void directpath_steering_teardown(struct directpath_ctx *ctx);
 
 #define MAX_CQ 65536 // TODO FIX
 extern struct cq *cqn_to_cq_map[MAX_CQ];
@@ -130,10 +133,12 @@ struct directpath_ctx {
 	struct mlx5dv_devx_obj *tis_obj;
 	struct mlx5dv_devx_obj *rqt_obj;
 	struct mlx5dv_devx_obj *td_obj;
+	struct mlx5dv_devx_obj *fte;
 
 	struct ibv_mr *mreg;
 
 	uint32_t rqtn;
+	uint32_t ft_idx;
 
 	ssize_t *uarns;
 	size_t nr_alloc_uarn;
