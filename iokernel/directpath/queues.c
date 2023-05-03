@@ -50,7 +50,7 @@ static void directpath_arm_queue(struct directpath_ctx *ctx, struct cq *cq, uint
 	cq->dbrec[1] = htobe32(sn << 28 | cmd | ci);
 
 	barrier();
-	mmio_write64_be(main_eq.uar->base_addr + MLX5_CQ_DOORBELL, htobe64(doorbell));
+	mmio_write64_be(admin_uar->base_addr + MLX5_CQ_DOORBELL, htobe64(doorbell));
 	barrier();
 	cq->armed = true;
 	ctx->nr_armed++;

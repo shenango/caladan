@@ -38,8 +38,12 @@ extern int directpath_setup_steering(void);
 extern int directpath_steering_attach(struct directpath_ctx *ctx);
 extern void directpath_steering_teardown(struct directpath_ctx *ctx);
 
+extern int alloc_raw_ctx(unsigned int nrqs, bool use_rmp,
+	struct directpath_ctx **dp_out, bool is_admin);
+
 #define MAX_CQ 65536 // TODO FIX
 extern struct cq *cqn_to_cq_map[MAX_CQ];
+extern struct mlx5dv_devx_uar *admin_uar;
 
 // Flow steering
 #define FLOW_TBL_TYPE 0x0
@@ -50,7 +54,6 @@ struct eq {
 	uint32_t nent;
 	struct mlx5dv_devx_eq *eq;
 	struct mlx5dv_devx_msi_vector *vec;
-	struct mlx5dv_devx_uar *uar;
 };
 
 enum {

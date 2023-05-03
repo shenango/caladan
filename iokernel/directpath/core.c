@@ -30,6 +30,7 @@ static unsigned int nr_prealloc;
 
 struct ibv_context *vfcontext;
 struct cq *cqn_to_cq_map[MAX_CQ];
+struct mlx5dv_devx_uar *admin_uar;
 
 static unsigned char rss_key[40] = {
 	0x82, 0x19, 0xFA, 0x80, 0xA4, 0x31, 0x06, 0x59, 0x3E, 0x3F, 0x9A,
@@ -577,7 +578,7 @@ static int create_cq(struct directpath_ctx *dp, struct cq *cq, uint32_t log_nr_c
 	DEVX_SET(cqc, cq_ctx, cq_timestamp_format, 0 /* INTERNAL_TIMER */);
 	DEVX_SET(cqc, cq_ctx, log_cq_size, log_nr_cq);
 	// TODO maybe set this to something else for non-monitored
-	DEVX_SET(cqc, cq_ctx, uar_page, main_eq.uar->page_id); // TODO FIX
+	DEVX_SET(cqc, cq_ctx, uar_page, admin_uar->page_id);
 
 	if (monitored) {
 		DEVX_SET(cqc, cq_ctx, cq_period, 0);
@@ -951,7 +952,7 @@ void directpath_get_spec(struct directpath_ctx *dp, struct directpath_spec *spec
 }
 
 
-static int alloc_raw_ctx(unsigned int nrqs, bool use_rmp, struct directpath_ctx **dp_out)
+int alloc_raw_ctx(unsigned int nrqs, bool use_rmp, struct directpath_ctx **dp_out, bool is_admin)
 {
 	int ret = 0;
 	uint32_t i;
@@ -1003,17 +1004,18 @@ static int alloc_raw_ctx(unsigned int nrqs, bool use_rmp, struct directpath_ctx 
 	if (ret)
 		goto err;
 
-	dp->uarns = malloc(sizeof(*dp->uarns) * dp->nr_qs);
-	if (!dp->uarns)
-		goto err;
-
-
-	/* For now allocate 1 UAR, may need more for scalability reasons ? */
-	for (i = 0; i < 1; i++) {
-		dp->uarns[i] = alloc_uar();
-		if (dp->uarns[i] == -1)
+	if (!is_admin) {
+		dp->uarns = malloc(sizeof(*dp->uarns) * dp->nr_qs);
+		if (!dp->uarns)
 			goto err;
-		dp->nr_alloc_uarn++;
+
+		/* For now allocate 1 UAR, may need more for scalability reasons ? */
+		for (i = 0; i < 1; i++) {
+			dp->uarns[i] = alloc_uar();
+			if (dp->uarns[i] == -1)
+				goto err;
+			dp->nr_alloc_uarn++;
+		}
 	}
 
 	if (use_rmp) {
@@ -1031,7 +1033,10 @@ static int alloc_raw_ctx(unsigned int nrqs, bool use_rmp, struct directpath_ctx 
 	for (i = 0; i < dp->nr_qs; i++) {
 
 		/* round robin assign every pair of SQs to a UARN */
-		dp->qps[i].uarn = dp->uarns[(i / 2) % dp->nr_alloc_uarn];
+		if (!is_admin)
+			dp->qps[i].uarn = dp->uarns[(i / 2) % dp->nr_alloc_uarn];
+		else
+			dp->qps[i].uarn = admin_uar->page_id;
 		dp->qps[i].uar_offset = i % 2 == 0 ? 0x800 : 0xA00;
 
 		ret = create_cq(dp, &dp->qps[i].rx_cq, lg_cq_sz, true, i);
@@ -1091,7 +1096,7 @@ void directpath_preallocate(bool use_rmp, unsigned int nrqs, unsigned int cnt)
 		if (nr_prealloc == MAX_PREALLOC)
 			break;
 
-		ret = alloc_raw_ctx(nrqs, use_rmp, &preallocated_ctx[nr_prealloc]);
+		ret = alloc_raw_ctx(nrqs, use_rmp, &preallocated_ctx[nr_prealloc], false);
 		if (ret)
 			break;
 
@@ -1118,7 +1123,7 @@ int alloc_directpath_ctx(struct proc *p, bool use_rmp,
 
 	if (!dp) {
 		log_warn_ratelimited("allocating fresh context on startup path");
-		ret = alloc_raw_ctx(p->thread_count, use_rmp, &dp);
+		ret = alloc_raw_ctx(p->thread_count, use_rmp, &dp, false);
 		if (unlikely(ret))
 			return ret;
 	}
@@ -1165,6 +1170,12 @@ int directpath_init(void)
 	if (!vfcontext) {
 		log_err("enable to initialize vfio context: %d", errno);
 		return errno ? -errno : -1;
+	}
+
+	admin_uar = mlx5dv_devx_alloc_uar(vfcontext, MLX5_IB_UAPI_UAR_ALLOC_TYPE_NC);
+	if (!admin_uar) {
+		log_err("failed to alloc UAR");
+		return -1;
 	}
 
 	ret = directpath_commands_init();

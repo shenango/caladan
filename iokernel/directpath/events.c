@@ -48,9 +48,6 @@ static void free_eq(struct eq *eq)
 			log_warn("couldn't free eq");
 	}
 
-	if (eq->uar)
-		mlx5dv_devx_free_uar(eq->uar);
-
 	if (eq->vec) {
 		ret = mlx5dv_devx_free_msi_vector(eq->vec);
 		if (ret)
@@ -71,18 +68,12 @@ static int create_eq(struct eq *eq)
 		return -1;
 	}
 
-	eq->uar = mlx5dv_devx_alloc_uar(vfcontext, MLX5_IB_UAPI_UAR_ALLOC_TYPE_NC);
-	if (!eq->uar) {
-		log_err("failed to alloc UAR");
-		return -1;
-	}
-
 	DEVX_SET(create_eq_in, in, opcode, MLX5_CMD_OP_CREATE_EQ);
 
 	eqc = DEVX_ADDR_OF(create_eq_in, in, eq_context_entry);
 
 	DEVX_SET(eqc, eqc, log_eq_size, LOG_EQ_SIZE);
-	DEVX_SET(eqc, eqc, uar_page, eq->uar->page_id);
+	DEVX_SET(eqc, eqc, uar_page, admin_uar->page_id);
 	DEVX_SET(eqc, eqc, intr, eq->vec->vector);
 
 	DEFINE_BITMAP(events, MLX5_EVENT_TYPE_MAX);
@@ -142,7 +133,7 @@ static struct mlx5_eqe *get_head_eqe(struct eq *eq)
 
 static void eq_update_ci(struct eq *eq, int arm)
 {
-	__be32 *addr = (eq->uar->base_addr + MLX5_EQ_DOORBEL_OFFSET) + (arm ? 0 : 2);
+	__be32 *addr = (admin_uar->base_addr + MLX5_EQ_DOORBEL_OFFSET) + (arm ? 0 : 2);
 	uint32_t val;
 
 	val = (eq->cons_idx & 0xffffff) | (eq->eqn << 24);
