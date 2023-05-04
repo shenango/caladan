@@ -671,14 +671,9 @@ static void *directpath_init_thread_poll(void *arg)
 {
 	volatile bool *stop = (volatile bool *)arg;
 
-	struct timespec tv = {
-		.tv_sec = 0,
-		.tv_nsec = 10000000
-	};
-
 	while (!*stop) {
 		directpath_events_poll();
-		nanosleep(&tv, NULL);
+		sched_yield();
 	}
 
 	return NULL;
@@ -1231,8 +1226,8 @@ int directpath_init(void)
 		return ret;
 
 	if (nr_vfio_prealloc) {
-		directpath_preallocate(true, 8, nr_vfio_prealloc);
-		log_info("control: preallocated %u 8-thread directpath contexts", nr_vfio_prealloc);
+		directpath_preallocate(true, 1, nr_vfio_prealloc);
+		log_info("control: preallocated %u 1-thread directpath contexts", nr_vfio_prealloc);
 	}
 
 	poll_thread_stop = true;

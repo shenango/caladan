@@ -270,7 +270,7 @@ static void arp_send_pkt(struct mbuf *m)
 	dpseg->byte_count = htobe32(buflen - inln_sz);
 	dpseg->addr = htobe64((uint64_t)buf + inln_sz);
 
-	tx_buffers[idx] = buf;
+	tx_buffers[idx] = m->head;
 	tx_wq_head++;
 }
 
