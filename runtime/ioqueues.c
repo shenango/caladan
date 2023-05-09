@@ -69,7 +69,11 @@ static size_t estimate_shm_space(void)
 	ret = align_up(ret, CACHE_LINE_SIZE);
 
 	// Compute congestion signal line
-	ret += CACHE_LINE_SIZE;
+	ret += align_up(sizeof(struct runtime_info), CACHE_LINE_SIZE);
+
+	// Shared queue pointers for the iokernel to use to determine busyness
+	q = align_up(sizeof(struct q_ptrs), CACHE_LINE_SIZE);
+	ret += q * maxks;
 
 	// RX queues (wb is not included)
 	q = sizeof(struct lrpc_msg) * lrpc_q_size();
@@ -88,16 +92,14 @@ static size_t estimate_shm_space(void)
 	q += align_up(sizeof(uint32_t), CACHE_LINE_SIZE);
 	ret += q * maxks;
 
-	// Shared queue pointers for the iokernel to use to determine busyness
-	q = align_up(sizeof(struct q_ptrs), CACHE_LINE_SIZE);
-	ret += q * maxks;
+	if (!cfg_directpath_external()) {
+		ret = align_up(ret, PGSIZE_2MB);
 
-	ret = align_up(ret, PGSIZE_2MB);
-
-	// Egress buffers
-	BUILD_ASSERT(PGSIZE_2MB % MBUF_DEFAULT_LEN == 0);
-	ret += calculate_egress_pool_size();
-	ret = align_up(ret, PGSIZE_2MB);
+		// Egress buffers
+		BUILD_ASSERT(PGSIZE_2MB % MBUF_DEFAULT_LEN == 0);
+		ret += calculate_egress_pool_size();
+		ret = align_up(ret, PGSIZE_2MB);
+	}
 
 	// mlx5 directpath
 	if (cfg_directpath_enabled() && !cfg_directpath_external()) {
@@ -128,21 +130,22 @@ void *iok_shm_alloc(size_t size, size_t alignment, shmptr_t *shm_out)
 	static DEFINE_SPINLOCK(shmlock);
 	static size_t allocated;
 	struct shm_region *r = &netcfg.tx_region;
+	size_t pgsize;
 	void *p;
 
 	spin_lock(&shmlock);
 	if (!r->base) {
 		r->len = estimate_shm_space();
-		r->base = mem_map_shm(iok.key, NULL, r->len, PGSIZE_2MB, true);
+
+		pgsize = cfg_directpath_external() ? PGSIZE_4KB : PGSIZE_2MB;
+		r->base = mem_map_shm(iok.key, NULL, r->len, pgsize, true);
 		if (r->base == MAP_FAILED)
 			panic("failed to map shared memory (requested %lu bytes)", r->len);
 		log_info("shm: using %lu bytes", r->len);
 	}
 
-	if (alignment < CACHE_LINE_SIZE)
-		alignment = CACHE_LINE_SIZE;
-
-	allocated = align_up(allocated, alignment);
+	if (alignment)
+		allocated = align_up(allocated, alignment);
 
 	p = shmptr_to_ptr(r, allocated, size);
 	BUG_ON(!p);
@@ -199,7 +202,7 @@ int ioqueues_init(void)
 	/* map ingress memory */
 	netcfg.rx_region.base =
 	    mem_map_shm_rdonly(INGRESS_MBUF_SHM_KEY, NULL, INGRESS_MBUF_SHM_SIZE,
-			PGSIZE_2MB);
+			PGSIZE_4KB);
 	if (netcfg.rx_region.base == MAP_FAILED) {
 		log_err("control_setup: failed to map ingress region");
 		log_err("Please make sure IOKernel is running");
@@ -213,13 +216,19 @@ int ioqueues_init(void)
 	runtime_info = iok_shm_alloc(sizeof(struct runtime_info),
 	                             0, &iok.hdr->runtime_info);
 
+	/* first allocate q_ptrs in a contiguous array */
+	for (i = 0; i < maxks; i++) {
+		ts = &iok.threads[i];
+		iok_shm_alloc(sizeof(struct q_ptrs), CACHE_LINE_SIZE, &ts->q_ptrs);
+	}
+
+	/* then allocate lrpc rings */
 	for (i = 0; i < maxks; i++) {
 		ts = &iok.threads[i];
 		ioqueue_alloc(&ts->rxq, lrpc_q_size(), false);
 		ioqueue_alloc(&ts->txpktq, lrpc_q_size(), true);
 		ioqueue_alloc(&ts->txcmdq, lrpc_q_size(), true);
 
-		iok_shm_alloc(sizeof(struct q_ptrs), CACHE_LINE_SIZE, &ts->q_ptrs);
 		ts->rxq.wb = ts->q_ptrs;
 	}
 
