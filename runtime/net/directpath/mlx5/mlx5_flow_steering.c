@@ -248,9 +248,9 @@ static int mlx5_init_root_table(void)
 	if (!match_ip_and_tport)
 		return -errno;
 
-	DEVX_SET(fte_match_param, mask.buf, outer_headers.ethertype, hton16(ETHTYPE_IP));
+	DEVX_SET(fte_match_param, mask.buf, outer_headers.ethertype, ETHTYPE_IP);
 	DEVX_SET(fte_match_param, mask.buf, outer_headers.ip_version, IPVERSION);
-	DEVX_SET(fte_match_param, mask.buf, outer_headers.dst_ipv4_dst_ipv6.ipv4_layout.ipv4, hton32(netcfg.addr));
+	DEVX_SET(fte_match_param, mask.buf, outer_headers.dst_ipv4_dst_ipv6.ipv4_layout.ipv4, netcfg.addr);
 	DEVX_SET(fte_match_param, mask.buf, outer_headers.ip_protocol, IPPROTO_TCP);
 	action[0] = tcp_tbl.ingress_action;
 	root_tcp_rule = mlx5dv_dr_rule_create(match_ip_and_tport, &mask.params, 1, action);

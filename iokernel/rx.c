@@ -137,6 +137,11 @@ static void rx_one_pkt(struct rte_mbuf *buf)
 		goto fail_free;
 	}
 
+	if (unlikely(p->has_directpath)) {
+		if (ether_type == ETHTYPE_IP)
+			log_warn_ratelimited("delivering an IP packet to a directpath runtime");
+	}
+
 	return;
 
 fail_free:
