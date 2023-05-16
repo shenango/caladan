@@ -170,7 +170,7 @@ static int directpath_query_nic_vport(void)
 static int directpath_setup_port(void)
 {
 	uint32_t out[DEVX_ST_SZ_DW(modify_nic_vport_context_out)] = {0};
-	uint32_t in[DEVX_ST_SZ_DW(modify_nic_vport_context_in)];
+	uint32_t in[DEVX_ST_SZ_DW(modify_nic_vport_context_in)] = {0};
 	int ret;
 
 	DEVX_SET(modify_nic_vport_context_in, in, opcode, MLX5_CMD_OP_MODIFY_NIC_VPORT_CONTEXT);
