@@ -134,6 +134,7 @@ struct iokernel_info {
 	struct pci_addr		directpath_pci;
 	int			cycles_per_us;
 	struct eth_addr		host_mac;
+	bool			external_directpath_enabled;
 };
 
 BUILD_ASSERT(sizeof(struct iokernel_info) <= IOKERNEL_INFO_SIZE);

@@ -251,6 +251,7 @@ int main(int argc, char *argv[])
 		return ret;
 
 	iok_info->cycles_per_us = cycles_per_us;
+	iok_info->external_directpath_enabled = cfg.vfio_directpath;
 
 	pthread_barrier_wait(&init_barrier);
 
