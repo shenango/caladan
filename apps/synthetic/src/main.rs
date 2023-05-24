@@ -201,7 +201,8 @@ enum OutputMode {
     Silent,
     Normal,
     Buckets,
-    Trace
+    Trace,
+    Live
 }}
 
 fn duration_to_ns(duration: Duration) -> u64 {
@@ -530,6 +531,17 @@ fn process_result_final(
     let first_tsc = first_tsc.unwrap();
     let start_unix = wct_start + first_send;
 
+    if let OutputMode::Live = sched.output {
+        println!(
+            "RPS: {}\tMedian (us): {: <7}\t99th (us): {: <7}\t99.9th (us): {: <7}",
+            sched.rps,
+            percentile(50.0) as usize,
+            percentile(99.0) as usize,
+            percentile(99.9) as usize
+        );
+        return true;
+    }
+
     println!(
         "{}, {}, {}, {}, {}, {:.1}, {:.1}, {:.1}, {:.1}, {:.1}, {}, {}",
         sched.service.name(),
@@ -655,22 +667,10 @@ fn process_result(sched: &RequestSchedule, packets: &mut [Packet]) -> Option<Sch
     })
 }
 
-fn run_client_worker(
-    proto: Arc<Box<dyn LoadgenProtocol>>,
-    backend: Backend,
-    addr: SocketAddrV4,
-    tport: Transport,
-    wg: shenango::WaitGroup,
-    wg_start: shenango::WaitGroup,
-    schedules: Arc<Vec<RequestSchedule>>,
-    index: usize,
-) -> Vec<Option<ScheduleResult>> {
+fn gen_packets_for_schedule(schedules: &Arc<Vec<RequestSchedule>>) -> (Vec<Packet>, Vec<usize>) {
     let mut packets: Vec<Packet> = Vec::new();
     let mut rng: MersenneTwister = SeedableRng::from_seed(rand::thread_rng().gen::<u64>());
-    let mut payload = Vec::with_capacity(4096);
-
     let mut sched_boundaries = Vec::new();
-
     let mut last = 100_000_000;
     let mut end = 100_000_000;
     for sched in schedules.iter() {
@@ -691,12 +691,31 @@ fn run_client_worker(
         }
         sched_boundaries.push(packets.len());
     }
+    (packets, sched_boundaries)
+}
 
+fn run_client_worker(
+    proto: Arc<Box<dyn LoadgenProtocol>>,
+    backend: Backend,
+    addr: SocketAddrV4,
+    tport: Transport,
+    wg: shenango::WaitGroup,
+    wg_start: shenango::WaitGroup,
+    schedules: Arc<Vec<RequestSchedule>>,
+    index: usize,
+    live_mode_socket: Option<Arc<Connection>>,
+) -> Vec<Option<ScheduleResult>> {
+    let mut payload = Vec::with_capacity(4096);
+    let (mut packets, sched_boundaries) = gen_packets_for_schedule(&schedules);
     let src_addr = SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), (100 + index) as u16);
-    let socket = Arc::new(match tport {
-        Transport::Tcp => backend.create_tcp_connection(Some(src_addr), addr).unwrap(),
-        Transport::Udp => backend.create_udp_connection(src_addr, Some(addr)).unwrap(),
-    });
+    let live_mode = live_mode_socket.is_some();
+    let socket = match live_mode_socket {
+        Some(sock) => sock,
+        _ => Arc::new(match tport {
+            Transport::Tcp => backend.create_tcp_connection(Some(src_addr), addr).unwrap(),
+            Transport::Udp => backend.create_udp_connection(src_addr, Some(addr)).unwrap(),
+        }),
+    };
 
     let packets_per_thread = packets.len();
     let socket2 = socket.clone();
@@ -737,9 +756,13 @@ fn run_client_worker(
     let socket2 = socket.clone();
     let wg2 = wg.clone();
     let wg3 = wg_start.clone();
+    let live_mode2 = live_mode;
     let timer = backend.spawn_thread(move || {
         wg2.done();
         wg3.wait();
+        if live_mode2 {
+            return;
+        }
         backend.sleep(last + Duration::from_millis(500));
         if Arc::strong_count(&socket2) > 1 {
             socket2.shutdown();
@@ -759,7 +782,7 @@ fn run_client_worker(
             backend.sleep(packet.target_start - t);
             t = start.elapsed();
         }
-        if t > packet.target_start + Duration::from_micros(5) {
+        if !live_mode && t > packet.target_start + Duration::from_micros(5) {
             continue;
         }
 
@@ -806,6 +829,101 @@ fn run_client_worker(
         .collect::<Vec<Option<ScheduleResult>>>()
 }
 
+fn run_live_client(
+    proto: Arc<Box<dyn LoadgenProtocol>>,
+    backend: Backend,
+    addrs: &Vec<SocketAddrV4>,
+    nthreads: usize,
+    tport: Transport,
+    barrier_group: &mut Option<lockstep::Group>,
+    schedules: Vec<RequestSchedule>,
+) {
+    let schedules = Arc::new(schedules);
+
+    let sockets: Vec<_> = (0..nthreads)
+        .into_iter()
+        .map(|i| {
+            let addr = addrs[i % addrs.len()];
+            let client_idx = 200 + i;
+            let src_addr = SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), client_idx as u16);
+            Arc::new(match tport {
+                Transport::Tcp => backend.create_tcp_connection(Some(src_addr), addr).unwrap(),
+                Transport::Udp => backend.create_udp_connection(src_addr, Some(addr)).unwrap(),
+            })
+        })
+        .collect();
+
+    let wg = shenango::WaitGroup::new();
+    let wg_start = shenango::WaitGroup::new();
+
+    loop {
+        wg.add(3 * nthreads as i32);
+        wg_start.add(1 as i32);
+        let socks = sockets.clone();
+
+        let conn_threads: Vec<_> = (0..nthreads)
+            .into_iter()
+            .zip(socks)
+            .map(|(i, sock)| {
+                let client_idx = 100 + i;
+                let proto = proto.clone();
+                let wg = wg.clone();
+                let wg_start = wg_start.clone();
+                let schedules = schedules.clone();
+                let addr = addrs[i % addrs.len()];
+
+                backend.spawn_thread(move || {
+                    run_client_worker(
+                        proto,
+                        backend,
+                        addr,
+                        tport,
+                        wg,
+                        wg_start,
+                        schedules,
+                        client_idx,
+                        Some(sock.clone()),
+                    )
+                })
+            })
+            .collect();
+
+        wg.wait();
+
+        if let Some(ref mut g) = *barrier_group {
+            g.barrier();
+        }
+
+        wg_start.done();
+        let start_unix = SystemTime::now();
+
+        wg.add(nthreads as i32);
+        wg_start.add(1 as i32);
+
+        wg.wait();
+        wg_start.done();
+
+        let mut packets: Vec<Vec<Option<ScheduleResult>>> = conn_threads
+            .into_iter()
+            .map(|s| s.join().unwrap())
+            .collect();
+
+        let mut sched_start = Duration::from_nanos(100_000_000);
+        schedules
+            .iter()
+            .enumerate()
+            .map(|(i, sched)| {
+                let perthread = packets.iter_mut().filter_map(|p| p[i].take()).collect();
+                let r = process_result_final(sched, perthread, start_unix, sched_start);
+                sched_start += sched.runtime;
+                r
+            })
+            .collect::<Vec<bool>>()
+            .into_iter()
+            .all(|p| p);
+    }
+}
+
 fn run_client(
     proto: Arc<Box<dyn LoadgenProtocol>>,
     backend: Backend,
@@ -834,7 +952,7 @@ fn run_client(
 
             backend.spawn_thread(move || {
                 run_client_worker(
-                    proto, backend, addr, tport, wg, wg_start, schedules, client_idx,
+                    proto, backend, addr, tport, wg, wg_start, schedules, client_idx, None,
                 )
             })
         })
@@ -882,27 +1000,10 @@ fn run_local(
     worker: Arc<FakeWorker>,
     schedules: Vec<RequestSchedule>,
 ) -> bool {
-    let mut rng = rand::thread_rng();
     let schedules = Arc::new(schedules);
 
     let packet_schedules: Vec<Vec<Packet>> = (0..nthreads)
-        .map(|_| {
-            let mut last = 100_000_000;
-            let mut thread_packets: Vec<Packet> = Vec::new();
-            for sched in schedules.iter() {
-                let end = last + duration_to_ns(sched.runtime);
-                while last < end {
-                    last += sched.arrival.sample(&mut rng);
-                    thread_packets.push(Packet {
-                        randomness: rng.gen::<u64>(),
-                        target_start: Duration::from_nanos(last),
-                        work_iterations: sched.service.sample(&mut rng),
-                        ..Default::default()
-                    });
-                }
-            }
-            thread_packets
-        })
+        .map(|_| gen_packets_for_schedule(&schedules).0)
         .collect();
 
     let start_unix = SystemTime::now();
@@ -1168,6 +1269,12 @@ fn main() {
                 .help("loadshift spec"),
         )
         .arg(
+            Arg::with_name("live")
+                .long("live")
+                .takes_value(false)
+                .help("run live mode"),
+        )
+        .arg(
             Arg::with_name("intersample_sleep")
                 .long("intersample_sleep")
                 .takes_value(true)
@@ -1195,6 +1302,7 @@ fn main() {
     assert!(start_packets_per_second <= packets_per_second);
     let config = matches.value_of("config");
     let dowarmup = matches.is_present("warmup");
+    let live_mode = matches.is_present("live");
 
     let tport = value_t_or_exit!(matches, "transport", Transport);
     let proto: Arc<Box<dyn LoadgenProtocol>> = match matches.value_of("protocol").unwrap() {
@@ -1326,7 +1434,9 @@ fn main() {
                     .unwrap()
                 });
 
-                println!("Distribution, Target, Actual, Dropped, Never Sent, Median, 90th, 99th, 99.9th, 99.99th, Start, StartTsc");
+                if !live_mode {
+                    println!("Distribution, Target, Actual, Dropped, Never Sent, Median, 90th, 99th, 99.9th, 99.99th, Start, StartTsc");
+                }
                 match (matches.value_of("protocol").unwrap(), &barrier_group) {
                     (_, Some(lockstep::Group::Client(ref _c))) => (),
                     ("memcached", _) => {
@@ -1340,6 +1450,21 @@ fn main() {
                     },
                     _ => (),
                 };
+
+
+                if live_mode {
+                    let sched = gen_classic_packet_schedule(
+                        runtime,
+                        packets_per_second,
+                        OutputMode::Live,
+                        distribution,
+                        rampup,
+                        nthreads,
+                        discard_pct
+                    );
+                    run_live_client(proto, backend, &addrs, nthreads, tport, &mut barrier_group, sched);
+                    unreachable!();
+                }
 
                 if !loadshift_spec.is_empty() {
                     let sched = gen_loadshift_experiment(&loadshift_spec, distribution, nthreads, output);
