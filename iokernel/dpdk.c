@@ -274,6 +274,10 @@ int dpdk_init(void)
  */
 int dpdk_late_init(void)
 {
+
+	if (cfg.vfio_directpath)
+		return 0;
+
 	/* initialize port */
 	dp.port = 0;
 	if (dpdk_port_init(dp.port, dp.rx_mbuf_pool) != 0) {

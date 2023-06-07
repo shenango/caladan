@@ -85,6 +85,31 @@ static int run_init_handlers(const char *phase, const struct init_entry *h,
 	return 0;
 }
 
+static void dataplane_loop_vfio(void)
+{
+	bool work_done;
+
+	log_info("main: core %u running dataplane. [Ctrl+C to quit]",
+			rte_lcore_id());
+	fflush(stdout);
+
+	/* run until quit or killed */
+	for (;;) {
+		work_done = false;
+
+		/* adjust core assignments */
+		sched_poll();
+
+		work_done |= directpath_poll();
+
+		/* handle control messages */
+		if (!work_done)
+			dp_clients_rx_control_lrpcs();
+
+		STAT_INC(LOOPS, 1);
+	}
+}
+
 /*
  * The main dataplane thread.
  */
@@ -126,9 +151,6 @@ void dataplane_loop(void)
 
 		/* process a batch of commands from runtimes */
 		work_done |= commands_rx();
-
-		if (cfg.vfio_directpath)
-			work_done |= directpath_poll();
 
 		/* handle control messages */
 		if (!work_done)
@@ -264,6 +286,9 @@ int main(int argc, char *argv[])
 
 	pthread_barrier_wait(&init_barrier);
 
-	dataplane_loop();
+	if (cfg.vfio_directpath)
+		dataplane_loop_vfio();
+	else
+		dataplane_loop();
 	return 0;
 }
