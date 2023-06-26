@@ -275,6 +275,11 @@ static inline bool hardware_q_pending(struct hardware_q *q)
 extern bool cfg_storage_enabled;
 extern unsigned long storage_device_latency_us;
 
+static inline bool storage_enabled(void)
+{
+	return cfg_storage_enabled;
+}
+
 struct storage_q {
 
 	spinlock_t lock;
@@ -301,6 +306,10 @@ static inline bool storage_pending_completions(struct storage_q *q)
 #else
 
 struct storage_q {};
+
+static inline bool storage_enabled(void) {
+	return false;
+}
 
 static inline bool storage_available_completions(struct storage_q *q)
 {

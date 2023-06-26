@@ -58,6 +58,14 @@ uint64_t cfg_ht_punish_us;
 uint64_t cfg_qdelay_us = 10;
 uint64_t cfg_quantum_us = 100;
 
+static inline size_t shm_page_size(void)
+{
+	if (storage_enabled() || !cfg_directpath_external())
+		return PGSIZE_2MB;
+
+	return PGSIZE_4KB;
+}
+
 // Could be a macro really, this is totally static :/
 static size_t estimate_shm_space(void)
 {
@@ -130,15 +138,12 @@ void *iok_shm_alloc(size_t size, size_t alignment, shmptr_t *shm_out)
 	static DEFINE_SPINLOCK(shmlock);
 	static size_t allocated;
 	struct shm_region *r = &netcfg.tx_region;
-	size_t pgsize;
 	void *p;
 
 	spin_lock(&shmlock);
 	if (!r->base) {
-		r->len = estimate_shm_space();
-
-		pgsize = cfg_directpath_external() ? PGSIZE_4KB : PGSIZE_2MB;
-		r->base = mem_map_shm(iok.key, NULL, r->len, pgsize, true);
+		r->len = align_up(estimate_shm_space(), shm_page_size());
+		r->base = mem_map_shm(iok.key, NULL, r->len, shm_page_size(), true);
 		if (r->base == MAP_FAILED)
 			panic("failed to map shared memory (requested %lu bytes)", r->len);
 		log_info("shm: using %lu bytes", r->len);
