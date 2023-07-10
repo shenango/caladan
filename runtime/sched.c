@@ -419,7 +419,7 @@ again:
 	if (!preempt_cede_needed(l) &&
 	    (++iters < RUNTIME_SCHED_POLL_ITERS ||
 	     perthread_get_stable(last_tsc) - start_tsc < cycles_per_us * RUNTIME_SCHED_MIN_POLL_US ||
-	     storage_pending_completions(&l->storage_q) ||
+	     storage_pending_completions(l) ||
 	     !mbufq_empty(&l->txpktq_overflow))) {
 		goto again;
 	}

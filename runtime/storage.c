@@ -257,7 +257,6 @@ int storage_init_thread(void)
 	struct storage_q *q = &k->storage_q;
 	thread_t *th;
 
-	int ret;
 	uint32_t max_xfer_size, entries, depth, *consumer_idx;
 	shmptr_t cq_shm;
 	struct spdk_nvme_cpl *cpl;

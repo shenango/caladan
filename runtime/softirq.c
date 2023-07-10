@@ -22,18 +22,13 @@ static bool softirq_timer_pending(struct kthread *k, uint64_t now_tsc)
 	       ACCESS_ONCE(k->timers[0].deadline_us) <= now_us;
 }
 
-static bool softirq_storage_pending(struct kthread *k)
-{
-	return storage_available_completions(&k->storage_q);
-}
-
 /**
  * softirq_pending - is there a softirq pending?
  */
 bool softirq_pending(struct kthread *k, uint64_t now_tsc)
 {
 	return softirq_iokernel_pending(k) || softirq_timer_pending(k, now_tsc) ||
-	       softirq_storage_pending(k);
+	       storage_available_completions(k);
 }
 
 /**
@@ -70,7 +65,7 @@ bool softirq_run_locked(struct kthread *k)
 	}
 
 	/* check for storage softirq work */
-	if (!k->storage_busy && softirq_storage_pending(k)) {
+	if (!k->storage_busy && storage_available_completions(k)) {
 		k->storage_busy = true;
 		thread_ready_head_locked(k->storage_softirq);
 		work_done = true;
