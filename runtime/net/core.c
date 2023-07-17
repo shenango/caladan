@@ -496,6 +496,7 @@ static int net_tx_local_loopback(struct mbuf *m_in, uint8_t proto)
 	m->csum_type = CHECKSUM_TYPE_UNNECESSARY;
 	m->release = (void (*)(struct mbuf *))sfree;
 
+	mbuf_mark_network_offset(m);
 	mbuf_pull_hdr(m, struct ip_hdr);
 	switch(proto) {
 		case IPPROTO_UDP:
