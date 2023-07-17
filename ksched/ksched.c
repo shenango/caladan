@@ -41,10 +41,10 @@
 #define CORE_PERF_GLOBAL_CTRL_ENABLE_PMC_1 (0x2)
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(6,1,0)
-#define PF__HOLE__00004000 0x00004000
+#define PF__HOLE__40000000 0x40000000
 #endif
 
-#define PF_KSCHED_PARKED PF__HOLE__00004000
+#define PF_KSCHED_PARKED PF__HOLE__40000000
 
 /* the character device that provides the ksched IOCTL interface */
 static struct cdev ksched_cdev;
