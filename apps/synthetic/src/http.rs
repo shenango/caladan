@@ -112,9 +112,9 @@ fn header_extract(state: ParseState, buf: &[u8]) -> io::Result<ParseState> {
 
                 let utfln = unsafe { std::str::from_utf8_unchecked(&header_ln[..]) };
                 if next_line_begin == 0 {
-                    // Check for "HTTP/1.* 200 OK"
+                    // Check for "HTTP/1.* 200*"
                     if !utfln[..7].eq_ignore_ascii_case("HTTP/1.")
-                        || !utfln[8..].eq_ignore_ascii_case(" 200 OK")
+                        || !utfln[8..12].eq_ignore_ascii_case(" 200")
                     {
                         return Err(Error::new(
                             ErrorKind::Other,
