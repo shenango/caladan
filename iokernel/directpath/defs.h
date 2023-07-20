@@ -28,7 +28,7 @@ extern int events_init(void);
 struct mlx5_eqe;
 struct directpath_ctx;
 extern void directpath_handle_cmd_eqe(struct mlx5_eqe *eqe);
-extern void directpath_handle_completion_eqe(struct mlx5_eqe *eqe);
+extern void directpath_handle_completion_eqe_batch(struct mlx5_eqe **eqe, unsigned int nr);
 extern void directpath_handle_cq_error_eqe(struct mlx5_eqe *eqe);
 extern bool directpath_commands_poll(void);
 extern bool directpath_events_poll(void);
@@ -42,7 +42,13 @@ extern int alloc_raw_ctx(unsigned int nrqs, bool use_rmp,
 	struct directpath_ctx **dp_out, bool is_admin);
 
 #define MAX_CQ 65536 // TODO FIX
-extern struct cq *cqn_to_cq_map[MAX_CQ];
+
+struct cq_map_entry {
+	struct directpath_ctx *ctx;
+	uint32_t qp_idx;
+};
+
+extern struct cq_map_entry cqn_to_cq_map[MAX_CQ];
 extern struct mlx5dv_devx_uar *admin_uar;
 
 extern struct mlx5dv_devx_obj *root_flow_tbl;
@@ -78,7 +84,6 @@ struct cq {
 	uint8_t arm_sn;
 	uint8_t qp_idx;
 	uint8_t state;
-	bool armed;
 	struct mlx5dv_devx_obj *obj;
 };
 
@@ -112,6 +117,8 @@ struct directpath_ctx {
 
 	uint32_t	nr_armed;
 	uint32_t	nr_qs;
+
+	DEFINE_BITMAP(armed_rx_queues, NCPU);
 
 	/* command data */
 	int8_t command_slot;

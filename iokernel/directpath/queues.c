@@ -14,11 +14,6 @@
 #define QUEUE_DEMOTION_US 500
 #define QUEUE_PROMOTION_US 100
 
-static inline uint32_t directpath_cq_cons_tail(struct cq *cq)
-{
-	return be32toh(ACCESS_ONCE(cq->dbrec[0]));
-}
-
 static void directpath_arm_queue(struct directpath_ctx *ctx, struct cq *cq, uint32_t cons_idx)
 {
 	uint64_t doorbell;
@@ -26,7 +21,7 @@ static void directpath_arm_queue(struct directpath_ctx *ctx, struct cq *cq, uint
 	uint32_t ci;
 	uint32_t cmd;
 
-	assert(!cq->armed);
+	assert(!bitmap_test(ctx->armed_rx_queues, cq->qp_idx));
 
 	sn  = cq->arm_sn++ & 3;
 	ci  = cons_idx & 0xffffff;
@@ -41,7 +36,7 @@ static void directpath_arm_queue(struct directpath_ctx *ctx, struct cq *cq, uint
 	barrier();
 	mmio_write64_be(admin_uar->base_addr + MLX5_CQ_DOORBELL, htobe64(doorbell));
 	barrier();
-	cq->armed = true;
+	bitmap_set(ctx->armed_rx_queues, cq->qp_idx);
 	ctx->nr_armed++;
 }
 
@@ -74,9 +69,6 @@ static void directpath_queue_update_state(struct directpath_ctx *ctx,
 {
 	struct cq *cq = &ctx->qps[idx].rx_cq;
 
-	if (cfg.no_directpath_active_rss)
-		return;
-
 	if (cq->state == RXQ_STATE_DISABLING &&
 	    cq->disable_gen <= ctx->hw_rss_gen) {
 		cq->state = RXQ_STATE_DISABLED;
@@ -95,33 +87,29 @@ static void directpath_queue_update_state(struct directpath_ctx *ctx,
 	}
 }
 
-static void directpath_poll_cq(struct directpath_ctx *ctx,
-                               unsigned int thread_idx, struct thread *th,
-                               uint64_t *delay, uint64_t cur_tsc)
+static uint64_t directpath_poll_cq_delay(struct directpath_ctx *ctx,
+	                                     struct thread *th, struct cq *cq)
 {
-	struct cq *cq = &ctx->qps[thread_idx].rx_cq;
-	struct mlx5_cqe64 *cqe = NULL;
 	uint32_t cons_idx;
+	struct mlx5_cqe64 *cqe;
 
-	if (!cq->armed) {
-		/* report the delay if a packet is waiting */
-		cons_idx = directpath_cq_cons_tail(cq);
-		cqe = get_cqe(cq, cons_idx);
-		if (cqe)
-			*delay = MAX(hw_timestamp_delay_us(cqe), *delay);
-		else
-			directpath_arm_queue(ctx, cq, cons_idx);
+	cons_idx = ACCESS_ONCE(th->q_ptrs->directpath_rx_tail);
+	cqe = get_cqe(cq, cons_idx);
+	if (!cqe) {
+		directpath_arm_queue(ctx, cq, cons_idx);
+		return 0;
 	}
 
-	directpath_queue_update_state(ctx, th, thread_idx, cur_tsc);
+	return hw_timestamp_delay_us(cqe);
 }
 
 bool directpath_poll_proc(struct proc *p, uint64_t *delay_cycles, uint64_t cur_tsc)
 {
 	struct directpath_ctx *ctx = (struct directpath_ctx *)p->directpath_data;
+	struct cq *cq;
 	struct thread *th;
 	uint64_t delay = 0;
-	unsigned int i;
+	int i;
 
 	if (ctx->nr_armed == ctx->nr_qs &&
 	    (cfg.no_directpath_active_rss || ctx->active_rx_count == 1))
@@ -129,8 +117,17 @@ bool directpath_poll_proc(struct proc *p, uint64_t *delay_cycles, uint64_t cur_t
 
 	for (i = 0; i < ctx->nr_qs; i++) {
 		th = &p->threads[i];
-		directpath_poll_cq(ctx, i, th, &delay, cur_tsc);
+		cq = &ctx->qps[i].rx_cq;
+
+		if (!bitmap_test(ctx->armed_rx_queues, i))
+			delay = MAX(directpath_poll_cq_delay(ctx, th, cq), delay);
+
+		if (cfg.no_directpath_active_rss)
+			continue;
+
+		directpath_queue_update_state(ctx, th, i, cur_tsc);
 	}
+
 
 	delay *= cycles_per_us;
 	*delay_cycles = MAX(*delay_cycles, delay);
@@ -142,25 +139,76 @@ bool directpath_poll_proc(struct proc *p, uint64_t *delay_cycles, uint64_t cur_t
 
 }
 
-void directpath_handle_completion_eqe(struct mlx5_eqe *eqe)
+static void directpath_handle_completion_eqe(struct mlx5_eqe *eqe)
 {
 	uint32_t cqn = be32toh(eqe->data.comp.cqn);
-	struct cq *cq = cqn_to_cq_map[cqn];
-	struct directpath_ctx *ctx = container_of(cq, struct directpath_ctx, qps[cq->qp_idx].rx_cq);
+	struct directpath_ctx *ctx = cqn_to_cq_map[cqn].ctx;
 	struct proc *p = ctx->p;
 
 	if (!sched_threads_active(p))
 		sched_add_core(p);
 
-	cq->armed = false;
+	bitmap_clear(ctx->armed_rx_queues, cqn_to_cq_map[cqn].qp_idx);
 	ctx->nr_armed--;
 }
+
+
+void directpath_handle_completion_eqe_batch(struct mlx5_eqe **eqe, unsigned int nr)
+{
+	struct proc *ps[nr];
+	struct cq_map_entry entries[nr];
+
+	unsigned int i;
+
+	if (nr < 2) {
+		for (i = 0; i < nr; i++)
+			directpath_handle_completion_eqe(eqe[i]);
+		return;
+	}
+
+	for (i = 0; i < nr + 4; i++) {
+
+		/* prefetch cqn to cq entry */
+		if (i < nr)
+			prefetch(&cqn_to_cq_map[be32toh(eqe[i]->data.comp.cqn)]);
+
+		/* dereference cqn to cq entry, prefetch cq */
+		if (i > 0 && i < nr + 1) {
+			entries[i - 1] = cqn_to_cq_map[be32toh(eqe[i - 1]->data.comp.cqn)];
+			__builtin_prefetch(entries[i - 1].ctx, 1, 0);
+		}
+
+		/* prefetch proc associated with context */
+		if (i > 1 && i < nr + 2) {
+			ps[i - 2] = entries[i - 2].ctx->p;
+			__builtin_prefetch(ps[i - 2], 1, 0);
+
+			/* decrement armed count in context */
+			entries[i - 2].ctx->nr_armed--;
+			bitmap_clear(entries[i - 2].ctx->armed_rx_queues, entries[i - 2].qp_idx);
+		}
+
+		/* add a core if the proc needs it */
+		if (i > 2 && i < nr + 3) {
+			if (!sched_threads_active(ps[i - 3]))
+				prefetch((void *)ps[i - 3]->policy_data);
+		}
+
+		/* add a core if the proc needs it */
+		if (i > 3) {
+			if (!sched_threads_active(ps[i - 4]))
+				sched_add_core(ps[i - 4]);
+		}
+
+
+	}
+}
+
 
 void directpath_handle_cq_error_eqe(struct mlx5_eqe *eqe)
 {
 	uint32_t cqn = be32toh(eqe->data.cq_err.cqn) & 0xffffff;
-	struct cq *cq = cqn_to_cq_map[cqn];
-	struct directpath_ctx *ctx = container_of(cq, struct directpath_ctx, qps[cq->qp_idx].rx_cq);
+	struct directpath_ctx *ctx = cqn_to_cq_map[cqn].ctx;
 	struct proc *p = ctx->p;
 	log_warn("killing proc with cq overrun");
 	kill(p->pid, SIGINT);

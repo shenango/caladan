@@ -144,9 +144,11 @@ static void eq_update_ci(struct eq *eq, int arm)
 
 bool directpath_events_poll(void)
 {
-	unsigned int i;
+	unsigned int i, nr_compl = 0;
 	struct eq *eq = &main_eq;
 	struct mlx5_eqe *eqe;
+
+	struct mlx5_eqe *eqes[POLL_EQ_BATCH_SIZE];
 
 	for (i = 0; i < POLL_EQ_BATCH_SIZE; i++) {
 		eqe = get_head_eqe(eq);
@@ -154,11 +156,11 @@ bool directpath_events_poll(void)
 			break;
 
 		switch (eqe->type) {
+			case MLX5_EVENT_TYPE_COMP:
+				eqes[nr_compl++] = eqe;
+				break;
 			case MLX5_EVENT_TYPE_CMD:
 				directpath_handle_cmd_eqe(eqe);
-				break;
-			case MLX5_EVENT_TYPE_COMP:
-				directpath_handle_completion_eqe(eqe);
 				break;
 			case MLX5_EVENT_TYPE_CQ_ERROR:
 				directpath_handle_cq_error_eqe(eqe);
@@ -173,6 +175,10 @@ bool directpath_events_poll(void)
 
 	if (i > 0) {
 		STAT_INC(DIRECTPATH_EVENTS, i);
+
+		if (nr_compl)
+			directpath_handle_completion_eqe_batch(eqes, nr_compl);
+
 		eq_update_ci(eq, 0);
 	}
 

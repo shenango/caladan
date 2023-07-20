@@ -29,7 +29,7 @@ static struct directpath_ctx *preallocated_ctx[MAX_PREALLOC];
 static unsigned int nr_prealloc;
 
 struct ibv_context *vfcontext;
-struct cq *cqn_to_cq_map[MAX_CQ];
+struct cq_map_entry cqn_to_cq_map[MAX_CQ];
 struct mlx5dv_devx_uar *admin_uar;
 
 static unsigned char rss_key[40] = {
@@ -609,7 +609,8 @@ static int create_cq(struct directpath_ctx *dp, struct cq *cq, uint32_t log_nr_c
 	if (monitored) {
 		cq->qp_idx = qp_idx;
 		BUG_ON(cq->cqn >= MAX_CQ);
-		cqn_to_cq_map[cq->cqn] = cq;
+		cqn_to_cq_map[cq->cqn].ctx = dp;
+		cqn_to_cq_map[cq->cqn].qp_idx = qp_idx;
 		if (cfg.no_directpath_active_rss || qp_idx == 0) {
 			dp->active_rx_count++;
 			bitmap_set(dp->active_rx_queues, qp_idx);
