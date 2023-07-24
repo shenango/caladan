@@ -43,7 +43,7 @@ extern bool vfio_prealloc_rmp;
  * Constant limits
  */
 
-#define IOKERNEL_MAX_PROC		2048
+#define IOKERNEL_MAX_PROC		4096
 #define IOKERNEL_NUM_MBUFS		(8192 * 16)
 #define IOKERNEL_NUM_COMPLETIONS	32767
 #define IOKERNEL_OVERFLOW_BATCH_DRAIN	64
@@ -53,6 +53,9 @@ extern bool vfio_prealloc_rmp;
 #define IOKERNEL_CONTROL_BURST_SIZE	4
 #define IOKERNEL_POLL_INTERVAL		10
 
+/* Ensure that uint16_t can be used to index procs/cores */
+BUILD_ASSERT(NCPU < UINT16_MAX);
+BUILD_ASSERT(IOKERNEL_MAX_PROC < UINT16_MAX);
 
 /*
  * Process Support
@@ -82,33 +85,43 @@ struct thread_metrics {
 };
 
 struct thread {
+	/* 1st cache line - state used for polling threads */
 	bool			active;
+	uint16_t		core;
 	pid_t			tid;
 	uint64_t		next_poll_tsc;
-	struct proc		*p;
-	struct lrpc_chan_out	rxq;
-	struct lrpc_chan_in	txpktq;
-	struct lrpc_chan_in	txcmdq;
 	struct q_ptrs		*q_ptrs;
+
 	uint32_t		last_rq_head;
 	uint32_t		last_rq_tail;
 	uint32_t		last_rxq_head;
 	uint32_t		last_rxq_tail;
+
 	uint64_t		rxq_busy_since;
-	unsigned int		core;
-	unsigned int		at_idx;
-	unsigned int		ts_idx;
+
+	struct lrpc_chan_out	rxq;
+
+	/* useful metrics for scheduling policies */
+	struct thread_metrics	metrics;
+
+	/* 2nd cache line - state used when a thread is active */
+	struct proc 	*p;
+	struct list_node	idle_link;
 	uint32_t		last_yield_rcu_gen;
 	uint64_t		wake_gen;
 	uint64_t		change_tsc;
 
+	struct lrpc_chan_in	txpktq;
+	struct lrpc_chan_in	txcmdq;
+	uint16_t		at_idx;
+	uint16_t		ts_idx;
+
+	/* legacy directpath queues */
 	struct hwq		directpath_hwq;
 	struct hwq		storage_hwq;
-	struct list_node	idle_link;
-
-	/* useful metrics for scheduling policies */
-	struct thread_metrics	metrics;
 };
+
+BUILD_ASSERT(offsetof(struct thread, rxq.send_tail) <= CACHE_LINE_SIZE);
 
 static inline void thread_enable_sched_poll(struct thread *th)
 {
@@ -144,11 +157,10 @@ static inline bool hwq_busy(struct hwq *h, uint32_t cq_idx)
 }
 
 struct proc {
-	pid_t			pid;
-	struct shm_region	region;
-
-	struct ref		ref;
-
+	/* hot data */
+	struct ref			ref;
+	uint16_t			thread_count;
+	uint16_t			active_thread_count;
 	unsigned int		has_directpath:1;
 	unsigned int		has_vfio_directpath:1;
 	unsigned int		vfio_directpath_rmp:1;
@@ -156,28 +168,24 @@ struct proc {
 	unsigned int		attach_fail:1;
 	unsigned int		removed:1;
 	unsigned int		started:1;
+	unsigned int		has_storage:1;
 	struct runtime_info	*runtime_info;
 	unsigned long		policy_data;
 	unsigned long		directpath_data;
-	float			load;
 	uint64_t		next_poll_tsc;
 
-	/* scheduler data */
-	struct sched_spec	sched_cfg;
-
-	/* the flow steering table */
-	unsigned int		flow_tbl[NCPU];
+	float			load;
 
 	/* runtime threads */
-	unsigned int		thread_count;
-	unsigned int		active_thread_count;
-	struct thread		threads[NCPU];
-	struct thread		*active_threads[NCPU];
 	struct list_head	idle_threads;
-	unsigned int		next_thread_rr; // for spraying join requests/overflow completions
+	struct thread		threads[NCPU];
+
+	/* COLD */
 
 	/* network data */
 	uint32_t		ip_addr;
+
+	struct shm_region	region;
 
 	/* Overfloq queue for completion data */
 	size_t max_overflows;
@@ -185,7 +193,16 @@ struct proc {
 	unsigned long *overflow_queue;
 	struct list_node overflow_link;
 
+	uint16_t		next_thread_rr; // for spraying join requests/overflow completions
+
+	/* scheduler data */
+	struct sched_spec	sched_cfg;
+
+	/* the flow steering table */
+	uint16_t		flow_tbl[NCPU];
+	struct thread		*active_threads[NCPU];
 	int				control_fd;
+	pid_t			pid;
 
 	/* table of physical addresses for shared memory */
 	physaddr_t		page_paddrs[];
@@ -248,7 +265,7 @@ extern struct thread *ts[NCPU];
  */
 static inline void poll_thread(struct thread *th)
 {
-	if (th->ts_idx != UINT_MAX)
+	if (th->ts_idx != UINT16_MAX)
 		return;
 	proc_get(th->p);
 	ts[nrts] = th;
@@ -261,11 +278,11 @@ static inline void poll_thread(struct thread *th)
  */
 static inline void unpoll_thread(struct thread *th)
 {
-	if (th->ts_idx == UINT_MAX)
+	if (th->ts_idx == UINT16_MAX)
 		return;
 	ts[th->ts_idx] = ts[--nrts];
 	ts[th->ts_idx]->ts_idx = th->ts_idx;
-	th->ts_idx = UINT_MAX;
+	th->ts_idx = UINT16_MAX;
 	proc_put(th->p);
 }
 
@@ -306,8 +323,8 @@ struct dataplane {
 	struct rte_mempool	*rx_mbuf_pool;
 	struct shm_region	ingress_mbuf_region;
 
+	uint16_t			nr_clients;
 	struct proc		*clients[IOKERNEL_MAX_PROC];
-	int			nr_clients;
 	struct rte_hash		*ip_to_proc;
 	struct rte_device	*device;
 };

@@ -91,7 +91,7 @@ static void sched_steer_flows(struct proc *p)
 
 	/* then assign the rest round-robin */
 	for (i = 0; i < p->thread_count; i++) {
-		if (p->flow_tbl[i] != UINT_MAX)
+		if (p->flow_tbl[i] != UINT16_MAX)
 			continue;
 		th = p->active_threads[j++ % p->active_thread_count];
 		p->flow_tbl[i] = th - p->threads;
@@ -109,14 +109,16 @@ static void sched_enable_kthread(struct thread *th, unsigned int core)
 	th->active = true;
 	th->core = core;
 	list_del_from(&p->idle_threads, &th->idle_link);
-	th->at_idx = p->active_thread_count;
-	p->active_threads[p->active_thread_count++] = th;
-	if (!p->has_directpath)
-		sched_steer_flows(p);
-	if (p->has_vfio_directpath)
+	if (p->has_vfio_directpath) {
+		p->active_thread_count++;
 		directpath_notify_waking(p, th);
-	else
+	} else {
+		th->at_idx = p->active_thread_count;
+		p->active_threads[p->active_thread_count++] = th;
 		poll_thread(th);
+		if (!p->has_directpath)
+			sched_steer_flows(p);
+	}
 
 	if (unlikely(!p->started))
 		p->started = true;
@@ -128,13 +130,17 @@ static void sched_disable_kthread(struct thread *th)
 
 	th->active = false;
 	th->change_tsc = cur_tsc;
-	p->active_threads[th->at_idx] = p->active_threads[--p->active_thread_count];
-	p->active_threads[th->at_idx]->at_idx = th->at_idx;
 	list_add(&p->idle_threads, &th->idle_link);
 	if (!p->has_directpath)
 		sched_steer_flows(p);
-	if (!p->has_vfio_directpath && lrpc_empty(&th->txpktq))
-		unpoll_thread(th);
+	if (!p->has_vfio_directpath) {
+		p->active_threads[th->at_idx] = p->active_threads[--p->active_thread_count];
+		p->active_threads[th->at_idx]->at_idx = th->at_idx;
+		if (lrpc_empty(&th->txpktq))
+			unpoll_thread(th);
+	} else {
+		p->active_thread_count--;
+	}
 }
 
 static struct thread *sched_pick_kthread(struct proc *p, unsigned int core)
@@ -441,7 +447,7 @@ sched_update_kthread_metrics(struct thread *th, bool work_pending)
 }
 
 static void
-sched_measure_kthread_delay(struct thread *th, uint64_t *thread_delay,
+sched_measure_kthread_delay(struct proc *p, struct thread *th, uint64_t *thread_delay,
                             uint64_t *rxq_delay, bool *has_work,
                             bool *standing_queue, uint64_t *next_timer)
 {
@@ -468,7 +474,7 @@ sched_measure_kthread_delay(struct thread *th, uint64_t *thread_delay,
 
 	/* RXQ: measure delay */
 	last_tail = th->last_rxq_tail;
-	cur_tail = lrpc_poll_send_tail(&th->rxq);
+	cur_tail = ACCESS_ONCE(th->q_ptrs->rxq_wb);
 	last_head = th->last_rxq_head;
 	cur_head = ACCESS_ONCE(th->rxq.send_head);
 	th->last_rxq_head = cur_head;
@@ -498,20 +504,24 @@ sched_measure_kthread_delay(struct thread *th, uint64_t *thread_delay,
 	 * DIRECTPATH: measure delay and update signals.
 	 * ignore the busy signal here.
 	 */
-	if (th->directpath_hwq.hwq_type == HWQ_MLX5_QSTEER) {
-		bool a, b;
-		sched_measure_hardware_delay(th, &th->directpath_hwq, true, &a, &b, rxq_delay);
-	} else {
-		tmp = 0;
-		sched_measure_hardware_delay(th, &th->directpath_hwq, true, has_work, standing_queue, &tmp);
-		*thread_delay += tmp;
+	if (p->has_directpath && !p->has_vfio_directpath) {
+		if (th->directpath_hwq.hwq_type == HWQ_MLX5_QSTEER) {
+			bool a, b;
+			sched_measure_hardware_delay(th, &th->directpath_hwq, true, &a, &b, rxq_delay);
+		} else {
+			tmp = 0;
+			sched_measure_hardware_delay(th, &th->directpath_hwq, true, has_work, standing_queue, &tmp);
+			*thread_delay += tmp;
+		}
 	}
 
-	/* STORAGE: measure delay and update signals */
-	tmp = 0;
-	sched_measure_hardware_delay(th, &th->storage_hwq, true, has_work,
-		                         standing_queue, &tmp);
-	*thread_delay += tmp;
+	if (p->has_storage) {
+		/* STORAGE: measure delay and update signals */
+		tmp = 0;
+		sched_measure_hardware_delay(th, &th->storage_hwq, true, has_work,
+			                         standing_queue, &tmp);
+		*thread_delay += tmp;
+	}
 }
 
 #define EWMA_WEIGHT     0.1f
@@ -542,15 +552,15 @@ static void sched_measure_delay(struct proc *p)
 	uint64_t rxq_delay = 0, consumed_strides, posted_strides, next_poll_tsc;
 	unsigned int i;
 
+	if (!proc_sched_should_poll(p, cur_tsc))
+		return;
+
 	dl.has_work = false;
 	dl.standing_queue = false;
 	dl.parked_thread_busy = false;
 	dl.max_delay_us = 0;
 	dl.min_delay_us = UINT64_MAX;
 	dl.avg_delay_us = 0;
-
-	if (!proc_sched_should_poll(p, cur_tsc))
-		return;
 
 	next_poll_tsc = UINT64_MAX;
 	consumed_strides = atomic64_read(&p->runtime_info->directpath_strides_consumed);
@@ -566,7 +576,7 @@ static void sched_measure_delay(struct proc *p)
 			continue;
 		}
 
-		sched_measure_kthread_delay(th, &delay, &rxq_delay, &busy,
+		sched_measure_kthread_delay(p, th, &delay, &rxq_delay, &busy,
 			                        &dl.standing_queue, &next_timer_tsc);
 
 		if (th->active)
@@ -582,7 +592,8 @@ static void sched_measure_delay(struct proc *p)
 			dl.min_delay_core = th->core;
 		}
 
-		sched_update_kthread_metrics(th, busy);
+		if (th->active)
+			sched_update_kthread_metrics(th, busy);
 
 		if (!th->active && !busy && sched_proc_can_unpoll(p)) {
 			thread_set_next_poll(th, next_timer_tsc);
@@ -612,11 +623,6 @@ static void sched_measure_delay(struct proc *p)
 		dl.parked_thread_busy |= sched_threads_active(p) == 0;
 	}
 
-	/* when possible, defer polling this proc until the next timer */
-	if (sched_threads_active(p) == 0 && !dl.has_work &&
-	    directpath_armed && sched_proc_can_unpoll(p))
-	    proc_set_next_poll(p, next_poll_tsc);
-
 	/* don't report parked busy if no threads are active */
 	if (cfg.noidlefastwake && sched_threads_active(p) == 0)
 		dl.parked_thread_busy = false;
@@ -632,6 +638,9 @@ static void sched_measure_delay(struct proc *p)
 	/* notify the scheduler policy of the current delay */
 	if (sched_ops->notify_congested(p, &dl))
 		proc_disable_sched_poll(p);
+	else if (sched_threads_active(p) == 0 && !dl.has_work &&
+	    directpath_armed && sched_proc_can_unpoll(p))
+	    proc_set_next_poll(p, next_poll_tsc);
 }
 
 /*
@@ -697,7 +706,7 @@ rewake:
  */
 void sched_poll(void)
 {
-	static uint64_t last_time = 0;
+	static uint64_t last_time;
 	DEFINE_BITMAP(idle, NCPU);
 	struct core_state *s;
 	uint64_t now;
@@ -710,20 +719,21 @@ void sched_poll(void)
 
 	cur_tsc = rdtsc();
 	now = (cur_tsc - start_tsc) / cycles_per_us;
-	if (now - last_time >= IOKERNEL_POLL_INTERVAL) {
-		int i;
+	if (cur_tsc - last_time >= IOKERNEL_POLL_INTERVAL * cycles_per_us) {
 
 		STAT_INC(SCHED_RUN, 1);
 
 		/* retrieve current network device tick */
 		hw_timestamp_update();
 
-		last_time = now;
+		last_time = cur_tsc;
 		for (i = 0; i < dp.nr_clients; i++) {
+			if (i + 2 < dp.nr_clients)
+				prefetch(dp.clients[i + 2]);
 			p = dp.clients[i];
 			sched_measure_delay(p);
 		}
-	} else if (!cfg.noidlefastwake) {
+	} else if (!cfg.noidlefastwake && !cfg.vfio_directpath) {
 		/* check if any idle directpath runtimes have received I/Os */
 		for (i = 0; i < dp.nr_clients; i++) {
 			p = dp.clients[i];
@@ -822,11 +832,9 @@ int sched_attach_proc(struct proc *p)
 	}
 
 	p->active_thread_count = 0;
-	/* p->active_threads[0] always has most recent thread */
-	p->active_threads[0] = &p->threads[0];
 	list_head_init(&p->idle_threads);
 	for (i = 0; i < p->thread_count; i++) {
-		p->threads[i].core = UINT_MAX;
+		p->threads[i].core = UINT16_MAX;
 		p->threads[i].active = false;
 		list_add(&p->idle_threads, &p->threads[i].idle_link);
 	}
@@ -836,6 +844,7 @@ int sched_attach_proc(struct proc *p)
 		return ret;
 
 	nr_guaranteed += p->sched_cfg.guaranteed_cores;
+	proc_enable_sched_poll(p);
 
 	return 0;
 }

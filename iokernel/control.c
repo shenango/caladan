@@ -282,8 +282,8 @@ static struct proc *control_create_proc(mem_key_t key, size_t len,
 
 		th->tid = s->tid;
 		th->p = p;
-		th->at_idx = UINT_MAX;
-		th->ts_idx = UINT_MAX;
+		th->at_idx = UINT16_MAX;
+		th->ts_idx = UINT16_MAX;
 
 		/* initialize pointer to queue pointers in shared memory */
 		th->q_ptrs = (struct q_ptrs *) shmptr_to_ptr(&reg, s->q_ptrs,
@@ -300,6 +300,7 @@ static struct proc *control_create_proc(mem_key_t key, size_t len,
 			goto fail;
 
 		p->has_directpath |= th->directpath_hwq.enabled;
+		p->has_storage |= th->storage_hwq.enabled;
 	}
 
 	/* initialize the table of physical page addresses */

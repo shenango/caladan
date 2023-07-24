@@ -26,10 +26,10 @@ struct lrpc_msg {
  */
 
 struct lrpc_chan_out {
-	struct lrpc_msg	*tbl;
-	uint32_t	*recv_head_wb;
 	uint32_t	send_head;
 	uint32_t	send_tail;
+	struct lrpc_msg	*tbl;
+	uint32_t	*recv_head_wb;
 	uint32_t	size;
 	uint32_t	pad;
 };
