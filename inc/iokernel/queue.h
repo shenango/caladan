@@ -59,7 +59,7 @@ enum {
 enum {
 	RX_NET_RECV = 0,	/* points to a struct rx_net_hdr */
 	RX_NET_COMPLETE,	/* contains tx_net_hdr.completion_data */
-	RX_JOIN,		/* immediate detach request for a kthread */
+	RX_REFILL_BUFS,		/* runtime should replenish RX work queues */
 	RX_CALL_NR,		/* number of commands */
 };
 

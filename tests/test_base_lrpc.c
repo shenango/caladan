@@ -98,7 +98,7 @@ static void *test_thread(void *data)
 		log_err("base_init_thread() failed, ret = %d", ret);
 		BUG();
 	}
-	BUG_ON(!thread_init_done);
+	BUG_ON(!perthread_read(thread_init_done));
 
 	server((struct params *)data);
 	return NULL;
@@ -122,7 +122,7 @@ int main(int argc, char *argv[])
 		log_err("base_init_thread() failed, ret = %d", ret);
 		BUG();
 	}
-	BUG_ON(!thread_init_done);
+	BUG_ON(!perthread_read(thread_init_done));
 
 	p.client_buf = malloc(sizeof(struct lrpc_msg) * QUEUE_SIZE);
 	BUG_ON(!p.client_buf);

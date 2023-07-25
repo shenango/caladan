@@ -17,11 +17,10 @@
 
 /* log levels greater than this value won't be printed */
 int max_loglevel = LOG_DEBUG;
-/* stored here to avoid pushing too much on the stack */
-static __thread char buf[MAX_LOG_LEN];
 
 void logk(int level, const char *fmt, ...)
 {
+	char buf[MAX_LOG_LEN];
 	va_list ptr;
 	off_t off;
 	int cpu;

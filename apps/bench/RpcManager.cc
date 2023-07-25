@@ -145,3 +145,6 @@ ssize_t WritevFull_(rt::TcpConn *c, const struct iovec *iov, int iovcnt) {
   } while (iovcnt);
   return sent;
 }
+
+template class RpcEndpoint<MemcachedHdr>;
+template class RpcEndpoint<ReflexHdr>;

@@ -18,7 +18,7 @@ extern int runtime_set_initializers(initializer_fn_t global_fn,
 extern int runtime_init(const char *cfgpath, thread_fn_t main_fn, void *arg);
 
 
-extern struct congestion_info *runtime_congestion;
+extern struct runtime_info *runtime_info;
 
 /**
  * runtime_queue_us - returns the us of packet queueing delay + runtime queueing
@@ -26,7 +26,7 @@ extern struct congestion_info *runtime_congestion;
  */
 static inline uint64_t runtime_queue_us(void)
 {
-	return ACCESS_ONCE(runtime_congestion->delay_us);
+	return ACCESS_ONCE(runtime_info->congestion.delay_us);
 }
 
 /**
@@ -34,7 +34,7 @@ static inline uint64_t runtime_queue_us(void)
  */
 static inline float runtime_load(void)
 {
-	return ACCESS_ONCE(runtime_congestion->load);
+	return ACCESS_ONCE(runtime_info->congestion.load);
 }
 
 /**

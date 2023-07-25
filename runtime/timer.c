@@ -96,7 +96,7 @@ static void sift_down(struct timer_idx *heap, int i, int n)
 
 static void update_q_ptrs(struct kthread *k)
 {
-	uint64_t next_tsc = 0;
+	uint64_t next_tsc = UINT64_MAX;
 
 	if (k->timern)
 		next_tsc = k->timers[0].deadline_us * cycles_per_us + start_tsc;
@@ -171,7 +171,7 @@ void timer_start(struct timer_entry *e, uint64_t deadline_us)
  * Returns true if the timer was successfully cancelled, otherwise it has
  * already fired or was never armed.
  */
-bool timer_cancel(struct timer_entry *e)
+bool __timer_cancel(struct timer_entry *e)
 {
 	struct kthread *k = e->localk;
 	int last;
@@ -181,7 +181,6 @@ bool timer_cancel(struct timer_entry *e)
 	if (!e->armed) {
 		spin_unlock_np(&k->timer_lock);
 		if (unlikely(load_acquire(&e->executing))) {
-			/* wait until the timer callback finishes */
 			while (load_acquire(&e->executing))
 				cpu_relax();
 		}
@@ -268,8 +267,8 @@ static void timer_softirq_one(struct kthread *k)
 			sift_down(k->timers, 0, i);
 		}
 		update_q_ptrs(k);
-		e->armed = false;
 		e->executing = true;
+		store_release(&e->armed, false);
 		spin_unlock(&k->timer_lock);
 
 		/* execute the timer handler */
@@ -302,7 +301,6 @@ static void timer_softirq(void *arg)
 int timer_init_thread(void)
 {
 	struct kthread *k = myk();
-	struct timer_spec *ts = &iok.threads[k->kthread_idx].timer_heap;
 	thread_t *th;
 
 	k->timers = aligned_alloc(CACHE_LINE_SIZE,
@@ -316,10 +314,6 @@ int timer_init_thread(void)
 		return -ENOMEM;
 
 	k->timer_softirq = th;
-	k->q_ptrs->next_timer_tsc = 0;
-	ts->next_tsc = ptr_to_shmptr(&netcfg.tx_region,
-			    &k->q_ptrs->next_timer_tsc, sizeof(uint64_t));
-	ts->timer_resolution = cycles_per_us;
-
+	k->q_ptrs->next_timer_tsc = UINT64_MAX;
 	return 0;
 }

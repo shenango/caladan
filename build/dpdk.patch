@@ -1,0 +1,13 @@
+diff --git a/config/rte_config.h b/config/rte_config.h
+index 8eb29c1525..1d053bfb9e 100644
+--- a/config/rte_config.h
++++ b/config/rte_config.h
+@@ -29,7 +29,7 @@
+ 
+ /* EAL defines */
+ #define RTE_MAX_HEAPS 32
+-#define RTE_MAX_MEMSEG_LISTS 128
++#define RTE_MAX_MEMSEG_LISTS 1024
+ #define RTE_MAX_MEMSEG_PER_LIST 8192
+ #define RTE_MAX_MEM_MB_PER_LIST 32768
+ #define RTE_MAX_MEMSEG_PER_TYPE 32768

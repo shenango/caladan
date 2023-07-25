@@ -18,17 +18,15 @@
 #include "defs.h"
 
 /* the current running thread, or NULL if there isn't one */
-__thread thread_t *__self;
+DEFINE_PERTHREAD(thread_t *, __self);
 /* a pointer to the top of the per-kthread (TLS) runtime stack */
-static __thread void *runtime_stack;
-/* a pointer to the bottom of the per-kthread (TLS) runtime stack */
-static __thread void *runtime_stack_base;
+static DEFINE_PERTHREAD(void *, runtime_stack);
 
 /* Flag to prevent watchdog from running */
 bool disable_watchdog;
 
 /* real-time compute congestion signals (shared with the iokernel) */
-struct congestion_info *runtime_congestion;
+struct runtime_info *runtime_info;
 
 /* fast allocation of struct thread */
 static struct slab thread_slab;
@@ -36,7 +34,7 @@ static struct tcache *thread_tcache;
 static DEFINE_PERTHREAD(struct tcache_perthread, thread_pt);
 
 /* used to track cycle usage in scheduler */
-static __thread uint64_t last_tsc;
+static DEFINE_PERTHREAD(uint64_t, last_tsc);
 
 /**
  * In inc/runtime/thread.h, this function is declared inline (rather than static
@@ -47,14 +45,14 @@ thread_t *thread_self(void);
 
 uint64_t get_uthread_specific(void)
 {
-	BUG_ON(!__self);
-	return __self->tlsvar;
+	BUG_ON(!perthread_read_stable(__self));
+	return (perthread_read_stable(__self))->tlsvar;
 }
 
 void set_uthread_specific(uint64_t val)
 {
-	BUG_ON(!__self);
-	__self->tlsvar = val;
+	BUG_ON(!perthread_read_stable(__self));
+	(perthread_read_stable(__self))->tlsvar = val;
 }
 
 /**
@@ -80,7 +78,7 @@ static __noreturn void jmp_thread(thread_t *th)
 	assert_preempt_disabled();
 	assert(th->thread_ready);
 
-	__self = th;
+	perthread_store(__self, th);
 	th->thread_ready = false;
 	if (unlikely(load_acquire(&th->thread_running))) {
 		/* wait until the scheduler finishes switching stacks */
@@ -104,7 +102,7 @@ static void jmp_thread_direct(thread_t *oldth, thread_t *newth)
 	assert_preempt_disabled();
 	assert(newth->thread_ready);
 
-	__self = newth;
+	perthread_store(__self, newth);
 	newth->thread_ready = false;
 	if (unlikely(load_acquire(&newth->thread_running))) {
 		/* wait until the scheduler finishes switching stacks */
@@ -130,7 +128,7 @@ static void jmp_runtime(runtime_fn_t fn)
 	assert_preempt_disabled();
 	assert(thread_self() != NULL);
 
-	__jmp_runtime(&thread_self()->tf, fn, runtime_stack);
+	__jmp_runtime(&thread_self()->tf, fn, perthread_read(runtime_stack));
 }
 
 /**
@@ -142,7 +140,7 @@ static __noreturn void jmp_runtime_nosave(runtime_fn_t fn)
 {
 	assert_preempt_disabled();
 
-	__jmp_runtime_nosave(fn, runtime_stack);
+	__jmp_runtime_nosave(fn, perthread_read(runtime_stack));
 }
 
 static void drain_overflow(struct kthread *l)
@@ -268,10 +266,8 @@ static bool steal_work(struct kthread *l, struct kthread *r)
 	assert_spin_lock_held(&l->lock);
 	assert(myk() == l);
 
-	if (!work_available(r, now_tsc))
-		return false;
-	if (!spin_try_lock(&r->lock))
-		return false;
+	if (!work_available(r, now_tsc) || !spin_try_lock(&r->lock))
+		return rx_poll_locked(r);
 
 #ifdef GC
 	if (unlikely(get_gc_gen() != r->local_gc_gen)) {
@@ -330,19 +326,19 @@ static __noreturn __noinline void schedule(void)
 	assert_spin_lock_held(&l->lock);
 	assert(l->parked == false);
 
-	/* unmark busy for the stack of the last uthread */
-	if (likely(__self != NULL)) {
-		store_release(&__self->thread_running, false);
-		__self = NULL;
-	}
-
 	/* detect misuse of preempt disable */
-	BUG_ON((preempt_cnt & ~PREEMPT_NOT_PENDING) != 1);
+	BUG_ON((perthread_read(preempt_cnt) & ~PREEMPT_NOT_PENDING) != 1);
+
+	/* unmark busy for the stack of the last uthread */
+	if (likely(perthread_get_stable(__self) != NULL)) {
+		store_release(&perthread_get_stable(__self)->thread_running, false);
+		perthread_get_stable(__self) = NULL;
+	}
 
 	/* update entry stat counters */
 	STAT(RESCHEDULES)++;
 	start_tsc = rdtsc();
-	STAT(PROGRAM_CYCLES) += start_tsc - last_tsc;
+	STAT(PROGRAM_CYCLES) += start_tsc - perthread_read_stable(last_tsc);
 
 	/* increment the RCU generation number (even is in scheduler) */
 	store_release(&l->rcu_gen, l->rcu_gen + 1);
@@ -353,7 +349,7 @@ static __noreturn __noinline void schedule(void)
 	if (unlikely(preempt_cede_needed(l))) {
 		l->parked = true;
 		spin_unlock(&l->lock);
-		kthread_park(false);
+		kthread_park_now();
 		start_tsc = rdtsc();
 		iters = 0;
 		spin_lock(&l->lock);
@@ -383,6 +379,10 @@ static __noreturn __noinline void schedule(void)
 		goto done;
 
 again:
+
+	if (unlikely(!mbufq_empty(&l->txpktq_overflow)))
+		net_tx_drain_overflow();
+
 	/* then check for local softirqs */
 	if (softirq_run_locked(l)) {
 		STAT(SOFTIRQS_LOCAL)++;
@@ -415,25 +415,24 @@ again:
 #endif
 
 	/* keep trying to find work until the polling timeout expires */
-	last_tsc = rdtsc();
+	perthread_get_stable(last_tsc) = rdtsc();
 	if (!preempt_cede_needed(l) &&
 	    (++iters < RUNTIME_SCHED_POLL_ITERS ||
-	     last_tsc - start_tsc < cycles_per_us * RUNTIME_SCHED_MIN_POLL_US ||
-	     storage_pending_completions(&l->storage_q))) {
+	     perthread_get_stable(last_tsc) - start_tsc < cycles_per_us * RUNTIME_SCHED_MIN_POLL_US ||
+	     storage_pending_completions(l) ||
+	     !mbufq_empty(&l->txpktq_overflow))) {
 		goto again;
 	}
 
 	l->parked = true;
-	spin_unlock(&l->lock);
 
 	/* did not find anything to run, park this kthread */
-	STAT(SCHED_CYCLES) += last_tsc - start_tsc;
+	STAT(SCHED_CYCLES) += perthread_get_stable(last_tsc) - start_tsc;
 	/* we may have got a preempt signal before voluntarily yielding */
-	kthread_park(!preempt_cede_needed(l));
+	kthread_park();
 	start_tsc = rdtsc();
 	iters = 0;
 
-	spin_lock(&l->lock);
 	l->parked = false;
 	goto again;
 
@@ -451,16 +450,16 @@ done:
 	spin_unlock(&l->lock);
 
 	/* update exit stat counters */
-	last_tsc = rdtsc();
-	STAT(SCHED_CYCLES) += last_tsc - start_tsc;
+	perthread_get_stable(last_tsc) = rdtsc();
+	STAT(SCHED_CYCLES) += perthread_get_stable(last_tsc) - start_tsc;
 	if (cores_have_affinity(th->last_cpu, l->curr_cpu))
 		STAT(LOCAL_RUNS)++;
 	else
 		STAT(REMOTE_RUNS)++;
 
 	/* update exported thread run start time */
-	th->run_start_tsc = last_tsc;
-	ACCESS_ONCE(l->q_ptrs->run_start_tsc) = last_tsc;
+	th->run_start_tsc = perthread_get_stable(last_tsc);
+	ACCESS_ONCE(l->q_ptrs->run_start_tsc) = perthread_get_stable(last_tsc);
 
 	/* increment the RCU generation number (odd is in thread) */
 	store_release(&l->rcu_gen, l->rcu_gen + 1);
@@ -499,8 +498,8 @@ static __always_inline void enter_schedule(thread_t *curth)
 	}
 
 	/* fast path: switch directly to the next uthread */
-	STAT(PROGRAM_CYCLES) += now_tsc - last_tsc;
-	last_tsc = now_tsc;
+	STAT(PROGRAM_CYCLES) += now_tsc - perthread_get_stable(last_tsc);
+	perthread_get_stable(last_tsc) = now_tsc;
 
 	/* pop the next runnable thread from the queue */
 	th = k->rq[k->rq_tail++ % RUNTIME_RQ_SIZE];
@@ -514,8 +513,8 @@ static __always_inline void enter_schedule(thread_t *curth)
 	spin_unlock(&k->lock);
 
 	/* update exported thread run start time */
-	th->run_start_tsc = last_tsc;
-	ACCESS_ONCE(k->q_ptrs->run_start_tsc) = last_tsc;
+	th->run_start_tsc = perthread_get_stable(last_tsc);
+	ACCESS_ONCE(k->q_ptrs->run_start_tsc) = perthread_get_stable(last_tsc);
 
 	/* increment the RCU generation number (odd is in thread) */
 	store_release(&k->rcu_gen, k->rcu_gen + 2);
@@ -523,7 +522,7 @@ static __always_inline void enter_schedule(thread_t *curth)
 	assert((k->rcu_gen & 0x1) == 0x1);
 
 	/* check for misuse of preemption disabling */
-	BUG_ON((preempt_cnt & ~PREEMPT_NOT_PENDING) != 1);
+	BUG_ON((perthread_read(preempt_cnt) & ~PREEMPT_NOT_PENDING) != 1);
 
 	/* check if we're switching into the same thread as before */
 	if (unlikely(th == curth)) {
@@ -720,8 +719,8 @@ static void thread_finish_cede(void)
 	/* update stats and scheduler state */
 	myth->thread_running = false;
 	myth->last_cpu = k->curr_cpu;
-	__self = NULL;
-	STAT(PROGRAM_CYCLES) += tsc - last_tsc;
+	perthread_store(__self, NULL);
+	STAT(PROGRAM_CYCLES) += tsc - perthread_get_stable(last_tsc);
 
 	/* mark ceded thread ready at head of runqueue */
 	thread_ready_head(myth);
@@ -733,8 +732,8 @@ static void thread_finish_cede(void)
 
 	/* cede this kthread to the iokernel */
 	ACCESS_ONCE(k->parked) = true; /* deliberately racy */
-	kthread_park(false);
-	last_tsc = tsc;
+	kthread_park_now();
+	perthread_get_stable(last_tsc) = tsc;
 
 	/* increment the RCU generation number (odd - back in thread) */
 	store_release(&k->rcu_gen, k->rcu_gen + 1);
@@ -781,7 +780,7 @@ static __always_inline thread_t *__thread_create(void)
 	struct stack *s;
 
 	preempt_disable();
-	th = tcache_alloc(&perthread_get(thread_pt));
+	th = tcache_alloc(perthread_ptr(thread_pt));
 	if (unlikely(!th)) {
 		preempt_enable();
 		return NULL;
@@ -789,7 +788,7 @@ static __always_inline thread_t *__thread_create(void)
 
 	s = stack_alloc();
 	if (unlikely(!s)) {
-		tcache_free(&perthread_get(thread_pt), th);
+		tcache_free(perthread_ptr(thread_pt), th);
 		preempt_enable();
 		return NULL;
 	}
@@ -898,8 +897,8 @@ static void thread_finish_exit(void)
 
 	gc_remove_thread(th);
 	stack_free(th->stack);
-	tcache_free(&perthread_get(thread_pt), th);
-	__self = NULL;
+	tcache_free(perthread_ptr(thread_pt), th);
+	perthread_store(__self, NULL);
 
 	/* if the main thread dies, kill the whole program */
 	if (unlikely(th->main_thread))
@@ -936,7 +935,7 @@ static __noreturn void schedule_start(void)
 		ACCESS_ONCE(k->q_ptrs->oldest_tsc) = UINT64_MAX;
 	ACCESS_ONCE(k->parked) = true;
 	kthread_wait_to_attach();
-	last_tsc = rdtsc();
+	perthread_store(last_tsc, rdtsc());
 	store_release(&k->rcu_gen, 1);
 	ACCESS_ONCE(k->q_ptrs->rcu_gen) = 1;
 
@@ -968,14 +967,13 @@ int sched_init_thread(void)
 {
 	struct stack *s;
 
-	tcache_init_perthread(thread_tcache, &perthread_get(thread_pt));
+	tcache_init_perthread(thread_tcache, perthread_ptr(thread_pt));
 
 	s = stack_alloc();
 	if (!s)
 		return -ENOMEM;
 
-	runtime_stack_base = (void *)s;
-	runtime_stack = (void *)stack_init_to_rsp(s, runtime_top_of_stack); 
+	perthread_store(runtime_stack, (void *)stack_init_to_rsp(s, runtime_top_of_stack));
 
 	return 0;
 }

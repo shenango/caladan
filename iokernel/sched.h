@@ -10,6 +10,16 @@
 
 #include "defs.h"
 
+struct delay_info {
+	bool has_work; /* process has any queued work */
+	bool parked_thread_busy; /* a parked thread has work in one of its queues */
+	bool standing_queue; /* old shenango signal: item queued after two checks */
+	double max_delay_us; /* max delay seen across the set of threads */
+	double min_delay_us; /* min delay seen across the set of threads */
+	double avg_delay_us; /* avg delay */
+	unsigned int min_delay_core; /* core with the lowest delay */
+};
+
 struct sched_ops {
 	/**
 	 * proc_attach - attaches a new process to the scheduler
@@ -34,14 +44,15 @@ struct sched_ops {
 	/**
 	 * notify_congested - notifies the scheduler of process congestion
 	 * @p: the process for which congestion has changed
-	 * @congested: did the old shenango congestion signal trigger
-	 * @delay: the new queueing delay signal in microseconds
-	 * @parked_thread_congested: queueing delay is non-zero for a parked thread
+	 * @delay: info associated with the current delays in this process
 	 *
 	 * This notifier informs the scheduler of when processes become
 	 * congested or uncongested, driving core allocation decisions.
+	 *
+	 * The scheduler returns true if the proc does not need to be polled again
+	 * until woken.
 	 */
-	void (*notify_congested)(struct proc *p, bool congested, uint64_t delay, bool parked_thread_delay);
+	bool (*notify_congested)(struct proc *p, struct delay_info *delay);
 
 	/**
 	 * notify_core_needed - notifies the scheduler that a core is needed
@@ -88,6 +99,8 @@ extern int sched_run_on_core(struct proc *p, unsigned int core);
 extern int sched_idle_on_core(uint32_t mwait_hint, unsigned int core);
 extern int sched_yield_on_core(unsigned int core);
 extern struct thread *sched_get_thread_on_core(unsigned int core);
+extern int sched_request_cooperative_cede(unsigned int core);
+extern int sched_cancel_cooperative_cede(struct proc *p, unsigned int core);
 
 static inline int sched_threads_active(struct proc *p)
 {

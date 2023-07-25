@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <base/thread.h>
 #include <base/types.h>
 #include <base/compiler.h>
 #include <runtime/preempt.h>
@@ -26,12 +27,12 @@ extern void thread_ready_head(thread_t *thread);
 extern thread_t *thread_create(thread_fn_t fn, void *arg);
 extern thread_t *thread_create_with_buf(thread_fn_t fn, void **buf, size_t len);
 
-extern __thread thread_t *__self;
-extern __thread unsigned int kthread_idx;
+DECLARE_PERTHREAD(thread_t *, __self);
+DECLARE_PERTHREAD(unsigned int, kthread_idx);
 
 static inline unsigned int get_current_affinity(void)
 {
-	return kthread_idx;
+	return perthread_read(kthread_idx);
 }
 
 /**
@@ -39,7 +40,7 @@ static inline unsigned int get_current_affinity(void)
  */
 inline thread_t *thread_self(void)
 {
-	return __self;
+	return perthread_read_stable(__self);
 }
 
 

@@ -6,6 +6,7 @@
 #include <pthread.h>
 #include <string.h>
 #include <sys/ipc.h>
+#include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/un.h>
@@ -17,6 +18,7 @@
 #include <base/mem.h>
 #include <base/thread.h>
 
+#include <iokernel/directpath.h>
 #include <iokernel/shm.h>
 #include <runtime/thread.h>
 
@@ -27,11 +29,22 @@
 #include "net/defs.h"
 
 #define PACKET_QUEUE_MCOUNT	4096
-#define COMMAND_QUEUE_MCOUNT	4096
+#define LRPC_QUEUE_SIZE_DIRECTPATH 16
+
+static size_t lrpc_q_size(void)
+{
+	if (cfg_directpath_enabled())
+		return LRPC_QUEUE_SIZE_DIRECTPATH;
+
+	return PACKET_QUEUE_MCOUNT;
+}
 
 /* the egress buffer pool must be large enough to fill all the TXQs entirely */
 static size_t calculate_egress_pool_size(void)
 {
+	if (cfg_directpath_external())
+		return 0;
+
 	size_t buflen = MBUF_DEFAULT_LEN;
 	return align_up(PACKET_QUEUE_MCOUNT *
 			buflen * MAX(1, guaranteedks) * 8UL,
@@ -40,26 +53,17 @@ static size_t calculate_egress_pool_size(void)
 
 struct iokernel_control iok;
 bool cfg_prio_is_lc;
+unsigned int cfg_request_hardware_queues = DIRECTPATH_REQUEST_NONE;
 uint64_t cfg_ht_punish_us;
 uint64_t cfg_qdelay_us = 10;
 uint64_t cfg_quantum_us = 100;
 
-static int generate_random_mac(struct eth_addr *mac)
+static inline size_t shm_page_size(void)
 {
-	int fd, ret;
-	fd = open("/dev/urandom", O_RDONLY);
-	if (fd < 0)
-		return -1;
+	if (storage_enabled() || !cfg_directpath_external())
+		return PGSIZE_2MB;
 
-	ret = read(fd, mac, sizeof(*mac));
-	close(fd);
-	if (ret != sizeof(*mac))
-		return -1;
-
-	mac->addr[0] &= ~ETH_ADDR_GROUP;
-	mac->addr[0] |= ETH_ADDR_LOCAL_ADMIN;
-
-	return 0;
+	return PGSIZE_4KB;
 }
 
 // Could be a macro really, this is totally static :/
@@ -73,41 +77,45 @@ static size_t estimate_shm_space(void)
 	ret = align_up(ret, CACHE_LINE_SIZE);
 
 	// Compute congestion signal line
-	ret += CACHE_LINE_SIZE;
-
-	// RX queues (wb is not included)
-	q = sizeof(struct lrpc_msg) * PACKET_QUEUE_MCOUNT;
-	q = align_up(q, CACHE_LINE_SIZE);
-	ret += q * maxks;
-
-	// TX packet queues
-	q = sizeof(struct lrpc_msg) * PACKET_QUEUE_MCOUNT;
-	q = align_up(q, CACHE_LINE_SIZE);
-	q += align_up(sizeof(uint32_t), CACHE_LINE_SIZE);
-	ret += q * maxks;
-
-	// TX command queues
-	q = sizeof(struct lrpc_msg) * COMMAND_QUEUE_MCOUNT;
-	q = align_up(q, CACHE_LINE_SIZE);
-	q += align_up(sizeof(uint32_t), CACHE_LINE_SIZE);
-	ret += q * maxks;
+	ret += align_up(sizeof(struct runtime_info), CACHE_LINE_SIZE);
 
 	// Shared queue pointers for the iokernel to use to determine busyness
 	q = align_up(sizeof(struct q_ptrs), CACHE_LINE_SIZE);
 	ret += q * maxks;
 
-	ret = align_up(ret, PGSIZE_2MB);
+	// RX queues (wb is not included)
+	q = sizeof(struct lrpc_msg) * lrpc_q_size();
+	q = align_up(q, CACHE_LINE_SIZE);
+	ret += q * maxks;
 
-	// Egress buffers
-	BUILD_ASSERT(PGSIZE_2MB % MBUF_DEFAULT_LEN == 0);
-	ret += calculate_egress_pool_size();
-	ret = align_up(ret, PGSIZE_2MB);
+	// TX packet queues
+	q = sizeof(struct lrpc_msg) * lrpc_q_size();
+	q = align_up(q, CACHE_LINE_SIZE);
+	q += align_up(sizeof(uint32_t), CACHE_LINE_SIZE);
+	ret += q * maxks;
 
-#ifdef DIRECTPATH
+	// TX command queues
+	q = sizeof(struct lrpc_msg) * lrpc_q_size();
+	q = align_up(q, CACHE_LINE_SIZE);
+	q += align_up(sizeof(uint32_t), CACHE_LINE_SIZE);
+	ret += q * maxks;
+
+	if (!cfg_directpath_external()) {
+		ret = align_up(ret, PGSIZE_2MB);
+
+		// Egress buffers
+		BUILD_ASSERT(PGSIZE_2MB % MBUF_DEFAULT_LEN == 0);
+		ret += calculate_egress_pool_size();
+		ret = align_up(ret, PGSIZE_2MB);
+	}
+
 	// mlx5 directpath
-	if (cfg_directpath_enabled)
+	if (cfg_directpath_enabled() && !cfg_directpath_external()) {
 		ret += PGSIZE_2MB * 4;
-#endif
+		if (is_directpath_strided())
+			ret += PGSIZE_2MB * 28;
+		ret += align_up(directpath_rx_buf_pool_sz(maxks), PGSIZE_2MB);
+	}
 
 #ifdef DIRECT_STORAGE
 	// SPDK completion queue memory
@@ -134,16 +142,15 @@ void *iok_shm_alloc(size_t size, size_t alignment, shmptr_t *shm_out)
 
 	spin_lock(&shmlock);
 	if (!r->base) {
-		r->len = estimate_shm_space();
-		r->base = mem_map_shm(iok.key, NULL, r->len, PGSIZE_2MB, true);
+		r->len = align_up(estimate_shm_space(), shm_page_size());
+		r->base = mem_map_shm(iok.key, NULL, r->len, shm_page_size(), true);
 		if (r->base == MAP_FAILED)
 			panic("failed to map shared memory (requested %lu bytes)", r->len);
+		log_info("shm: using %lu bytes", r->len);
 	}
 
-	if (alignment < CACHE_LINE_SIZE)
-		alignment = CACHE_LINE_SIZE;
-
-	allocated = align_up(allocated, alignment);
+	if (alignment)
+		allocated = align_up(allocated, alignment);
 
 	p = shmptr_to_ptr(r, allocated, size);
 	BUG_ON(!p);
@@ -169,61 +176,86 @@ static void ioqueue_alloc(struct queue_spec *q, size_t msg_count,
 	q->msg_count = msg_count;
 }
 
+int ioqueues_init_early(void)
+{
+	void *shbuf;
+
+	shbuf = mem_map_shm_rdonly(IOKERNEL_INFO_KEY, NULL, IOKERNEL_INFO_SIZE,
+	                           PGSIZE_4KB);
+	if (unlikely(shbuf == MAP_FAILED)) {
+		log_err("control_setup: failed to map iokernel info region");
+		log_err("Please make sure IOKernel is running");
+		return -1;
+	}
+
+	iok.iok_info = (struct iokernel_info *)shbuf;
+	memcpy(&netcfg.mac, &iok.iok_info->host_mac, sizeof(netcfg.mac));
+
+#ifdef DIRECTPATH
+	if (iok.iok_info->external_directpath_enabled) {
+		cfg_directpath_strided = true;
+		cfg_directpath_mode = DIRECTPATH_MODE_EXTERNAL;
+	}
+#endif
+
+	return 0;
+}
+
 /*
  * General initialization for runtime <-> iokernel communication. Must be
  * called before per-thread ioqueues initialization.
  */
 int ioqueues_init(void)
 {
-	bool has_mac = false;
-	int i, ret;
+	int i;
 	struct thread_spec *ts;
 
-	for (i = 0; i < ARRAY_SIZE(netcfg.mac.addr); i++)
-		has_mac |= netcfg.mac.addr[i] != 0;
-
-	if (!has_mac) {
-		ret = generate_random_mac(&netcfg.mac);
-		if (ret < 0)
-			return ret;
-	}
-
-	BUILD_ASSERT(sizeof(netcfg.mac) >= sizeof(mem_key_t));
-	iok.key = *(mem_key_t*)(&netcfg.mac);
-	iok.key = rand_crc32c(iok.key);
+	iok.key = rand_crc32c(netcfg.addr);
 
 	/* map ingress memory */
 	netcfg.rx_region.base =
 	    mem_map_shm_rdonly(INGRESS_MBUF_SHM_KEY, NULL, INGRESS_MBUF_SHM_SIZE,
-			PGSIZE_2MB);
+			PGSIZE_4KB);
 	if (netcfg.rx_region.base == MAP_FAILED) {
 		log_err("control_setup: failed to map ingress region");
 		log_err("Please make sure IOKernel is running");
 		return -1;
 	}
 	netcfg.rx_region.len = INGRESS_MBUF_SHM_SIZE;
-#if 0
-	iok.iok_info = (struct iokernel_info *)netcfg.rx_region.base;
-#endif
 
 	/* set up queues in shared memory */
 	iok.hdr = iok_shm_alloc(sizeof(*iok.hdr), 0, NULL);
 	iok.threads = iok_shm_alloc(sizeof(*ts) * maxks, 0, NULL);
-	runtime_congestion = iok_shm_alloc(sizeof(struct congestion_info),
-					   0, &iok.hdr->congestion_info);
+	runtime_info = iok_shm_alloc(sizeof(struct runtime_info),
+	                             0, &iok.hdr->runtime_info);
 
+	/* first allocate q_ptrs in a contiguous array */
 	for (i = 0; i < maxks; i++) {
 		ts = &iok.threads[i];
-		ioqueue_alloc(&ts->rxq, PACKET_QUEUE_MCOUNT, false);
-		ioqueue_alloc(&ts->txpktq, PACKET_QUEUE_MCOUNT, true);
-		ioqueue_alloc(&ts->txcmdq, COMMAND_QUEUE_MCOUNT, true);
-
 		iok_shm_alloc(sizeof(struct q_ptrs), CACHE_LINE_SIZE, &ts->q_ptrs);
+	}
+
+	/* then allocate lrpc rings */
+	for (i = 0; i < maxks; i++) {
+		ts = &iok.threads[i];
+		ioqueue_alloc(&ts->rxq, lrpc_q_size(), false);
+		ioqueue_alloc(&ts->txpktq, lrpc_q_size(), true);
+		ioqueue_alloc(&ts->txcmdq, lrpc_q_size(), true);
+
 		ts->rxq.wb = ts->q_ptrs;
 	}
 
+	/* don't allocate buffer space, iokernel will provide */
+	if (cfg_directpath_external())
+		return 0;
+
 	iok.tx_len = calculate_egress_pool_size();
 	iok.tx_buf = iok_shm_alloc(iok.tx_len, PGSIZE_2MB, NULL);
+
+	if (cfg_directpath_enabled()) {
+		iok.rx_len = directpath_rx_buf_pool_sz(maxks);
+		iok.rx_buf = iok_shm_alloc(iok.rx_len, PGSIZE_2MB, NULL);
+	}
 
 	return 0;
 }
@@ -233,6 +265,93 @@ static void ioqueues_shm_cleanup(void)
 	mem_unmap_shm(netcfg.tx_region.base);
 	mem_unmap_shm(netcfg.rx_region.base);
 }
+
+#ifdef DIRECTPATH
+static int recv_fd(int fd, int *fd_out)
+{
+	struct msghdr msg;
+	char buf[CMSG_SPACE(sizeof(int))];
+	struct iovec iov[1];
+	char iobuf[1];
+	ssize_t ret;
+	struct cmsghdr *cmptr;
+
+	/* init message header and buffs for control message and iovec */
+	msg.msg_control = buf;
+	msg.msg_controllen = sizeof(buf);
+	msg.msg_name = NULL;
+	msg.msg_namelen = 0;
+
+	iov[0].iov_base = iobuf;
+	iov[0].iov_len = sizeof(iobuf);
+	msg.msg_iov = iov;
+	msg.msg_iovlen = 1;
+
+	ret = recvmsg(fd, &msg, 0);
+	if (ret < 0) {
+		log_debug("control: error with recvmsg %ld", ret);
+		return ret;
+	}
+
+	/* check validity of control message */
+	cmptr = CMSG_FIRSTHDR(&msg);
+	if (cmptr == NULL) {
+		log_debug("control: no cmsg %p", cmptr);
+		return -1;
+	} else if (cmptr->cmsg_len != CMSG_LEN(sizeof(int))) {
+		log_debug("control: cmsg is too long %ld", cmptr->cmsg_len);
+		return -1;
+	} else if (cmptr->cmsg_level != SOL_SOCKET) {
+		log_debug("control: unrecognized cmsg level %d", cmptr->cmsg_level);
+		return -1;
+	} else if (cmptr->cmsg_type != SCM_RIGHTS) {
+		log_debug("control: unrecognized cmsg type %d", cmptr->cmsg_type);
+		return -1;
+	}
+
+	*fd_out = *(int *)CMSG_DATA(cmptr);
+	return 0;
+}
+
+static int setup_external_directpath(int controlfd)
+{
+	int memfd = -1, ret, barfd = -1;
+	size_t specsz;
+	ssize_t rret;
+	struct directpath_spec *spec;
+	struct directpath_queue_spec *qspec;
+
+	specsz = sizeof(*spec) + sizeof(*qspec) * maxks;
+	spec = malloc(specsz);
+	if (unlikely(!spec))
+		return -ENOMEM;
+
+	ret = recv_fd(controlfd, &memfd);
+	if (unlikely(ret < 0)) {
+		log_err("bad recv");
+		goto done;
+	}
+
+	ret = recv_fd(controlfd, &barfd);
+	if (unlikely(ret < 0)) {
+		log_err("bad recv");
+		goto done;
+	}
+
+	rret = read(controlfd, spec, specsz);
+	if (unlikely(rret != specsz)) {
+		log_err("bad read");
+		ret = -1;
+		goto done;
+	}
+
+	ret = mlx5_init_ext_late(spec, barfd, memfd);
+
+done:
+	free(spec);
+	return ret;
+}
+#endif
 
 /*
  * Register this runtime with the IOKernel. All threads must complete their
@@ -253,7 +372,9 @@ int ioqueues_register_iokernel(void)
 	/* TODO: overestimating is okay, but fix this later */
 	hdr->egress_buf_count = div_up(iok.tx_len, net_get_mtu() + MBUF_HEAD_LEN);
 	hdr->thread_count = maxks;
-	hdr->mac = netcfg.mac;
+	hdr->ip_addr = netcfg.addr;
+
+	hdr->request_directpath_queues = cfg_request_hardware_queues;
 
 	hdr->sched_cfg.priority = cfg_prio_is_lc ?
 				  SCHED_PRIO_LC : SCHED_PRIO_BE;
@@ -295,6 +416,16 @@ int ioqueues_register_iokernel(void)
 		goto fail_close_fd;
 	}
 
+#ifdef DIRECTPATH
+	if (cfg_request_hardware_queues) {
+		ret = setup_external_directpath(iok.fd);
+		if (ret) {
+			log_err("dp setup error");
+			goto fail_close_fd;
+		}
+	}
+#endif
+
 	return 0;
 
 fail_close_fd:
@@ -323,7 +454,7 @@ int ioqueues_init_thread(void)
 	BUG_ON(ret);
 
 	myk()->q_ptrs = (struct q_ptrs *) shmptr_to_ptr(r, ts->q_ptrs,
-			sizeof(uint32_t));
+			sizeof(struct q_ptrs));
 	BUG_ON(!myk()->q_ptrs);
 
 	return 0;

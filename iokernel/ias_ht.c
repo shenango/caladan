@@ -91,14 +91,14 @@ static void ias_ht_relax(struct ias_data *sd, unsigned int core)
 	WARN_ON(ias_idle_on_core(sib));
 }
 
-static float ias_ht_poll_one(unsigned int core, uint64_t cur_tsc)
+static float ias_ht_poll_one(unsigned int core)
 {
 	struct ias_ht_data *htd = &ias_ht_percore[core];
 	struct ias_data *sd = cores[core];
 	struct thread *th = sched_get_thread_on_core(core);
 	float budget_used = 0;
 
-	if (sd && sd->ht_punish_us >0 && th != NULL) {
+	if (sd && sd->ht_punish_us > 0 && th != NULL) {
 		budget_used = (float)th->metrics.uthread_elapsed_us /
 			      (float)sd->ht_punish_us;
 	}
@@ -131,14 +131,18 @@ static int cmptarr(const void *p1, const void *p2)
 void ias_ht_poll(void)
 {
 	struct tarr arr[NCPU];
-	unsigned int core, tmp, num = 0;
-	uint64_t now_tsc = rdtsc();
+	unsigned int core, tmp, num = 0, cnt = 0;
 
 	/* loop over cores to update service times */
 	sched_for_each_allowed_core(core, tmp) {
-		arr[num].budget_used = ias_ht_poll_one(core, now_tsc);
+		arr[num].budget_used = ias_ht_poll_one(core);
+		if (arr[num].budget_used)
+			cnt++;
 		arr[num++].core = core;
 	}
+
+	if (!cnt && ias_ht_punish_count == ias_ht_relax_count)
+		return;
 
 	/* sort by longest service time */
 	qsort(arr, num, sizeof(struct tarr), cmptarr);

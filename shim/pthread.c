@@ -93,26 +93,35 @@ static int thread_join(struct join_handle *j, void **retval)
 int pthread_create(pthread_t *thread, const pthread_attr_t *attr,
 		   void *(*start_routine)(void *), void *arg)
 {
-	NOTSELF_4ARG(int, __func__, thread, attr, start_routine, arg);
+	NOTSELF(pthread_create, thread, attr, start_routine, arg);
 	return thread_spawn_joinable((struct join_handle **)thread,
 				     start_routine, arg);
 }
 
 int pthread_detach(pthread_t thread)
 {
-	NOTSELF_1ARG(int, __func__, thread);
+	NOTSELF(pthread_detach, thread);
 	return thread_detach((struct join_handle *)thread);
 }
 
 int pthread_join(pthread_t thread, void **retval)
 {
-	NOTSELF_2ARG(int, __func__, thread, retval);
+	NOTSELF(pthread_join, thread, retval);
 	return thread_join((struct join_handle *)thread, retval);
 }
 
 int pthread_yield(void)
 {
-	NOTSELF_NOARG(int, __func__);
+	NOTSELF(pthread_yield);
 	thread_yield();
 	return 0;
 }
+
+#if 0
+int sched_yield(void)
+{
+	NOTSELF(sched_yield);
+	thread_yield();
+	return 0;
+}
+#endif

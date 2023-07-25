@@ -22,7 +22,7 @@ static int init_thread(void)
 		log_err("base_init_thread() failed, ret = %d", ret);
 		return 1;
 	}
-	BUG_ON(!thread_init_done);
+	BUG_ON(!perthread_read(thread_init_done));
 	BUG_ON(perthread_get(blah) != 0);
 
 	perthread_get(blah) = PERTHREAD_VAL;
@@ -37,7 +37,7 @@ static void *test_thread(void *data)
 
 	ret = init_thread();
 	BUG_ON(ret);
-	log_info("hello thread %d", thread_id);
+	log_info("hello thread %d", this_thread_id());
 
 	return NULL;
 }
@@ -57,7 +57,7 @@ int main(int argc, char *argv[])
 
 	init_thread();
 
-	for (i = 1; i < cpu_count; i++) {	
+	for (i = 1; i < cpu_count; i++) {
 		ret = pthread_create(&tid[i], NULL, test_thread, NULL);
 		BUG_ON(ret);
 	}

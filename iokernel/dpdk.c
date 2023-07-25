@@ -113,6 +113,7 @@ static inline int dpdk_port_init(uint8_t port, struct rte_mempool *mbuf_pool)
 	if (is_mlx5) {
 		nb_rxd = MLX5_RX_RING_SIZE;
 		nb_txd = MLX5_TX_RING_SIZE;
+		port_conf.lpbk_mode = 1;
 	}
 
 	/* Configure the Ethernet device. */
@@ -153,6 +154,7 @@ static inline int dpdk_port_init(uint8_t port, struct rte_mempool *mbuf_pool)
 	/* Display the port MAC address. */
 	struct rte_ether_addr addr;
 	rte_eth_macaddr_get(port, &addr);
+	memcpy(&iok_info->host_mac, &addr, sizeof(iok_info->host_mac));
 	log_info("dpdk: driver: %s port %u MAC: %02" PRIx8 " %02" PRIx8 " %02" PRIx8
 			" %02" PRIx8 " %02" PRIx8 " %02" PRIx8 "",
 			dev_info.driver_name, (unsigned)port,
@@ -207,33 +209,49 @@ void dpdk_print_eth_stats(void)
  */
 int dpdk_init(void)
 {
-	char *argv[4 + (nic_pci_addr_str ? 2 : 1) + dpdk_argc];
-	char buf[10];
+	unsigned int max_args;
+	char buf[10], **argv;
+	int i, ret, argc = 0;
 
-	int i, argc = 0;
+	max_args = 7 + dpdk_argc;
+	argv = malloc(max_args * sizeof(char *));
+	if (!argv)
+		return -ENOMEM;
+
+#define ARGV(strval)              \
+	do {                          \
+		BUG_ON(argc == max_args); \
+		argv[argc++] = (strval);  \
+	} while (0);
 
 	/* init args */
-	argv[argc++] = "./iokerneld";
-	argv[argc++] = "-l";
+	ARGV("./iokerneld");
+	ARGV("-l");
 	/* use our assigned core */
 	sprintf(buf, "%d", sched_dp_core);
-	argv[argc++] = buf;
-	argv[argc++] = "--socket-mem=128";
-	if (nic_pci_addr_str) {
-		argv[argc++] = "--allow";
-		argv[argc++] = nic_pci_addr_str;
+	ARGV(buf);
+	ARGV("--socket-mem=128");
+
+	if (cfg.vfio_directpath) {
+		ARGV("--vdev=net_tap0");
+		ARGV("--allow");
+		ARGV("0000:00:00.0");
+	} else if (nic_pci_addr_str) {
+		ARGV("--allow");
+		ARGV(nic_pci_addr_str);
 	} else {
-		argv[argc++] = "--vdev=net_tap0";
+		ARGV("--vdev=net_tap0");
 	}
 
 	/* include any user-supplied arguments */
 	for (i = 0; i < dpdk_argc; i++)
-		argv[argc++] = dpdk_argv[i];
+		ARGV(dpdk_argv[i]);
 
-	BUG_ON(argc != ARRAY_SIZE(argv));
+#undef ARGV
 
 	/* initialize the Environment Abstraction Layer (EAL) */
-	int ret = rte_eal_init(argc, argv);
+	ret = rte_eal_init(argc, argv);
+	free(argv);
 	if (ret < 0) {
 		log_err("dpdk: error with EAL initialization");
 		return -1;

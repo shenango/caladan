@@ -6,16 +6,17 @@
 
 #include <base/compiler.h>
 #include <base/atomic.h>
+#include <base/thread.h>
 #include <runtime/preempt.h>
 
 #ifdef DEBUG
-extern __thread int rcu_read_count;
+DECLARE_PERTHREAD(int, rcu_read_count);
 #endif /* DEBUG */
 
 static inline bool rcu_read_lock_held(void)
 {
 #ifdef DEBUG
-	return rcu_read_count > 0;
+	return perthread_read(rcu_read_count) > 0;
 #else /* DEBUG */
 	return true;
 #endif /* DEBUG */
@@ -25,7 +26,7 @@ static inline void rcu_read_lock(void)
 {
 	preempt_disable();
 #ifdef DEBUG
-	rcu_read_count++;
+	perthread_incr(rcu_read_count);
 #endif /* DEBUG */
 }
 
@@ -33,7 +34,7 @@ static inline void rcu_read_unlock(void)
 {
 #ifdef DEBUG
 	assert(rcu_read_lock_held());
-	rcu_read_count--;
+	perthread_decr(rcu_read_count);
 #endif /* DEBUG */
 	preempt_enable();
 }

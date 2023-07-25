@@ -44,7 +44,7 @@ static inline uint16_t chksum_internet(const void *buf, int len)
              /* process 2 byte (if left) */
              "3: test $2, %2\n"
              "je 4f\n"
-             "movzxw (%1), %%rdx\n"
+             "movzwq (%1), %%rdx\n"
              "addq %%rdx, %0\n"
              "adcq $0, %0\n"
              "leaq 2(%1), %1\n"
@@ -52,7 +52,7 @@ static inline uint16_t chksum_internet(const void *buf, int len)
              /* process 1 byte (if left) */
              "4: test $1, %2\n"
              "je 5f\n"
-             "movzxb (%1), %%rdx\n"
+             "movzbq (%1), %%rdx\n"
              "addq %%rdx, %0\n"
              "adcq $0, %0\n"
 

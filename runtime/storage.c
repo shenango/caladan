@@ -113,7 +113,7 @@ int storage_write(const void *payload, uint64_t lba, uint32_t lba_count)
 	q = &k->storage_q;
 
 	if (likely(use_thread_cache)) {
-		spdk_payload = tcache_alloc(&perthread_get(storage_buf_pt));
+		spdk_payload = tcache_alloc(perthread_ptr(storage_buf_pt));
 	} else {
 		spdk_payload =
 			spdk_zmalloc(req_size, 0, NULL, SPDK_ENV_SOCKET_ID_ANY,
@@ -145,7 +145,7 @@ int storage_write(const void *payload, uint64_t lba, uint32_t lba_count)
 
 done_np:
 	if (likely(use_thread_cache))
-		tcache_free(&perthread_get(storage_buf_pt), spdk_payload);
+		tcache_free(perthread_ptr(storage_buf_pt), spdk_payload);
 	else
 		spdk_free(spdk_payload);
 
@@ -177,7 +177,7 @@ int storage_read(void *dest, uint64_t lba, uint32_t lba_count)
 	q = &k->storage_q;
 
 	if (likely(use_thread_cache)) {
-		spdk_payload = tcache_alloc(&perthread_get(storage_buf_pt));
+		spdk_payload = tcache_alloc(perthread_ptr(storage_buf_pt));
 	} else {
 		spdk_payload =
 			spdk_zmalloc(req_size, 0, NULL, SPDK_ENV_SOCKET_ID_ANY,
@@ -207,7 +207,7 @@ int storage_read(void *dest, uint64_t lba, uint32_t lba_count)
 
 done_np:
 	if (likely(use_thread_cache))
-		tcache_free(&perthread_get(storage_buf_pt), spdk_payload);
+		tcache_free(perthread_ptr(storage_buf_pt), spdk_payload);
 	else
 		spdk_free(spdk_payload);
 	preempt_enable();
@@ -257,7 +257,6 @@ int storage_init_thread(void)
 	struct storage_q *q = &k->storage_q;
 	thread_t *th;
 
-	int ret;
 	uint32_t max_xfer_size, entries, depth, *consumer_idx;
 	shmptr_t cq_shm;
 	struct spdk_nvme_cpl *cpl;
@@ -296,12 +295,6 @@ int storage_init_thread(void)
 		return -ENOMEM;
 	}
 	opts.cq.vaddr = cpl;
-	ret = mem_lookup_page_phys_addr(cpl, PGSIZE_2MB, &opts.cq.paddr);
-	if (ret) {
-		log_err("storage_init_thread: could not lookup paddr %d", ret);
-		return ret;
-	}
-
 	qp_handle =
 		spdk_nvme_ctrlr_alloc_io_qpair(controller, &opts, sizeof(opts));
 	if (qp_handle == NULL) {
@@ -335,7 +328,7 @@ int storage_init_thread(void)
 	hs->hwq_type = HWQ_SPDK_NVME;
 
 	tcache_init_perthread(storage_buf_tcache,
-			      &perthread_get(storage_buf_pt));
+			      perthread_ptr(storage_buf_pt));
 
 	return 0;
 }
@@ -362,6 +355,12 @@ int storage_init(void)
 
 	if (spdk_env_init(&opts) < 0) {
 		log_err("Unable to initialize SPDK env");
+		return 1;
+	}
+
+	rc = spdk_mem_register(netcfg.tx_region.base, netcfg.tx_region.len);
+	if (rc != 0) {
+		log_err("storage: failed to register SHM area");
 		return 1;
 	}
 

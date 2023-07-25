@@ -29,7 +29,11 @@ static int completion_enqueue(struct rte_mempool *mp, void * const *obj_table,
 		// Give up on notifying the runtime if this returns false.
 		tx_send_completion(obj_table[i]);
 
+#if defined(__clang__)
+#pragma clang loop vectorize(enable)
+#elif defined(__GNUC__) || defined(__GNUG__)
 #pragma GCC ivdep
+#endif
 	for (i = 0; i < n; i++)
 		s->objs[s->len + i] = obj_table[i];
 
@@ -45,7 +49,11 @@ static int completion_dequeue(struct rte_mempool *mp, void  ** obj_table, unsign
 		return -ENOBUFS;
 
 	s->len -= n;
+#if defined(__clang__)
+#pragma clang loop vectorize(enable)
+#elif defined(__GNUC__) || defined(__GNUG__)
 #pragma GCC ivdep
+#endif
 	for (i = 0, j = s->len; i < n; i++, j++)
 		obj_table[i] = s->objs[j];
 

@@ -19,7 +19,7 @@ uint64_t n;
 std::string worker_spec;
 
 void MainHandler(void *arg) {
-  uint64_t cnt[threads] = {};
+  std::vector<uint64_t> cnt(threads);
 
   for (int i = 0; i < threads; ++i) {
     std::thread([i, &cnt]() {

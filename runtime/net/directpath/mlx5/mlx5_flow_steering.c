@@ -10,8 +10,9 @@
 #define PORT_MASK ((1 << PORT_MATCH_BITS) - 1)
 
 static struct mlx5dv_dr_domain		*dmn;
-static unsigned int		nr_rxq;
 static DEFINE_SPINLOCK(direct_rule_lock);
+static DEFINE_BITMAP(tcp_listen_ports, 65536);
+static DEFINE_BITMAP(udp_listen_ports, 65536);
 
 struct tbl {
 	struct mlx5dv_dr_table		*tbl;
@@ -33,16 +34,12 @@ struct port_matcher_tbl {
 	struct mlx5dv_dr_rule		*rules[];
 };
 
-static DEFINE_BITMAP(tcp_listen_ports, 65536);
-static DEFINE_BITMAP(udp_listen_ports, 65536);
 
 /* level 0 flow table (root) */
 static struct mlx5dv_dr_table		*root_tbl;
-static struct mlx5dv_dr_matcher		*match_mac_and_tport;
-static struct mlx5dv_dr_matcher		*match_just_mac;
+static struct mlx5dv_dr_matcher		*match_ip_and_tport;
 static struct mlx5dv_dr_rule		*root_tcp_rule;
 static struct mlx5dv_dr_rule		*root_udp_rule;
-static struct mlx5dv_dr_rule		*root_catchall_rule;
 
 /* level 1 flow tables */
 static struct tbl		tcp_tbl;
@@ -58,9 +55,12 @@ static struct port_matcher_tbl		*udp_dport_tbl;
 static struct port_matcher_tbl		*udp_sport_tbl;
 
 /* last level flow groups */
-static struct tbl		fg_tbl[NCPU];
+struct last_level_fg {
+	struct tbl		tbl;
+	unsigned int	qp_assignment;
+};
+static struct last_level_fg	last_level_fgs[NCPU];
 static struct mlx5dv_dr_action		*fg_fwd_action[NCPU];
-static unsigned int		fg_qp_assignment[NCPU];
 
 static union match empty_match = {
 	.size = sizeof(empty_match.buf)
@@ -112,7 +112,7 @@ static struct port_matcher_tbl *alloc_port_matcher(uint8_t ipproto,
 	t->ipproto = ipproto;
 	t->use_dst = use_dst;
 
-	ret = mlx5_tbl_init(&t->tbl, 2, fg_tbl[0].ingress_action);
+	ret = mlx5_tbl_init(&t->tbl, 2, last_level_fgs[0].tbl.ingress_action);
 	if (ret)
 		return NULL;
 
@@ -143,7 +143,7 @@ static struct port_matcher_tbl *alloc_port_matcher(uint8_t ipproto,
 
 	for (i = 0; i < nrules; i++) {
 		_devx_set(mask.buf, i, t->match_bit_off, t->match_bit_sz);
-		action[0] = fg_tbl[pos++ % nr_rxq].ingress_action;
+		action[0] = last_level_fgs[pos++ % maxks].tbl.ingress_action;
 		t->rules[i] = mlx5dv_dr_rule_create(t->match, &mask.params, 1, action);
 		if (!t->rules[i])
 				return NULL;
@@ -152,22 +152,21 @@ static struct port_matcher_tbl *alloc_port_matcher(uint8_t ipproto,
 	return t;
 }
 
-
 static int mlx5_init_fg_tables(void)
 {
 	int i, ret;
 
-	for (i = 0; i < nr_rxq; i++) {
+	for (i = 0; i < maxks; i++) {
 		/* forward to qp 0 */
-		fg_fwd_action[i] = mlx5dv_dr_action_create_dest_ibv_qp(rxqs[0].qp);
+		fg_fwd_action[i] = mlx5dv_dr_action_create_dest_ibv_qp(rx_qps[0]);
 		if (!fg_fwd_action[i])
 			return -errno;
 
-		ret = mlx5_tbl_init(&fg_tbl[i], 3, fg_fwd_action[i]);
+		ret = mlx5_tbl_init(&last_level_fgs[i].tbl, 3, fg_fwd_action[i]);
 		if (ret)
 			return ret;
 
-		fg_qp_assignment[i] = 0;
+		last_level_fgs[i].qp_assignment = 0;
 	}
 
 	return 0;
@@ -241,37 +240,27 @@ static int mlx5_init_root_table(void)
 		return -errno;
 
 	mask.size = DEVX_ST_SZ_BYTES(fte_match_param);
-
-	DEVX_SET(fte_match_param, mask.buf, outer_headers.dmac_47_16, __devx_mask(32));
-	DEVX_SET(fte_match_param, mask.buf, outer_headers.dmac_15_0, __devx_mask(16));
+	DEVX_SET(fte_match_param, mask.buf, outer_headers.ethertype, __devx_mask(16));
+	DEVX_SET(fte_match_param, mask.buf, outer_headers.dst_ipv4_dst_ipv6.ipv4_layout.ipv4, __devx_mask(32));
+	DEVX_SET(fte_match_param, mask.buf, outer_headers.ip_version, __devx_mask(4));
 	DEVX_SET(fte_match_param, mask.buf, outer_headers.ip_protocol, __devx_mask(8));
-	match_mac_and_tport = mlx5dv_dr_matcher_create(root_tbl, 0, DR_MATCHER_CRITERIA_OUTER, &mask.params);
-	if (!match_mac_and_tport)
+	match_ip_and_tport = mlx5dv_dr_matcher_create(root_tbl, 0, DR_MATCHER_CRITERIA_OUTER, &mask.params);
+	if (!match_ip_and_tport)
 		return -errno;
 
-	DEVX_SET(fte_match_param, mask.buf, outer_headers.ip_protocol, 0);
-	match_just_mac = mlx5dv_dr_matcher_create(root_tbl, 1, DR_MATCHER_CRITERIA_OUTER, &mask.params);
-	if (!match_just_mac)
-		return -errno;
-
-	DEVX_SET(fte_match_param, mask.buf, outer_headers.dmac_47_16, hton32(*(uint32_t *)&netcfg.mac.addr[0]));
-	DEVX_SET(fte_match_param, mask.buf, outer_headers.dmac_15_0, hton16(*(uint16_t *)&netcfg.mac.addr[4]));
+	DEVX_SET(fte_match_param, mask.buf, outer_headers.ethertype, ETHTYPE_IP);
+	DEVX_SET(fte_match_param, mask.buf, outer_headers.ip_version, IPVERSION);
+	DEVX_SET(fte_match_param, mask.buf, outer_headers.dst_ipv4_dst_ipv6.ipv4_layout.ipv4, netcfg.addr);
 	DEVX_SET(fte_match_param, mask.buf, outer_headers.ip_protocol, IPPROTO_TCP);
 	action[0] = tcp_tbl.ingress_action;
-	root_tcp_rule = mlx5dv_dr_rule_create(match_mac_and_tport, &mask.params, 1, action);
+	root_tcp_rule = mlx5dv_dr_rule_create(match_ip_and_tport, &mask.params, 1, action);
 	if (!root_tcp_rule)
 		return -errno;
 
 	DEVX_SET(fte_match_param, mask.buf, outer_headers.ip_protocol, IPPROTO_UDP);
 	action[0] = udp_tbl.ingress_action;
-	root_udp_rule = mlx5dv_dr_rule_create(match_mac_and_tport, &mask.params, 1, action);
+	root_udp_rule = mlx5dv_dr_rule_create(match_ip_and_tport, &mask.params, 1, action);
 	if (!root_udp_rule)
-		return -errno;
-
-	DEVX_SET(fte_match_param, mask.buf, outer_headers.ip_protocol, 0);
-	action[0] = fg_tbl[0].ingress_action;
-	root_catchall_rule = mlx5dv_dr_rule_create(match_just_mac, &mask.params, 1, action);
-	if (!root_catchall_rule)
 		return -errno;
 
 	return 0;
@@ -351,26 +340,26 @@ static int mlx5_deregister_flow(struct trans_entry *e, void *handle)
 static int mlx5_steer_flows(unsigned int *new_fg_assignment)
 {
 	int i, ret = 0;
-	struct tbl *tbl;
 	struct ibv_qp *new_qp, *old_qp;
-
+	struct last_level_fg *fg;
 
 	postsend_lock(dmn);
 
-	for (i = 0; i < nr_rxq; i++) {
-		if (new_fg_assignment[i] == fg_qp_assignment[i])
+	for (i = 0; i < maxks; i++) {
+		fg = &last_level_fgs[i];
+
+		if (new_fg_assignment[i] == fg->qp_assignment)
 			continue;
 
-		tbl = &fg_tbl[i];
-		new_qp = rxqs[new_fg_assignment[i]].qp;
-		old_qp = rxqs[fg_qp_assignment[i]].qp;
+		new_qp = rx_qps[new_fg_assignment[i]];
+		old_qp = rx_qps[fg->qp_assignment];
 
-		ret = switch_qp_action(tbl->default_egress_rule, dmn,
+		ret = switch_qp_action(fg->tbl.default_egress_rule, dmn,
 			    new_qp, old_qp);
 		if (unlikely(ret))
 			break;
 
-		fg_qp_assignment[i] = new_fg_assignment[i];
+		fg->qp_assignment = new_fg_assignment[i];
 	}
 
 	postsend_unlock(dmn);
@@ -390,12 +379,11 @@ static uint32_t mlx5_get_flow_affinity(uint8_t ipproto, uint16_t local_port, str
 		return (local_port & PORT_MASK) % maxks;
 }
 
-static int mlx5_init_flows(int rxq_count)
+static int mlx5_init_flows(void)
 {
 	int ret;
 
 	spin_lock_init(&direct_rule_lock);
-	nr_rxq = rxq_count;
 
 	dmn = mlx5dv_dr_domain_create(context,
 		MLX5DV_DR_DOMAIN_TYPE_NIC_RX);
@@ -431,37 +419,20 @@ static int mlx5_init_flows(int rxq_count)
 
 }
 
-
-static int mlx5_fs_have_work(struct hardware_q *rxq)
-{
-	return hardware_q_pending(rxq);
-}
-
-static struct net_driver_ops mlx5_net_ops_flow_steering = {
-	.rx_batch = mlx5_gather_rx,
-	.tx_single = mlx5_transmit_one,
-	.steer_flows = mlx5_steer_flows,
-	.register_flow = mlx5_register_flow,
-	.deregister_flow = mlx5_deregister_flow,
-	.get_flow_affinity = mlx5_get_flow_affinity,
-	.rxq_has_work = mlx5_fs_have_work,
-};
-
-
-int mlx5_init_flow_steering(struct hardware_q **rxq_out,struct direct_txq **txq_out,
-	             unsigned int nr_rxq, unsigned int nr_txq)
+int mlx5_init_flow_steering(void)
 {
 	int ret;
 
-	ret = mlx5_common_init(rxq_out, txq_out, nr_rxq, nr_txq, false);
-	if (ret)
+	ret = mlx5_init_flows();
+	if (ret) {
+		log_err("Failed to setup mlx5 hardware steering: ret %d", ret);
 		return ret;
+	}
 
-	ret = mlx5_init_flows(nr_rxq);
-	if (ret)
-		return ret;
-
-	net_ops = mlx5_net_ops_flow_steering;
+	net_ops.steer_flows = mlx5_steer_flows;
+	net_ops.register_flow = mlx5_register_flow;
+	net_ops.deregister_flow = mlx5_deregister_flow;
+	net_ops.get_flow_affinity = mlx5_get_flow_affinity;
 
 	return 0;
 }

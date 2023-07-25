@@ -1,7 +1,5 @@
 #pragma once
 
-#include "mlx5.h"
-
 typedef unsigned char u8;
 
 struct mlx5_ifc_ipv4_layout_bits {

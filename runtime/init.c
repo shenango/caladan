@@ -58,6 +58,7 @@ static const struct init_entry global_init_handlers[] = {
 /* per-kthread subsystem initialization */
 static const struct init_entry thread_init_handlers[] = {
 	/* runtime core */
+	THREAD_INITIALIZER(preempt),
 	THREAD_INITIALIZER(kthread),
 	THREAD_INITIALIZER(ioqueues),
 	THREAD_INITIALIZER(stack),
@@ -78,6 +79,7 @@ static const struct init_entry thread_init_handlers[] = {
 
 static const struct init_entry late_init_handlers[] = {
 	/* network stack */
+	LATE_INITIALIZER(net),
 	LATE_INITIALIZER(arp),
 	LATE_INITIALIZER(stat),
 	LATE_INITIALIZER(tcp),
@@ -130,6 +132,7 @@ static void *pthread_entry(void *data)
 	BUG_ON(ret);
 
 	pthread_barrier_wait(&init_barrier);
+	pthread_barrier_wait(&init_barrier);
 	sched_start();
 
 	/* never reached unless things are broken */
@@ -163,6 +166,12 @@ int runtime_init(const char *cfgpath, thread_fn_t main_fn, void *arg)
 {
 	pthread_t tid[NCPU];
 	int ret, i;
+
+	ret = ioqueues_init_early();
+	if (unlikely(ret))
+		return ret;
+
+	cycles_per_us = iok.iok_info->cycles_per_us;
 
 	ret = base_init();
 	if (ret) {
@@ -207,6 +216,8 @@ int runtime_init(const char *cfgpath, thread_fn_t main_fn, void *arg)
 		log_err("couldn't register with iokernel, ret = %d", ret);
 		return ret;
 	}
+
+	pthread_barrier_wait(&init_barrier);
 
 	/* point of no return starts here */
 

@@ -227,12 +227,12 @@ static void slab_item_check(struct slab_node *n, void *item)
 	else
 		assert(PGOFF_4KB(item) % n->size == 0);
 
-	if (unlikely(!thread_init_done))
+	if (unlikely(!perthread_read(thread_init_done)))
 		return;
 
 	/* NUMA node checks */
-	assert(n->numa_node == thread_numa_node);
-	assert(addr_to_numa_node(item) == thread_numa_node);
+	assert(n->numa_node == this_numa_node());
+	assert(addr_to_numa_node(item) == this_numa_node());
 
 	/* page checks */
 	assert(is_page_addr(item));
@@ -391,7 +391,7 @@ void slab_free(struct slab *s, void *item)
 static int slab_tcache_alloc(struct tcache *tc, int nr, void **items)
 {
 	struct slab *s = (struct slab *)tc->data;
-	struct slab_node *n = s->nodes[thread_numa_node];
+	struct slab_node *n = s->nodes[this_numa_node()];
 	int i;
 
 	spin_lock(&n->page_lock);
@@ -415,7 +415,7 @@ fail:
 static void slab_tcache_free(struct tcache *tc, int nr, void **items)
 {
 	struct slab *s = (struct slab *)tc->data;
-	struct slab_node *n = s->nodes[thread_numa_node];
+	struct slab_node *n = s->nodes[this_numa_node()];
 	int i;
 
 	for (i = 0; i < nr; i++)

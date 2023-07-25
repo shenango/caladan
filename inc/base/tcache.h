@@ -11,7 +11,7 @@
 #include <base/thread.h>
 
 #define TCACHE_MAX_MAG_SIZE	64
-#define TCACHE_DEFAULT_MAG_SIZE	8
+#define TCACHE_DEFAULT_MAG_SIZE	32
 
 struct tcache;
 

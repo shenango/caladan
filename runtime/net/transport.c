@@ -150,7 +150,7 @@ struct l4_hdr {
 	uint16_t sport, dport;
 };
 
-static struct trans_entry *trans_lookup(struct mbuf *m)
+static struct trans_entry *trans_lookup(struct mbuf *m, bool reverse)
 {
 	const struct ip_hdr *iphdr;
 	const struct l4_hdr *l4hdr;
@@ -161,8 +161,6 @@ static struct trans_entry *trans_lookup(struct mbuf *m)
 
 	assert(rcu_read_lock_held());
 
-	/* set up the network header pointers */
-	mbuf_mark_transport_offset(m);
 	iphdr = mbuf_network_hdr(m, *iphdr);
 	if (unlikely(iphdr->proto != IPPROTO_UDP &&
 		     iphdr->proto != IPPROTO_TCP))
@@ -176,6 +174,9 @@ static struct trans_entry *trans_lookup(struct mbuf *m)
 	laddr.port = ntoh16(l4hdr->dport);
 	raddr.ip = ntoh32(iphdr->saddr);
 	raddr.port = ntoh16(l4hdr->sport);
+
+	if (unlikely(reverse))
+		swapvars(laddr, raddr);
 
 	/* attempt to find a 5-tuple match */
 	hash = trans_hash_5tuple(iphdr->proto, laddr, raddr);
@@ -214,8 +215,11 @@ void net_rx_trans(struct mbuf *m)
 	const struct ip_hdr *iphdr;
 	struct trans_entry *e;
 
+	/* set up the network header pointers */
+	mbuf_mark_transport_offset(m);
+
 	rcu_read_lock();
-	e = trans_lookup(m);
+	e = trans_lookup(m, false);
 	if (unlikely(!e)) {
 		rcu_read_unlock();
 		iphdr = mbuf_network_hdr(m, *iphdr);
@@ -238,8 +242,8 @@ void trans_error(struct mbuf *m, int err)
 {
 	struct trans_entry *e;
 
-        rcu_read_lock();
-	e = trans_lookup(m);
+	rcu_read_lock();
+	e = trans_lookup(m, true);
 	if (e && e->ops->err)
 		e->ops->err(e, err);
 	rcu_read_unlock();

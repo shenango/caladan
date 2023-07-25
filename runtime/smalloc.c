@@ -66,7 +66,7 @@ void *smalloc(size_t size)
 		return NULL;
 
 	preempt_disable();
-	pt = &perthread_get(smalloc_pts[smalloc_size_to_idx(size)]);
+	pt = perthread_ptr(smalloc_pts[smalloc_size_to_idx(size)]);
 	item = tcache_alloc(pt);
 	preempt_enable();
 
@@ -99,7 +99,7 @@ void sfree(void *item)
 	struct tcache_perthread *pt;
 
 	preempt_disable();
-	pt = &perthread_get(smalloc_pts[smalloc_size_to_idx(n->size)]);
+	pt = perthread_ptr(smalloc_pts[smalloc_size_to_idx(n->size)]);
 	tcache_free(pt, item);
 	preempt_enable();
 }
@@ -138,7 +138,7 @@ int smalloc_init_thread(void)
 
 	for (i = 0; i < SMALLOC_BITS; i++)
 		tcache_init_perthread(smalloc_tcaches[i],
-				      &perthread_get(smalloc_pts[i]));
+				      perthread_ptr(smalloc_pts[i]));
 
 	return 0;
 }

@@ -6,8 +6,10 @@
 
 #include <sys/types.h>
 
+#include <base/atomic.h>
 #include <base/bitmap.h>
 #include <base/limits.h>
+#include <base/pci.h>
 #include <iokernel/shm.h>
 #include <net/ethernet.h>
 
@@ -16,7 +18,7 @@
  * struct control_hdr, please increment the version number!
  */
 
-#define CONTROL_HDR_VERSION 5
+#define CONTROL_HDR_VERSION 10
 
 /* The abstract namespace path for the control socket. */
 #define CONTROL_SOCK_PATH	"\0/control/iokernel.sock"
@@ -29,17 +31,18 @@ struct q_ptrs {
 	uint32_t		directpath_rx_tail;
 	uint64_t		next_timer_tsc;
 	uint32_t		storage_tail;
-	uint32_t		pad;
+	uint32_t		pad1;
 	uint64_t		oldest_tsc;
 	uint64_t		rcu_gen;
 	uint64_t		run_start_tsc;
-	uint64_t		pad2;
+	uint64_t		directpath_strides_consumed;
 
 	/* second cache line contains information written by the scheduler */
 	uint64_t		curr_grant_gen;
 	uint64_t		cede_gen;
 	uint64_t		yield_rcu_gen;
-	uint64_t		pad3[5];
+	uint64_t		park_gen;
+	uint64_t		pad3[4];
 };
 
 BUILD_ASSERT(sizeof(struct q_ptrs) == 2 * CACHE_LINE_SIZE);
@@ -50,11 +53,17 @@ struct congestion_info {
 	uint64_t		delay_us;
 };
 
+struct runtime_info {
+	struct congestion_info congestion;
+	uint64_t directpath_strides_posted;
+	atomic64_t directpath_strides_consumed;
+};
+
 enum {
 	HWQ_INVALID = 0,
 	HWQ_MLX5,
+	HWQ_MLX5_QSTEER,
 	HWQ_SPDK_NVME,
-	HWQ_MLX5_QSTEERING,
 	NR_HWQ,
 };
 
@@ -68,12 +77,6 @@ struct hardware_queue_spec {
 	uint32_t		hwq_type;
 };
 
-struct timer_spec {
-	shmptr_t		next_tsc;
-	unsigned long		timer_resolution;
-};
-
-
 /* describes a runtime kernel thread */
 struct thread_spec {
 	struct queue_spec	rxq;
@@ -85,7 +88,6 @@ struct thread_spec {
 
 	struct hardware_queue_spec	direct_rxq;
 	struct hardware_queue_spec	storage_hwq;
-	struct timer_spec		timer_heap;
 };
 
 enum {
@@ -106,14 +108,21 @@ struct sched_spec {
 
 #define CONTROL_HDR_MAGIC	0x696f6b3a /* "iok:" */
 
+enum {
+	DIRECTPATH_REQUEST_NONE = 0,
+	DIRECTPATH_REQUEST_REGULAR = 1,
+	DIRECTPATH_REQUEST_STRIDED_RMP = 2,
+};
+
 /* the main control header */
 struct control_hdr {
 	unsigned int		version_no;
 	unsigned int		magic;
 	unsigned int		thread_count;
+	unsigned int		request_directpath_queues;
 	unsigned long		egress_buf_count;
-	shmptr_t		congestion_info;
-	struct eth_addr		mac;
+	shmptr_t		runtime_info;
+	uint32_t		ip_addr;
 	struct sched_spec	sched_cfg;
 	shmptr_t		thread_specs;
 };
@@ -121,5 +130,11 @@ struct control_hdr {
 /* information shared from iokernel to all runtimes */
 struct iokernel_info {
 	DEFINE_BITMAP(managed_cores, NCPU);
-	unsigned char rss_key[40];
+	unsigned char		rss_key[40];
+	struct pci_addr		directpath_pci;
+	int			cycles_per_us;
+	struct eth_addr		host_mac;
+	bool			external_directpath_enabled;
 };
+
+BUILD_ASSERT(sizeof(struct iokernel_info) <= IOKERNEL_INFO_SIZE);

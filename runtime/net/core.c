@@ -24,9 +24,31 @@ struct net_driver_ops net_ops;
 unsigned int eth_mtu = ETH_DEFAULT_MTU;
 
 /* TX buffer allocation */
-struct mempool net_tx_buf_mp;
+static struct mempool net_tx_buf_mp;
 static struct tcache *net_tx_buf_tcache;
 static DEFINE_PERTHREAD(struct tcache_perthread, net_tx_buf_pt);
+
+int net_init_mempool_late(void)
+{
+	int i, ret;
+
+	ret = mempool_create(&net_tx_buf_mp, iok.tx_buf, iok.tx_len, PGSIZE_2MB,
+			     align_up(net_get_mtu() + MBUF_HEAD_LEN + MBUF_DEFAULT_HEADROOM,
+				      CACHE_LINE_SIZE * 2));
+	if (unlikely(ret))
+		return ret;
+
+	net_tx_buf_tcache = mempool_create_tcache(&net_tx_buf_mp,
+		"runtime_tx_bufs", TCACHE_DEFAULT_MAG_SIZE);
+	if (unlikely(!net_tx_buf_tcache))
+		return -ENOMEM;
+
+	for (i = 0; i < maxks; i++)
+		tcache_init_perthread(net_tx_buf_tcache,
+			&perthread_get_remote(net_tx_buf_pt, i));
+
+	return 0;
+}
 
 
 /*
@@ -200,6 +222,10 @@ static void net_rx_one(struct mbuf *m)
 		net_rx_trans(m);
 		break;
 
+	case IPPROTO_DIRECTPATH_ARP_ENCAP:
+		net_rx_arp(m);
+		break;
+
 	default:
 		goto drop;
 	}
@@ -207,6 +233,7 @@ static void net_rx_one(struct mbuf *m)
 	return;
 
 drop:
+	log_warn_ratelimited("dropping");
 	mbuf_drop(m);
 }
 
@@ -254,6 +281,11 @@ static void iokernel_softirq_poll(struct kthread *k)
 			mbuf_free((struct mbuf *)payload);
 			break;
 
+		case RX_REFILL_BUFS:
+			BUG_ON(!net_ops.trigger_rx_refill);
+			net_ops.trigger_rx_refill();
+			break;
+
 		default:
 			panic("net: invalid RXQ cmd '%ld'", cmd);
 		}
@@ -287,7 +319,7 @@ static void iokernel_softirq(void *arg)
 void net_tx_release_mbuf(struct mbuf *m)
 {
 	preempt_disable();
-	tcache_free(&perthread_get(net_tx_buf_pt), m);
+	tcache_free(perthread_ptr(net_tx_buf_pt), m);
 	preempt_enable();
 }
 
@@ -302,7 +334,7 @@ struct mbuf *net_tx_alloc_mbuf(void)
 	unsigned char *buf;
 
 	preempt_disable();
-	m = tcache_alloc(&perthread_get(net_tx_buf_pt));
+	m = tcache_alloc(perthread_ptr(net_tx_buf_pt));
 	if (unlikely(!m)) {
 		preempt_enable();
 		log_warn_ratelimited("net: out of tx buffers");
@@ -320,7 +352,7 @@ struct mbuf *net_tx_alloc_mbuf(void)
 }
 
 /* drains overflow queues */
-static void __noinline net_tx_drain_overflow(void)
+int __noinline net_tx_drain_overflow(void)
 {
 	struct mbuf *m;
 	struct kthread *k = myk();
@@ -329,13 +361,18 @@ static void __noinline net_tx_drain_overflow(void)
 
 	/* drain TX packets */
 	while (!mbufq_empty(&k->txpktq_overflow)) {
+
+		if (unlikely(preempt_cede_needed(k)))
+			return 1;
+
 		m = mbufq_peak_head(&k->txpktq_overflow);
 		if (net_ops.tx_single(m))
-			break;
+			return 1;
 		mbufq_pop_head(&k->txpktq_overflow);
-		if (unlikely(preempt_cede_needed(k)))
-			return;
 	}
+
+	return 0;
+
 }
 
 static int net_tx_iokernel(struct mbuf *m)
@@ -366,12 +403,20 @@ static void net_tx_raw(struct mbuf *m)
 	unsigned int len = mbuf_length(m);
 
 	k = getk();
-	/* drain pending overflow packets first */
-	if (unlikely(!mbufq_empty(&k->txpktq_overflow)))
-		net_tx_drain_overflow();
 
 	STAT(TX_PACKETS)++;
 	STAT(TX_BYTES) += len;
+
+	/* drain pending overflow packets first */
+	if (unlikely(!mbufq_empty(&k->txpktq_overflow))) {
+		if (net_tx_drain_overflow()) {
+			mbufq_push_tail(&k->txpktq_overflow, m);
+			STAT(TXQ_OVERFLOW)++;
+			putk();
+			return;
+		}
+	}
+
 
 	if (unlikely(net_ops.tx_single(m))) {
 		mbufq_push_tail(&k->txpktq_overflow, m);
@@ -493,6 +538,7 @@ int net_tx_ip(struct mbuf *m, uint8_t proto, uint32_t daddr)
 
 	/* prepend the IP header */
 	net_push_iphdr(m, proto, daddr);
+	mbuf_mark_network_offset(m);
 
 	/* route loopbacks */
 	if (daddr == netcfg.addr)
@@ -619,7 +665,6 @@ int net_init_thread(void)
 		return -ENOMEM;
 
 	k->iokernel_softirq = th;
-	tcache_init_perthread(net_tx_buf_tcache, &perthread_get(net_tx_buf_pt));
 	return 0;
 }
 
@@ -637,11 +682,6 @@ static void net_dump_config(void)
 	log_info("  mtu:\t\t%d", net_get_mtu());
 }
 
-static int steer_flows_iokernel(unsigned int *new_fg_assignment)
-{
-	return 0;
-}
-
 static int
 register_flow_iokernel(unsigned int affininty, struct trans_entry *e,
 		       void **handle_out)
@@ -656,11 +696,20 @@ static int deregister_flow_iokernel(struct trans_entry *e, void *handle)
 
 static struct net_driver_ops iokernel_ops = {
 	.tx_single = net_tx_iokernel,
-	.steer_flows = steer_flows_iokernel,
+	.steer_flows = NULL,
 	.register_flow =  register_flow_iokernel,
 	.deregister_flow = deregister_flow_iokernel,
 	.get_flow_affinity = compute_flow_affinity,
 };
+
+int net_init_late(void)
+{
+	/* iokernel may provide buffers later */
+	if (cfg_directpath_external())
+		return 0;
+
+	return net_init_mempool_late();
+}
 
 /**
  * net_init - initializes the network stack
@@ -669,28 +718,11 @@ static struct net_driver_ops iokernel_ops = {
  */
 int net_init(void)
 {
-	int ret;
-
-	ret = mempool_create(&net_tx_buf_mp, iok.tx_buf, iok.tx_len, PGSIZE_2MB,
-			     align_up(net_get_mtu() + MBUF_HEAD_LEN + MBUF_DEFAULT_HEADROOM,
-				      CACHE_LINE_SIZE * 2));
-	if (ret)
-		return ret;
-
-	net_tx_buf_tcache = mempool_create_tcache(&net_tx_buf_mp,
-		"runtime_tx_bufs", TCACHE_DEFAULT_MAG_SIZE);
-	if (!net_tx_buf_tcache)
-		return -ENOMEM;
-
 	log_info("net: started network stack");
 	net_dump_config();
 
-#ifdef DIRECTPATH
-	if (!cfg_directpath_enabled)
+	if (!cfg_directpath_enabled())
 		net_ops = iokernel_ops;
-#else
-	net_ops = iokernel_ops;
-#endif
 
 	return 0;
 }

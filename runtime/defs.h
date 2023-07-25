@@ -125,8 +125,8 @@ extern void __jmp_runtime_nosave(runtime_fn_t fn, void *stack) __noreturn;
 #define GUARD_PTR_SIZE	(RUNTIME_GUARD_SIZE / sizeof(uintptr_t))
 
 struct stack {
-	uintptr_t	usable[STACK_PTR_SIZE];
 	uintptr_t	guard[GUARD_PTR_SIZE]; /* unreadable and unwritable */
+	uintptr_t       usable[STACK_PTR_SIZE];
 };
 
 DECLARE_PERTHREAD(struct tcache_perthread, stack_pt);
@@ -140,7 +140,10 @@ DECLARE_PERTHREAD(struct tcache_perthread, stack_pt);
  */
 static inline struct stack *stack_alloc(void)
 {
-	return tcache_alloc(&perthread_get(stack_pt));
+	void *s = tcache_alloc(perthread_ptr(stack_pt));
+	if (unlikely(!s))
+		return NULL;
+	return container_of(s, struct stack, usable);
 }
 
 /**
@@ -149,7 +152,7 @@ static inline struct stack *stack_alloc(void)
  */
 static inline void stack_free(struct stack *s)
 {
-	tcache_free(&perthread_get(stack_pt), (void *)s);
+	tcache_free(perthread_ptr(stack_pt), (void *)s->usable);
 }
 
 #define RSP_ALIGNMENT	16
@@ -224,11 +227,14 @@ struct iokernel_control {
 	const struct iokernel_info *iok_info;
 	void *tx_buf;
 	size_t tx_len;
+
+	void *rx_buf;
+	size_t rx_len;
 };
 
 extern struct iokernel_control iok;
 extern void *iok_shm_alloc(size_t size, size_t alignment, shmptr_t *shm_out);
-
+extern struct runtime_info *runtime_info;
 
 /*
  * Direct hardware queue support
@@ -269,6 +275,11 @@ static inline bool hardware_q_pending(struct hardware_q *q)
 extern bool cfg_storage_enabled;
 extern unsigned long storage_device_latency_us;
 
+static inline bool storage_enabled(void)
+{
+	return cfg_storage_enabled;
+}
+
 struct storage_q {
 
 	spinlock_t lock;
@@ -281,28 +292,9 @@ struct storage_q {
 	unsigned long pad[1];
 };
 
-static inline bool storage_available_completions(struct storage_q *q)
-{
-	return cfg_storage_enabled && hardware_q_pending(&q->hq);
-}
-
-static inline bool storage_pending_completions(struct storage_q *q)
-{
-	return cfg_storage_enabled && q->outstanding_reqs > 0 &&
-	       storage_device_latency_us <= 10;
-}
-
 #else
 
-struct storage_q {};
-
-static inline bool storage_available_completions(struct storage_q *q)
-{
-	return false;
-}
-
-static inline bool storage_pending_completions(struct storage_q *q)
-{
+static inline bool storage_enabled(void) {
 	return false;
 }
 
@@ -401,25 +393,20 @@ struct kthread {
 	unsigned int		timern;
 	struct timer_idx	*timers;
 	thread_t		*iokernel_softirq;
-	thread_t		*directpath_softirq;
 	thread_t		*timer_softirq;
 	thread_t		*storage_softirq;
 	bool			iokernel_busy;
-	bool			directpath_busy;
 	bool			timer_busy;
 	bool			storage_busy;
-	unsigned int		pad2;
+	bool			pad2[5 + 8];
 	uint64_t		last_softirq_tsc;
 
+#ifdef DIRECT_STORAGE
 	/* 9th cache-line, storage nvme queues */
 	struct storage_q	storage_q;
+#endif
 
-	/* 10th cache-line, direct path queues */
-	struct hardware_q	*directpath_rxq;
-	struct direct_txq	*directpath_txq;
-	unsigned long		pad3[6];
-
-	/* 11th cache-line, statistics counters */
+	/* 10th cache-line, statistics counters */
 	uint64_t		stats[STAT_NR];
 };
 
@@ -429,18 +416,19 @@ BUILD_ASSERT(offsetof(struct kthread, q_ptrs) % CACHE_LINE_SIZE == 0);
 BUILD_ASSERT(offsetof(struct kthread, txpktq) % CACHE_LINE_SIZE == 0);
 BUILD_ASSERT(offsetof(struct kthread, rq) % CACHE_LINE_SIZE == 0);
 BUILD_ASSERT(offsetof(struct kthread, timer_lock) % CACHE_LINE_SIZE == 0);
+#ifdef DIRECT_STORAGE
 BUILD_ASSERT(offsetof(struct kthread, storage_q) % CACHE_LINE_SIZE == 0);
-BUILD_ASSERT(offsetof(struct kthread, directpath_rxq) % CACHE_LINE_SIZE == 0);
+#endif
 BUILD_ASSERT(offsetof(struct kthread, stats) % CACHE_LINE_SIZE == 0);
 
-extern __thread struct kthread *mykthread;
+DECLARE_PERTHREAD(struct kthread *, mykthread);
 
 /**
  * myk - returns the per-kernel-thread data
  */
 static inline struct kthread *myk(void)
 {
-	return mykthread;
+	return perthread_read(mykthread);
 }
 
 /**
@@ -452,7 +440,7 @@ static inline struct kthread *myk(void)
 static inline struct kthread *getk(void)
 {
 	preempt_disable();
-	return mykthread;
+	return perthread_read(mykthread);
 }
 
 /**
@@ -466,7 +454,7 @@ static inline void putk(void)
 /* preempt_cede_needed - check if kthread should cede */
 static inline bool preempt_cede_needed(struct kthread *k)
 {
-	return ACCESS_ONCE(k->q_ptrs->curr_grant_gen) ==
+	return k->q_ptrs->curr_grant_gen ==
 	       ACCESS_ONCE(k->q_ptrs->cede_gen);
 }
 
@@ -476,6 +464,40 @@ static inline bool preempt_yield_needed(struct kthread *k)
         return ACCESS_ONCE(k->q_ptrs->yield_rcu_gen) == k->rcu_gen;
 }
 
+/* preempt_park_needed - check if kthread should park itself */
+static inline bool preempt_park_needed(struct kthread *k)
+{
+	return k->q_ptrs->curr_grant_gen ==
+	       ACCESS_ONCE(k->q_ptrs->park_gen);
+}
+
+#ifdef DIRECT_STORAGE
+static inline bool storage_available_completions(struct kthread *k)
+{
+	return cfg_storage_enabled && hardware_q_pending(&k->storage_q.hq);
+}
+
+static inline bool storage_pending_completions(struct kthread *k)
+{
+	return cfg_storage_enabled && k->storage_q.outstanding_reqs > 0 &&
+	       storage_device_latency_us <= 10;
+}
+
+#else
+
+static inline bool storage_available_completions(struct kthread *k)
+{
+	return false;
+}
+
+static inline bool storage_pending_completions(struct kthread *k)
+{
+	return false;
+}
+
+#endif
+
+
 
 DECLARE_SPINLOCK(klock);
 extern unsigned int spinks;
@@ -483,11 +505,13 @@ extern unsigned int maxks;
 extern unsigned int guaranteedks;
 extern struct kthread *ks[NCPU];
 extern bool cfg_prio_is_lc;
+extern unsigned int cfg_request_hardware_queues;
 extern uint64_t cfg_ht_punish_us;
 extern uint64_t cfg_qdelay_us;
 extern uint64_t cfg_quantum_us;
 
-extern void kthread_park(bool voluntary);
+extern void kthread_park(void);
+extern void kthread_park_now(void);
 extern void kthread_wait_to_attach(void);
 
 struct cpu_record {
@@ -508,7 +532,8 @@ extern int preferred_socket;
  *
  * Deliberately could race with preemption.
  */
-#define STAT(counter) (myk()->stats[STAT_ ## counter])
+#define STAT(counter)  \
+	((perthread_read_stable(mykthread))->stats[STAT_ ## counter])
 
 
 /*
@@ -539,46 +564,98 @@ BUILD_ASSERT(sizeof(struct net_cfg) == CACHE_LINE_SIZE);
 
 extern struct net_cfg netcfg;
 
-#define MAX_ARP_STATIC_ENTRIES 1024
 struct cfg_arp_static_entry {
 	uint32_t ip;
 	struct eth_addr addr;
 };
-extern int arp_static_count;
-extern struct cfg_arp_static_entry static_entries[MAX_ARP_STATIC_ENTRIES];
+extern size_t arp_static_count;
+extern struct cfg_arp_static_entry *static_entries;
 
 extern void net_rx_softirq(struct rx_net_hdr **hdrs, unsigned int nr);
 extern void net_rx_softirq_direct(struct mbuf **ms, unsigned int nr);
 
+extern int __noinline net_tx_drain_overflow(void);
+
 struct trans_entry;
 struct net_driver_ops {
-	int (*rx_batch)(struct hardware_q *rxq, struct mbuf **ms, unsigned int budget);
+	bool (*rx_poll)(unsigned int q_index);
+	bool (*rx_poll_locked)(unsigned int q_index);
 	int (*tx_single)(struct mbuf *m);
 	int (*steer_flows)(unsigned int *new_fg_assignment);
 	int (*register_flow)(unsigned int affininty, struct trans_entry *e, void **handle_out);
 	int (*deregister_flow)(struct trans_entry *e, void *handle);
 	uint32_t (*get_flow_affinity)(uint8_t ipproto, uint16_t local_port, struct netaddr remote);
-	int (*rxq_has_work)(struct hardware_q *rxq);
+	void (*trigger_rx_refill)(void);
 };
 
 extern struct net_driver_ops net_ops;
 
 #ifdef DIRECTPATH
 
-extern bool cfg_directpath_enabled;
-extern char directpath_arg[128];
-struct direct_txq {};
+extern int directpath_parse_arg(const char *name, const char *val);
+extern int cfg_directpath_mode;
+extern bool cfg_directpath_strided;
 
-static inline bool rx_pending(struct hardware_q *rxq)
+enum {
+	DIRECTPATH_MODE_DISABLED = 0,
+	DIRECTPATH_MODE_ALLOW_ANY,
+	DIRECTPATH_MODE_FLOW_STEERING,
+	DIRECTPATH_MODE_QUEUE_STEERING,
+	DIRECTPATH_MODE_EXTERNAL,
+};
+
+static inline bool is_directpath_strided(void)
 {
-	return cfg_directpath_enabled && net_ops.rxq_has_work(rxq);
+	return cfg_directpath_strided;
+}
+
+static inline bool cfg_directpath_enabled(void)
+{
+	return cfg_directpath_mode != DIRECTPATH_MODE_DISABLED;
+}
+
+static inline bool cfg_directpath_external(void)
+{
+	return cfg_directpath_mode == DIRECTPATH_MODE_EXTERNAL;
+}
+
+static inline bool rx_poll(struct kthread *k)
+{
+	// Note: the caller must not hold the kthread-local lock
+	return net_ops.rx_poll && net_ops.rx_poll(k->kthread_idx);
+}
+
+static inline bool rx_poll_locked(struct kthread *k)
+{
+	assert(spin_lock_held(&myk()->lock));
+	return net_ops.rx_poll_locked && net_ops.rx_poll_locked(k->kthread_idx);
 }
 
 extern size_t directpath_rx_buf_pool_sz(unsigned int nrqs);
 
 #else
 
-static inline bool rx_pending(struct hardware_q *rxq)
+static inline bool is_directpath_strided(void)
+{
+	return false;
+}
+
+static inline bool cfg_directpath_enabled(void)
+{
+	return false;
+}
+
+static inline bool cfg_directpath_external(void)
+{
+	return false;
+}
+
+static inline bool rx_poll(struct kthread *k)
+{
+	return false;
+}
+
+static inline bool rx_poll_locked(struct kthread *k)
 {
 	return false;
 }
@@ -637,6 +714,7 @@ extern int net_init_thread(void);
 extern int smalloc_init_thread(void);
 extern int storage_init_thread(void);
 extern int directpath_init_thread(void);
+extern int preempt_init_thread(void);
 
 /* global initialization */
 extern int kthread_init(void);
@@ -662,6 +740,13 @@ extern int stat_init_late(void);
 extern int tcp_init_late(void);
 extern int rcu_init_late(void);
 extern int directpath_init_late(void);
+extern int net_init_late(void);
+
+extern int ioqueues_init_early(void);
+extern int net_init_mempool_late(void);
+
+struct directpath_spec;
+extern int mlx5_init_ext_late(struct directpath_spec *spec, int bar_fd, int mem_fd);
 
 /* configuration loading */
 extern int cfg_load(const char *path);

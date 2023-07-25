@@ -20,10 +20,6 @@ LIST_HEAD(all_procs);
 static DEFINE_BITMAP(ias_idle_cores, NCPU);
 /* a bitmap of all cores that tasks have reserved */
 static DEFINE_BITMAP(ias_reserved_cores, NCPU);
-/* used for calculating a unique index number */
-static struct ias_data *ias_procs[IAS_NPROC];
-/* used for calculating a unique index number */
-static unsigned int ias_procs_nr;
 /* the current process running on each core */
 struct ias_data *cores[NCPU];
 /* the generation number (to detect context switches on a core) */
@@ -34,6 +30,53 @@ uint64_t now_us;
 #ifdef IAS_DEBUG
 static int owners[NCPU];
 #endif
+
+/* list of starved lcs (congested with no active cores) */
+static LIST_HEAD(starved_procs);
+/* procs that are congested */
+static LIST_HEAD(congested_procs);
+
+static void ias_mark_starved(struct ias_data *sd)
+{
+	if (sd->is_starved)
+		return;
+
+	sd->is_starved = true;
+	list_add_tail(&starved_procs, &sd->starved_link);
+}
+
+static void ias_unmark_starved(struct ias_data *sd)
+{
+	if (!sd->is_starved)
+		return;
+
+	sd->is_starved = false;
+	list_del_from(&starved_procs, &sd->starved_link);
+}
+
+static void ias_mark_congested(struct ias_data *sd)
+{
+	if (sd->is_lc && !sd->threads_active)
+		ias_mark_starved(sd);
+
+	if (sd->is_congested)
+		return;
+
+	sd->is_congested = true;
+	list_add(&congested_procs, &sd->congested_link);
+}
+
+static void ias_unmark_congested(struct ias_data *sd)
+{
+	ias_unmark_starved(sd);
+
+	if (!sd->is_congested)
+		return;
+
+	sd->is_congested = false;
+	list_del_from(&congested_procs, &sd->congested_link);
+}
+
 
 static void ias_cleanup_core(unsigned int core)
 {
@@ -52,8 +95,6 @@ static int ias_attach(struct proc *p, struct sched_spec *sched_cfg)
 	int i, core, sib;
 
 	/* validate parameters */
-	if (ias_procs_nr >= IAS_NPROC)
-		return -ENOENT;
 	if (!cfg.noht && sched_cfg->guaranteed_cores % 2 != 0) {
 		log_err("ias: tried to attach proc with odd number of guaranteed cores");
 		return -EINVAL;
@@ -103,16 +144,6 @@ static int ias_attach(struct proc *p, struct sched_spec *sched_cfg)
 #endif
 	}
 
-	/* reserve a unique index */
-	for (i = 0; i < ias_procs_nr; i++) {
-		if (ias_procs[i] == NULL) {
-			sd->idx = i;
-			ias_procs[i] = sd;
-			return 0;
-		}
-	}
-	sd->idx = ias_procs_nr;
-	ias_procs[ias_procs_nr++] = sd;
 	return 0;
 
 fail_reserve:
@@ -129,10 +160,6 @@ static void ias_detach(struct proc *p)
 	struct ias_data *sd = (struct ias_data *)p->policy_data;
 	int i;
 
-	ias_procs[sd->idx] = NULL;
-	if (sd->idx == ias_procs_nr)
-		ias_procs_nr--;
-
 	list_del_from(&all_procs, &sd->all_link);
 	bitmap_xor(ias_reserved_cores, ias_reserved_cores,
 		   sd->reserved_cores, NCPU);
@@ -141,6 +168,8 @@ static void ias_detach(struct proc *p)
 		if (cores[i] == sd)
 			cores[i] = NULL;
 	}
+
+	ias_unmark_congested(sd);
 
 	free(sd);
 }
@@ -168,6 +197,7 @@ static int ias_run_kthread_on_core(struct ias_data *sd, unsigned int core)
 	ias_gen[core]++;
 	bitmap_clear(ias_idle_cores, core);
 	sd->threads_active++;
+	ias_unmark_starved(sd);
 	return 0;
 }
 
@@ -371,34 +401,52 @@ done:
 
 static int ias_notify_core_needed(struct proc *p)
 {
+	int ret;
 	struct ias_data *sd = (struct ias_data *)p->policy_data;
-	return ias_add_kthread(sd);
+
+	if (list_empty(&starved_procs)) {
+		ret = ias_add_kthread(sd);
+		if (!ret)
+			return 0;
+	}
+
+	ias_mark_congested(sd);
+	return 0;
 }
 
-static void ias_notify_congested(struct proc *p, bool busy, uint64_t delay,
-				 bool parked_thread_delay)
+static bool ias_notify_congested(struct proc *p, struct delay_info *delay)
 {
 	struct ias_data *sd = (struct ias_data *)p->policy_data;
 	int ret;
 	bool congested;
 
 	/* detect congestion */
-	congested = sd->qdelay_us == 0 ? busy : delay >= sd->qdelay_us;
-	congested |= parked_thread_delay;
+	congested = sd->qdelay_us == 0 ?
+		        delay->standing_queue : delay->max_delay_us >= sd->qdelay_us;
+	congested |= delay->parked_thread_busy;
+
+	if (sd->is_lc && delay->parked_thread_busy)
+		STAT_INC(PARKED_THREAD_BUSY_WAKE, 1);
 
 	/* stop if there is no congestion */
 	if (!congested) {
-		sd->is_congested = false;
-		return;
+		ias_unmark_congested(sd);
+		return false;
 	}
 
-	/* try to add an additional core right away */
-	ret = ias_add_kthread(sd);
-	if (!ret)
-		return;
+	if (sd->is_congested)
+		return sd->is_starved;
+
+	if (list_empty(&starved_procs)) {
+		/* try to add an additional core right away */
+		ret = ias_add_kthread(sd);
+		if (!ret)
+			return false;
+	}
 
 	/* otherwise mark the process as congested, cores can be added later */
-	sd->is_congested = true;
+	ias_mark_congested(sd);
+	return sd->is_starved;
 }
 
 static int ias_kthread_score(struct ias_data *sd, int core)
@@ -419,10 +467,14 @@ static struct ias_data *ias_choose_kthread(unsigned int core)
 	struct ias_data *sd, *best_sd = NULL;
 	int score, best_score = -1;
 
-	ias_for_each_proc(sd) {
-		/* only congested processes need more cores */
-		if (!sd->is_congested)
-			continue;
+	/* feed starving LCs first */
+	sd = list_top(&starved_procs, struct ias_data, starved_link);
+	if (sd) {
+		assert(sd->threads_active == 0);
+		return sd;
+	}
+
+	list_for_each(&congested_procs, sd, congested_link) {
 		/* check if we're constrained by the thread limit */
 		if (sd->threads_active >= sd->threads_limit)
 			continue;
@@ -512,6 +564,7 @@ static void ias_sched_poll(uint64_t now, int idle_cnt, bitmap_ptr_t idle)
 #ifdef IAS_DEBUG
 	static uint64_t debug_ts = 0;
 #endif
+	struct ias_data *sd;
 	unsigned int core;
 
 	now_us = now;
@@ -525,7 +578,7 @@ static void ias_sched_poll(uint64_t now, int idle_cnt, bitmap_ptr_t idle)
 		if (bitmap_test(ias_ht_punished_cores, core))
 			continue;
 		if (cores[core] != NULL)
-			cores[core]->is_congested = false;
+			ias_unmark_congested(cores[core]);
 		ias_cleanup_core(core);
 		ias_add_kthread_on_core(core);
 	}
@@ -538,6 +591,12 @@ static void ias_sched_poll(uint64_t now, int idle_cnt, bitmap_ptr_t idle)
 		if (!cfg.noht)
 			ias_ht_poll();
 		ias_ts_poll();
+
+		/* try to add a core to a starved proc */
+		if (!list_empty(&starved_procs)) {
+			sd = list_top(&starved_procs, struct ias_data, starved_link);
+			ias_add_kthread(sd);
+		}
 	}
 
 #ifdef IAS_DEBUG

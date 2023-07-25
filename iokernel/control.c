@@ -9,7 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/eventfd.h>
-#include <sys/select.h>
+#include <sys/epoll.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -24,24 +24,52 @@
 #include <base/log.h>
 #include <base/thread.h>
 #include <iokernel/control.h>
+#include <iokernel/directpath.h>
 
 #include "hw_timestamp.h"
 #include "defs.h"
 #include "sched.h"
 
+#define EPOLL_CONTROLFD_COOKIE 0
+#define EPOLL_EFD_COOKIE 1
+#define CTL_SOCK_BACKLOG 4096
+
 static int controlfd;
-static int clientfds[IOKERNEL_MAX_PROC];
-static struct proc *clients[IOKERNEL_MAX_PROC];
-static int nr_clients;
+static int epoll_fd;
+static unsigned int nr_clients;
 struct lrpc_params lrpc_control_to_data_params;
 struct lrpc_params lrpc_data_to_control_params;
 int data_to_control_efd;
 static struct lrpc_chan_out lrpc_control_to_data;
 static struct lrpc_chan_in lrpc_data_to_control;
 
-#if 0
 struct iokernel_info *iok_info;
-#endif
+
+static int epoll_ctl_add(int fd, void *arg)
+{
+	struct epoll_event ev;
+
+	ev.events = EPOLLIN | EPOLLERR;
+	ev.data.fd = fd;
+	ev.data.ptr = arg;
+	if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fd, &ev) < 0) {
+		perror("epoll_ctl: EPOLL_CTL_ADD");
+		return -errno;
+	}
+
+	return 0;
+}
+
+
+static int epoll_ctl_del(int fd)
+{
+	if (epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, NULL) < 0) {
+		perror("epoll_ctl: EPOLL_CTL_DEL");
+		return -errno;
+	}
+
+	return 0;
+}
 
 static void *copy_shm_data(struct shm_region *r, shmptr_t ptr, size_t len)
 {
@@ -58,6 +86,81 @@ static void *copy_shm_data(struct shm_region *r, shmptr_t ptr, size_t len)
 	memcpy(out, in, len);
 
 	return out;
+}
+
+static int send_fd(int controlfd, int shared_fd)
+{
+	struct msghdr msg;
+	char buf[CMSG_SPACE(sizeof(int))];
+	struct iovec iov[1];
+	char iobuf[1];
+	struct cmsghdr *cmptr;
+
+	/* init message header, iovec is necessary even though it's unused */
+	msg.msg_name = NULL;
+	msg.msg_namelen = 0;
+	msg.msg_control = buf;
+	msg.msg_controllen = sizeof(buf);
+	iov[0].iov_base = iobuf;
+	iov[0].iov_len = sizeof(iobuf);
+	msg.msg_iov = iov;
+	msg.msg_iovlen = 1;
+
+	/* init control message */
+	cmptr = CMSG_FIRSTHDR(&msg);
+	cmptr->cmsg_len = CMSG_LEN(sizeof(int));
+	cmptr->cmsg_level = SOL_SOCKET;
+	cmptr->cmsg_type = SCM_RIGHTS;
+	*(int *)CMSG_DATA(cmptr) = shared_fd;
+
+	if (sendmsg(controlfd, &msg, 0) != sizeof(iobuf)) {
+		log_err("failed to send cmsg");
+		return -1;
+	}
+
+	return 0;
+}
+
+static int control_setup_directpath(struct proc *p, int controlfd)
+{
+	int memfd, barfd, ret;
+	size_t specsz;
+	ssize_t wret;
+	struct directpath_queue_spec *qspec;
+	struct directpath_spec *spec;
+
+	specsz = sizeof(*spec) + sizeof(*qspec) * p->thread_count;
+	spec = malloc(specsz);
+	if (!spec)
+		return -ENOMEM;
+
+	ret = alloc_directpath_ctx(p, p->vfio_directpath_rmp, spec, &memfd, &barfd);
+	if (ret) {
+		log_err("control: failed to allocate context");
+		goto err;
+	}
+
+	ret = send_fd(controlfd, memfd);
+	if (ret)
+		goto err;
+
+	ret = send_fd(controlfd, barfd);
+	if (ret)
+		goto err;
+
+	wret = write(controlfd, spec, specsz);
+	if (wret != specsz) {
+		ret = -1;
+		goto err;
+	}
+
+	free(spec);
+	return 0;
+
+err:
+	release_directpath_ctx(p);
+	free(spec);
+	return ret;
 }
 
 static int control_init_hwq(struct shm_region *r,
@@ -77,7 +180,6 @@ static int control_init_hwq(struct shm_region *r,
 	h->parity_bit_mask = hs->parity_bit_mask;
 	h->hwq_type = hs->hwq_type;
 	h->enabled = true;
-	h->queue_steering = h->hwq_type == HWQ_MLX5_QSTEERING;
 
 	if (!h->descriptor_table || !h->consumer_idx)
 		return -EINVAL;
@@ -104,7 +206,7 @@ static struct proc *control_create_proc(mem_key_t key, size_t len,
 	struct proc *p = NULL;
 	struct thread_spec *threads = NULL;
 	unsigned long *overflow_queue = NULL;
-	void *shbuf;
+	void *shbuf = NULL;
 	int i, ret;
 
 	/* attach the shared memory region */
@@ -145,14 +247,19 @@ static struct proc *control_create_proc(mem_key_t key, size_t len,
 	p->removed = false;
 	p->sched_cfg = hdr.sched_cfg;
 	p->thread_count = hdr.thread_count;
-	if (eth_addr_is_multicast(&hdr.mac) || eth_addr_is_zero(&hdr.mac))
+	if (!hdr.ip_addr)
 		goto fail;
-	p->mac = hdr.mac;
-	p->congestion_info = shmptr_to_ptr(&reg, hdr.congestion_info,
-					   sizeof(*p->congestion_info));
-	if (!p->congestion_info)
+	p->ip_addr = hdr.ip_addr;
+	p->runtime_info = shmptr_to_ptr(&reg, hdr.runtime_info,
+					   sizeof(*p->runtime_info));
+	if (!p->runtime_info)
 		goto fail;
-	memset(p->congestion_info, 0, sizeof(*p->congestion_info));
+	memset(&p->runtime_info->congestion, 0, sizeof(p->runtime_info->congestion));
+	if (hdr.request_directpath_queues != DIRECTPATH_REQUEST_NONE) {
+		p->has_vfio_directpath = p->has_directpath = true;
+		if (hdr.request_directpath_queues == DIRECTPATH_REQUEST_STRIDED_RMP)
+			p->vfio_directpath_rmp = true;
+	}
 
 	/* initialize the threads */
 	for (i = 0; i < hdr.thread_count; i++) {
@@ -172,10 +279,6 @@ static struct proc *control_create_proc(mem_key_t key, size_t len,
 		/* attach the TX command queue */
 		ret = shm_init_lrpc_in(&reg, &s->txcmdq, &th->txcmdq);
 		if (ret)
-			goto fail;
-
-		th->timer_heap.next_tsc = shmptr_to_ptr(&reg, s->timer_heap.next_tsc, sizeof(uint64_t));
-		if (!th->timer_heap.next_tsc)
 			goto fail;
 
 		th->tid = s->tid;
@@ -230,13 +333,12 @@ fail:
 
 static void control_destroy_proc(struct proc *p)
 {
-	int ret;
+	if (p->has_vfio_directpath)
+		release_directpath_ctx(p);
 
+	nr_clients--;
 	mem_unmap_shm(p->region.base);
 	free(p->overflow_queue);
-	ret = nl_remove_mac_address(&p->mac);
-	if (unlikely(ret))
-		log_warn("control: got ret %d when removing mac address", ret);
 	free(p);
 }
 
@@ -287,9 +389,17 @@ static void control_add_client(void)
 		goto fail;
 	}
 
-	ret = nl_register_mac_address(&p->mac);
+	if (p->has_vfio_directpath) {
+		ret = control_setup_directpath(p, fd);
+		if (ret) {
+			log_err("control: failed to setup directpath queues");
+			goto fail_destroy_proc;
+		}
+	}
+
+	ret = epoll_ctl_add(fd, p);
 	if (ret) {
-		log_err("control: failed to register mac address with netlink");
+		log_err("control: failed to add proc to epoll set");
 		goto fail_destroy_proc;
 	}
 
@@ -297,112 +407,77 @@ static void control_add_client(void)
 			(unsigned long) p)) {
 		log_err("control: failed to inform dataplane of new client '%d'",
 				ucred.pid);
-		goto fail_destroy_proc;
+		goto fail_efd;
 	}
 
-	clients[nr_clients] = p;
-	clientfds[nr_clients++] = fd;
+	nr_clients++;
+	p->control_fd = fd;
 	return;
 
+fail_efd:
+	epoll_ctl_del(fd);
 fail_destroy_proc:
 	control_destroy_proc(p);
 fail:
 	close(fd);
 }
 
-static void control_instruct_dataplane_to_remove_client(int fd)
+static void control_instruct_dataplane_to_remove_client(struct proc *p)
 {
-	int i;
+	p->removed = true;
 
-	for (i = 0; i < nr_clients; i++) {
-		if (clientfds[i] == fd)
-			break;
-	}
-
-	if (i == nr_clients) {
-		WARN();
-		return;
-	}
-
-	clients[i]->removed = true;
 	if (!lrpc_send(&lrpc_control_to_data, DATAPLANE_REMOVE_CLIENT,
-			(unsigned long) clients[i])) {
+			(unsigned long)p)) {
 		log_err("control: failed to inform dataplane of removed client");
+	} else {
+		/* remove fd from set once we have notified dataplane */
+		epoll_ctl_del(p->control_fd);
+		close(p->control_fd);
 	}
 }
 
 static void control_remove_client(struct proc *p)
 {
-	int i;
-
-	for (i = 0; i < nr_clients; i++) {
-		if (clients[i] == p)
-			break;
-	}
-
-	if (i == nr_clients) {
-		WARN();
-		return;
-	}
-
 	/* client failed to attach to scheduler, notify with signal */
 	if (p->attach_fail)
 		kill(p->pid, SIGINT);
 
-	control_destroy_proc(p);
-	clients[i] = clients[nr_clients - 1];
+	if (!p->removed) {
+		epoll_ctl_del(p->control_fd);
+		close(p->control_fd);
+	}
 
-	close(clientfds[i]);
-	clientfds[i] = clientfds[nr_clients - 1];
-	nr_clients--;
+	control_destroy_proc(p);
 }
 
 static void control_loop(void)
 {
-	fd_set readset;
-	int maxfd, i, nrdy;
+	int ret;
 	uint64_t cmd, efdval;
 	unsigned long payload;
 	struct proc *p;
+	struct epoll_event ev;
+
+	pthread_barrier_wait(&init_barrier);
 
 	while (1) {
-		maxfd = MAX(controlfd, data_to_control_efd);
-		FD_ZERO(&readset);
-		FD_SET(controlfd, &readset);
-		FD_SET(data_to_control_efd, &readset);
+		ret = epoll_wait(epoll_fd, &ev, 1, -1);
+		while (ret == -1 && errno == EINTR)
+			ret = epoll_wait(epoll_fd, &ev, 1, -1);
 
-		for (i = 0; i < nr_clients; i++) {
-			if (clients[i]->removed)
-				continue;
-
-			FD_SET(clientfds[i], &readset);
-			maxfd = (clientfds[i] > maxfd) ? clientfds[i] : maxfd;
+		if (ret != 1) {
+			log_err("control: epoll_wait got %d (errno %d)", ret, errno);
+			exit(1);
 		}
 
-		nrdy = select(maxfd + 1, &readset, NULL, NULL, NULL);
-		while (nrdy == -1 && errno == EINTR)
-			nrdy = select(maxfd + 1, &readset, NULL, NULL, NULL);
-		if (nrdy == -1) {
-			log_err("control: select() failed [%s]",
-				strerror(errno));
-			BUG();
-		}
-
-		for (i = 0; i <= maxfd && nrdy > 0; i++) {
-			if (!FD_ISSET(i, &readset))
-				continue;
-
-			if (i == data_to_control_efd) {
-				/* do nothing */
-			} else if (i == controlfd) {
-				/* accept a new connection */
-				control_add_client();
-			} else {
-				/* close an existing connection */
-				control_instruct_dataplane_to_remove_client(i);
-			}
-
-			nrdy--;
+		if (ev.data.u64 == EPOLL_EFD_COOKIE) {
+			/* do nothing */
+		} else if (ev.data.fd == EPOLL_CONTROLFD_COOKIE) {
+			/* accept a new connection */
+			control_add_client();
+		} else {
+			p = (struct proc *)ev.data.ptr;
+			control_instruct_dataplane_to_remove_client(p);
 		}
 
 		do {
@@ -505,6 +580,9 @@ static int control_init_dataplane_comm(void)
 	if (data_to_control_efd < 0)
 		return -errno;
 
+	if (epoll_ctl_add(data_to_control_efd, (void *)EPOLL_EFD_COOKIE))
+		return -1;
+
 	return 0;
 
 fail_free_wb_in:
@@ -541,11 +619,19 @@ int control_init(void)
 
 	dp.ingress_mbuf_region.base = shbuf;
 	dp.ingress_mbuf_region.len = INGRESS_MBUF_SHM_SIZE;
-#if 0
+
+
+	shbuf = mem_map_shm(IOKERNEL_INFO_KEY, NULL, IOKERNEL_INFO_SIZE, PGSIZE_4KB, true);
+	if (shbuf == MAP_FAILED) {
+		log_err("control: failed to map iokernel control header");
+		return -1;
+	}
+
 	iok_info = (struct iokernel_info *)shbuf;
 	memcpy(iok_info->managed_cores, sched_allowed_cores, sizeof(sched_allowed_cores));
-#endif
 
+	if (nic_pci_addr_str)
+		memcpy(&iok_info->directpath_pci, &nic_pci_addr, sizeof(nic_pci_addr));
 
 	memset(&addr, 0x0, sizeof(struct sockaddr_un));
 	addr.sun_family = AF_UNIX;
@@ -564,11 +650,20 @@ int control_init(void)
 		return -errno;
 	}
 
-	if (listen(sfd, 100) == -1) {
+	if (listen(sfd, CTL_SOCK_BACKLOG) == -1) {
 		log_err("control: listen() failed[%s]", strerror(errno));
 		close(sfd);
 		return -errno;
 	}
+
+	epoll_fd = epoll_create1(0);
+	if (epoll_fd < 0) {
+		log_err("control: failed to create epoll fd");
+		return -1;
+	}
+
+	if (epoll_ctl_add(sfd, EPOLL_CONTROLFD_COOKIE))
+		return -1;
 
 	ret = control_init_dataplane_comm();
 	if (ret < 0) {

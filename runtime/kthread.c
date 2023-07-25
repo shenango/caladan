@@ -35,8 +35,8 @@ atomic_t runningks;
 /* an array of attached kthreads (@nrks in total) */
 struct kthread *ks[NCPU];
 /* kernel thread-local data */
-__thread struct kthread *mykthread;
-__thread unsigned int kthread_idx;
+DEFINE_PERTHREAD(struct kthread *, mykthread);
+DEFINE_PERTHREAD(unsigned int, kthread_idx);
 /* Map of cpu to kthread */
 struct cpu_record cpu_map[NCPU] __attribute__((aligned(CACHE_LINE_SIZE)));
 /* the file descriptor for the ksched module */
@@ -67,6 +67,8 @@ static struct kthread *allock(void)
  */
 int kthread_init_thread(void)
 {
+	struct kthread *mykthread;
+
 	mykthread = allock();
 	if (!mykthread)
 		return -ENOMEM;
@@ -77,7 +79,8 @@ int kthread_init_thread(void)
 	assert(nrks <= maxks);
 	spin_unlock_np(&klock);
 
-	kthread_idx = mykthread->kthread_idx;
+	perthread_store(kthread_idx, mykthread->kthread_idx);
+	perthread_store(mykthread, mykthread);
 
 	return 0;
 }
@@ -167,7 +170,7 @@ done:
 
 static void flows_notify_waking(void)
 {
-	if (!cfg_directpath_enabled)
+	if (!net_ops.steer_flows)
 		return;
 
 	bitmap_atomic_set(kthread_awake, myk()->kthread_idx);
@@ -177,8 +180,7 @@ static void flows_notify_waking(void)
 
 static void flows_notify_parking(bool voluntary)
 {
-
-	if (!cfg_directpath_enabled)
+	if (!net_ops.steer_flows)
 		return;
 
 	bitmap_atomic_clear(kthread_awake, myk()->kthread_idx);
@@ -192,16 +194,59 @@ static inline void flows_notify_waking(void) {}
 static inline void flows_notify_parking(bool voluntary) {}
 #endif
 
+static void merge_directpath_counters(void)
+{
+	struct kthread *k = myk();
+	uint64_t tmp;
+
+	tmp = k->q_ptrs->directpath_strides_consumed;
+
+	if (!tmp)
+		return;
+
+	k->q_ptrs->directpath_strides_consumed = 0;
+	atomic64_fetch_and_add(&runtime_info->directpath_strides_consumed, tmp);
+}
+
+/*
+ * kthread_park_now - block this kthread until the iokernel wakes it up.
+ *
+ * This variant must be called without the local kthread lock held.
+ */
+void kthread_park_now(void)
+{
+	assert_preempt_disabled();
+
+	atomic_sub_and_fetch(&runningks, 1);
+
+	merge_directpath_counters();
+
+	flows_notify_parking(false);
+
+	STAT(PARKS)++;
+
+	/* perform the actual parking */
+	kthread_yield_to_iokernel();
+
+	/* iokernel has unparked us */
+	atomic_inc(&runningks);
+
+	flows_notify_waking();
+}
+
 
 /*
  * kthread_park - block this kthread until the iokernel wakes it up.
- * @voluntary: true if this kthread parked because it had no work left
  *
- * This variant must be called with the local kthread lock held. It is intended
- * for use by the scheduler and for use by signal handlers.
+ * This variant must be called with the local kthread lock held.
  */
-void kthread_park(bool voluntary)
+void kthread_park(void)
 {
+	struct kthread *k = myk();
+	bool voluntary;
+
+	voluntary = !preempt_cede_needed(k) & !preempt_park_needed(k);
+
 	assert_preempt_disabled();
 
 	/* atomically verify we have at least @spinks kthreads running */
@@ -213,7 +258,12 @@ void kthread_park(bool voluntary)
 		return;
 	}
 
-	flows_notify_parking(voluntary);
+	// Drop lock
+	spin_unlock(&k->lock);
+
+	merge_directpath_counters();
+
+	flows_notify_parking(!preempt_cede_needed(k));
 
 	STAT(PARKS)++;
 
@@ -224,6 +274,8 @@ void kthread_park(bool voluntary)
 	atomic_inc(&runningks);
 
 	flows_notify_waking();
+
+	spin_lock(&k->lock);
 }
 
 /**

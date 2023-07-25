@@ -196,6 +196,11 @@ struct rwmutex {
 
 typedef struct rwmutex rwmutex_t;
 
+static inline bool rwmutex_held(const rwmutex_t *m)
+{
+	return ACCESS_ONCE(m->count) != 0;
+}
+
 extern void rwmutex_init(rwmutex_t *m);
 extern void rwmutex_rdlock(rwmutex_t *m);
 extern void rwmutex_wrlock(rwmutex_t *m);

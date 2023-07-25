@@ -71,7 +71,7 @@ extern void slab_print_usage(void);
  */
 static __always_inline void *slab_alloc(struct slab *s)
 {
-	return slab_alloc_on_node(s, thread_numa_node);
+	return slab_alloc_on_node(s, this_numa_node());
 }
 
 struct tcache *slab_create_tcache(struct slab *s, unsigned int mag_size);

@@ -18,6 +18,14 @@ CXX	= g++
 AR      = ar
 SPARSE  = sparse
 
+ifeq ($(CONFIG_CLANG),y)
+LD	= clang
+CC	= clang
+LDXX	= clang++
+CXX	= clang++
+FLAGS += -Wno-sync-fetch-and-nand-semantics-changed
+endif
+
 # libraries to include
 RUNTIME_DEPS = $(ROOT_PATH)/libruntime.a $(ROOT_PATH)/libnet.a \
 	       $(ROOT_PATH)/libbase.a
@@ -45,6 +53,9 @@ else
 FLAGS += -DNDEBUG -O3
 ifeq ($(CONFIG_OPTIMIZE),y)
 FLAGS += -march=native -flto -ffast-math
+ifeq ($(CONFIG_CLANG),y)
+LDFLAGS += -flto
+endif
 else
 FLAGS += -mssse3
 endif

@@ -407,6 +407,8 @@ int arp_init_late(void)
 
 	spin_unlock_np(&arp_lock);
 
+	free(static_entries);
+
 	arp_worker_th = thread_create(arp_worker, NULL);
 	if (!arp_worker_th)
 		return -ENOMEM;
