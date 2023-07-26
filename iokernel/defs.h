@@ -169,12 +169,18 @@ struct proc {
 	unsigned int		removed:1;
 	unsigned int		started:1;
 	unsigned int		has_storage:1;
-	struct runtime_info	*runtime_info;
 	unsigned long		policy_data;
 	unsigned long		directpath_data;
 	uint64_t		next_poll_tsc;
 
+	/* timer list expiry us */
+	uint64_t 		timer_pos_us;
+
+	/* list node for timer wheel or poll list */
+	struct list_node	link;
+
 	float			load;
+	struct runtime_info	*runtime_info;
 
 	/* runtime threads */
 	struct list_head	idle_threads;
@@ -208,19 +214,28 @@ struct proc {
 	physaddr_t		page_paddrs[];
 };
 
-static inline void proc_enable_sched_poll(struct proc *p)
+extern void proc_timer_add(struct proc *p, uint64_t next_poll_tsc);
+extern void proc_timer_run(uint64_t now);
+extern uint64_t timer_pos;
+
+extern struct list_head poll_list;
+
+static inline bool proc_on_timer_wheel(struct proc *p)
 {
+	return p->timer_pos_us > timer_pos;
+}
+
+static inline bool proc_is_sched_polled(struct proc *p)
+{
+	return !proc_on_timer_wheel(p) && p->next_poll_tsc != UINT64_MAX;
+}
+
+static inline void proc_enable_sched_poll_nocheck(struct proc *p)
+{
+	assert(!proc_on_timer_wheel(p));
+
 	p->next_poll_tsc = 0;
-}
-
-static inline void proc_set_next_poll(struct proc *p, uint64_t tsc)
-{
-	p->next_poll_tsc = tsc;
-}
-
-static inline void proc_disable_sched_poll(struct proc *p)
-{
-	p->next_poll_tsc = UINT64_MAX;
+	list_add_tail(&poll_list, &p->link);
 }
 
 
@@ -411,6 +426,7 @@ extern int dp_clients_init(void);
 extern int dpdk_late_init(void);
 extern int hw_timestamp_init(void);
 extern int stats_init(void);
+extern int proc_timer_init(void);
 
 extern char *nic_pci_addr_str;
 extern struct pci_addr nic_pci_addr;

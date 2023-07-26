@@ -46,6 +46,7 @@ static const struct init_entry iok_init_handlers[] = {
 	IOK_INITIALIZER(simple),
 	IOK_INITIALIZER(numa),
 	IOK_INITIALIZER(ias),
+	IOK_INITIALIZER(proc_timer),
 
 	/* control plane */
 	IOK_INITIALIZER(control),

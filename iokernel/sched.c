@@ -19,6 +19,8 @@
 #include "ksched.h"
 #include "hw_timestamp.h"
 
+#define PROC_TIMER_WHEEL_THRESH_US 100
+
 /* a bitmap of cores available to be allocated by the scheduler */
 DEFINE_BITMAP(sched_allowed_cores, NCPU);
 
@@ -39,6 +41,8 @@ int sched_cores_nr;
 
 static int nr_guaranteed;
 
+LIST_HEAD(poll_list);
+
 struct core_state {
 	struct thread	*last_th;     /* recently run thread, waiting for preemption to complete */
 	struct thread	*pending_th;  /* a thread waiting run */
@@ -55,6 +59,46 @@ const struct sched_ops *sched_ops;
 
 /* current hardware timestamp */
 static uint64_t cur_tsc;
+
+static void proc_disable_sched_poll(struct proc *p)
+{
+	// proc already disabled
+	if (p->next_poll_tsc == UINT64_MAX)
+		return;
+
+	// otherwise delete it from the poll list or timer wheel
+	list_del(&p->link);
+	p->timer_pos_us = 0;
+	p->next_poll_tsc = UINT64_MAX;
+}
+
+static void proc_set_next_poll(struct proc *p, uint64_t tsc)
+{
+	assert(proc_is_sched_polled(p));
+
+	tsc = MAX(tsc, cur_tsc);
+	p->next_poll_tsc = tsc;
+
+	if (tsc - cur_tsc > PROC_TIMER_WHEEL_THRESH_US * cycles_per_us) {
+		list_del_from(&poll_list, &p->link);
+		if (tsc != UINT64_MAX)
+			proc_timer_add(p, tsc);
+	}
+}
+
+static void proc_enable_sched_poll(struct proc *p)
+{
+	if (proc_on_timer_wheel(p)) {
+		p->timer_pos_us = 0;
+		list_del(&p->link);
+	} else if (p->next_poll_tsc != UINT64_MAX) {
+		// already polled
+		return;
+	}
+
+	proc_enable_sched_poll_nocheck(p);
+}
+
 
 
 /**
@@ -611,6 +655,8 @@ static void sched_measure_delay(struct proc *p)
 	    posted_strides - consumed_strides < DIRECTPATH_STRIDE_REFILL_THRESH_HI) {
 		rx_send_to_runtime(p, 0, RX_REFILL_BUFS, 0);
 		STAT_INC(RX_REFILL, 1);
+		dl.has_work = true;
+		dl.parked_thread_busy |= sched_threads_active(p) == 0;
 	}
 
 	if (rxq_delay) {
@@ -711,7 +757,7 @@ void sched_poll(void)
 	struct core_state *s;
 	uint64_t now;
 	int i, core, idle_cnt = 0;
-	struct proc *p;
+	struct proc *p, *p_next;
 
 	/*
 	 * slow pass --- runs every IOKERNEL_POLL_INTERVAL
@@ -726,11 +772,11 @@ void sched_poll(void)
 		/* retrieve current network device tick */
 		hw_timestamp_update();
 
+		proc_timer_run(now);
+
 		last_time = cur_tsc;
-		for (i = 0; i < dp.nr_clients; i++) {
-			if (i + 2 < dp.nr_clients)
-				prefetch(dp.clients[i + 2]);
-			p = dp.clients[i];
+		list_for_each_safe(&poll_list, p, p_next, link) {
+			prefetch(p_next);
 			sched_measure_delay(p);
 		}
 	} else if (!cfg.noidlefastwake && !cfg.vfio_directpath) {
@@ -844,7 +890,7 @@ int sched_attach_proc(struct proc *p)
 		return ret;
 
 	nr_guaranteed += p->sched_cfg.guaranteed_cores;
-	proc_enable_sched_poll(p);
+	proc_enable_sched_poll_nocheck(p);
 
 	return 0;
 }
@@ -855,6 +901,7 @@ int sched_attach_proc(struct proc *p)
  */
 void sched_detach_proc(struct proc *p)
 {
+	proc_disable_sched_poll(p);
 	sched_ops->proc_detach(p);
 	nr_guaranteed -= p->sched_cfg.guaranteed_cores;
 }
