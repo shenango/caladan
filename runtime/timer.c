@@ -224,6 +224,8 @@ static void __timer_sleep(uint64_t deadline_us)
 	timer_start_locked(&e, deadline_us);
 	update_q_ptrs(k);
 	thread_park_and_unlock_np(&k->timer_lock);
+
+	timer_finish(&e);
 }
 
 /**

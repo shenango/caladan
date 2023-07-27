@@ -261,6 +261,7 @@ bool condvar_wait_timed(condvar_t *cv, mutex_t *m, uint64_t micros)
 
 	if (unlikely(args.timed_out)) {
 		spin_unlock_np(&cv->waiter_lock);
+		timer_finish(&e);
 		return false;
 	}
 
@@ -268,8 +269,7 @@ bool condvar_wait_timed(condvar_t *cv, mutex_t *m, uint64_t micros)
 	list_add_tail(&cv->waiters, &myth->link);
 	thread_park_and_unlock_np(&cv->waiter_lock);
 
-	if (likely(!args.timed_out))
-		timer_cancel(&e);
+	timer_cancel(&e);
 
 	mutex_lock(m);
 

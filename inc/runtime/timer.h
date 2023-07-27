@@ -40,6 +40,24 @@ timer_init(struct timer_entry *e, timer_fn_t fn, unsigned long arg)
 	e->arg = arg;
 }
 
+/**
+ * timer_finish - de-initializes a timer that has already expired
+ * @e: the timer entry
+ *
+ * Ensures that it is safe to reclaim the memory for timer_entry.
+ * This function may spin temporarily if racing with the timer firing code.
+ * Should not be called on a timer that hasn't expired yet - use timer_cancel
+ * instead.
+ */
+static inline void timer_finish(struct timer_entry *e)
+{
+	assert(!e->armed);
+
+	if (unlikely(load_acquire(&e->executing)))
+		while (load_acquire(&e->executing))
+			cpu_relax();
+}
+
 static inline bool timer_busy(struct timer_entry *e)
 {
 	return load_acquire(&e->armed) || load_acquire(&e->executing);
