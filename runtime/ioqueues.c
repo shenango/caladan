@@ -33,7 +33,7 @@
 
 static size_t lrpc_q_size(void)
 {
-	if (cfg_directpath_enabled())
+	if (cfg_directpath_external())
 		return LRPC_QUEUE_SIZE_DIRECTPATH;
 
 	return PACKET_QUEUE_MCOUNT;

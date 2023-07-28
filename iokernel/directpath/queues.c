@@ -123,7 +123,8 @@ bool directpath_poll_proc(struct proc *p, uint64_t *delay_cycles, uint64_t cur_t
 	uint64_t delay = 0;
 	unsigned int i;
 
-	if (ctx->nr_armed == ctx->nr_qs && ctx->active_rx_count == 1)
+	if (ctx->nr_armed == ctx->nr_qs &&
+	    (cfg.no_directpath_active_rss || ctx->active_rx_count == 1))
 		return true;
 
 	for (i = 0; i < ctx->nr_qs; i++) {
