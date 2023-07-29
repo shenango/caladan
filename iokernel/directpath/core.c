@@ -1097,8 +1097,8 @@ err:
 
 void release_directpath_ctx(struct proc *p)
 {
-	assert(p->directpath_data);
-	free_ctx((struct directpath_ctx *)p->directpath_data);
+	if (p->directpath_data)
+		free_ctx((struct directpath_ctx *)p->directpath_data);
 }
 
 void directpath_preallocate(bool use_rmp, unsigned int nrqs, unsigned int cnt)
