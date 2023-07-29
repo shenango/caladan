@@ -1234,7 +1234,12 @@ static int tcp_conn_shutdown_tx(tcpconn_t *c)
 	if (c->tx_closed)
 		return 0;
 
-	assert(c->pcb.state >= TCP_STATE_ESTABLISHED);
+	if (unlikely(c->pcb.state < TCP_STATE_ESTABLISHED)) {
+		tcp_conn_fail(c, ECONNABORTED);
+		tcp_tx_raw_rst(c->e.laddr, c->e.raddr, c->pcb.snd_nxt);
+		return 0;
+	}
+
 	while (c->tx_exclusive)
 		waitq_wait(&c->tx_wq, &c->lock);
 	ret = tcp_tx_ctl(c, TCP_FIN | TCP_ACK, NULL);
