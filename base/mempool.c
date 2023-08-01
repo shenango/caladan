@@ -120,6 +120,9 @@ static int mempool_tcache_alloc(struct tcache *tc, int nr, void **items)
 
 	struct mempool_tc *mptc = (struct mempool_tc *)tc->data;
 
+	if (unlikely(ACCESS_ONCE(mptc->m->allocated) + nr > mptc->m->capacity))
+		return -ENOMEM;
+
 	spin_lock(&mptc->lock);
 	for (i = 0; i < nr; i++) {
 		items[i] = mempool_alloc(mptc->m);

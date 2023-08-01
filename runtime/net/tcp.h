@@ -85,7 +85,7 @@ struct tcpconn {
 	struct trans_entry	e;
 	struct tcp_pcb		pcb;
 	struct list_node	global_link;
-	struct list_node	queue_link;
+	uint64_t                next_timeout;
 	spinlock_t		lock;
 	bool			nonblocking;
 	struct kref		ref;
@@ -112,7 +112,6 @@ struct tcpconn {
 	uint32_t		fast_retransmit_last_ack;
 
 	/* timeouts */
-	uint64_t 		next_timeout;
 	uint64_t		ack_ts;
 	uint64_t		zero_wnd_ts;
 	union {
@@ -123,6 +122,9 @@ struct tcpconn {
 	bool			ack_delayed;
 	int			rep_acks;
 	int			acks_delayed_cnt;
+
+	struct list_node        queue_link;
+
 };
 
 extern tcpconn_t *tcp_conn_alloc(void);

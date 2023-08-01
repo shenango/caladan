@@ -118,7 +118,7 @@ static void tcp_handle_timeouts(tcpconn_t *c, uint64_t now)
 /* a periodic background thread that handles timeout events */
 static void tcp_worker(void *arg)
 {
-	tcpconn_t *c;
+	tcpconn_t *c, *c_next;
 	uint64_t now;
 
 	while (true) {
@@ -134,7 +134,8 @@ static void tcp_worker(void *arg)
 		}
 
 
-		list_for_each(&tcp_conns, c, global_link) {
+		list_for_each_safe(&tcp_conns, c, c_next, global_link) {
+			prefetch(c_next);
 			if (preempt_needed()) {
 				again = true;
 				break;
