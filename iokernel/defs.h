@@ -36,7 +36,8 @@ struct iokernel_cfg {
 
 extern struct iokernel_cfg cfg;
 extern uint32_t nr_vfio_prealloc;
-
+extern unsigned int vfio_prealloc_nrqs;
+extern bool vfio_prealloc_rmp;
 
 /*
  * Constant limits

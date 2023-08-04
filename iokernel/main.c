@@ -18,6 +18,8 @@
 struct iokernel_cfg cfg;
 struct dataplane dp;
 
+unsigned int vfio_prealloc_nrqs = 1;
+bool vfio_prealloc_rmp = true;
 uint32_t nr_vfio_prealloc;
 bool stat_logging;
 bool allowed_cores_supplied;
@@ -191,7 +193,14 @@ int main(int argc, char *argv[])
 				fprintf(stderr, "missing vfioprealloc argument\n");
 				return -EINVAL;
 			}
-			nr_vfio_prealloc = atoi(argv[++i]);
+			char *token = strtok(argv[++i], ":");
+			nr_vfio_prealloc = atoi(token);
+			token = strtok(NULL, ":");
+			if (!token) continue;
+			vfio_prealloc_nrqs = atoi(token);
+			token = strtok(NULL, ":");
+			if (!token) continue;
+			vfio_prealloc_rmp = atoi(token);
 		} else if (!strcmp(argv[i], "vfio")) {
 #ifndef DIRECTPATH
 			log_err("please recompile with CONFIG_DIRECTPATH=y");

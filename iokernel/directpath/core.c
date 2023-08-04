@@ -1226,7 +1226,7 @@ int directpath_init(void)
 		return ret;
 
 	if (nr_vfio_prealloc) {
-		directpath_preallocate(true, 1, nr_vfio_prealloc);
+		directpath_preallocate(vfio_prealloc_rmp, vfio_prealloc_nrqs, nr_vfio_prealloc);
 		log_info("control: preallocated %u 1-thread directpath contexts", nr_vfio_prealloc);
 	}
 
