@@ -17,7 +17,10 @@
 #define MLX5_MPRQ_STRIDE_NUM_SHIFT 16
 #define MLX5_MPRQ_FILLER_MASK 0x80000000
 
+/* number of total buffers in rx mempool */
+static size_t nrbufs;
 /* array of ref counters for buffers in rx mempool */
+static uint16_t *sw_refs;
 static size_t nr_hw_refs;
 static uint16_t *hw_refs;
 BUILD_ASSERT(DIRECTPATH_NUM_STRIDES <= UINT16_MAX);
@@ -26,13 +29,6 @@ BUILD_ASSERT(DIRECTPATH_NUM_STRIDES <= UINT16_MAX);
 static struct slab mbuf_slab;
 static struct tcache *mbuf_tcache;
 static DEFINE_PERTHREAD(struct tcache_perthread, mbuf_pt);
-
-struct release_data {
-	uint16_t stride_idx;
-	uint16_t stride_cnt;
-};
-
-BUILD_ASSERT(sizeof(struct release_data) <= sizeof(uint64_t));
 
 static inline bool shared_rmp_enabled(void)
 {
@@ -47,17 +43,38 @@ static struct mlx5_wq *get_rx_wq(struct mlx5_rxq *v)
 	return &v->wq;
 }
 
-static inline void dec_hw_ref(uint16_t wq_idx, uint16_t count)
+static inline size_t index_of_buf(void *buf)
+{
+	assert((uintptr_t)buf >= (uintptr_t)iok.rx_buf);
+	assert((uintptr_t)buf < (uintptr_t)iok.rx_buf + iok.rx_len);
+	return (buf - (void *)iok.rx_buf) / DIRECTPATH_STRIDE_MODE_BUF_SZ;
+}
+
+static inline void *headbuf_from_buf(void *buf)
+{
+	size_t idx = index_of_buf(buf);
+	return (void *)iok.rx_buf + idx * DIRECTPATH_STRIDE_MODE_BUF_SZ;
+}
+
+static inline void dec_hw_ref(uint32_t wq_idx, uint64_t count)
 {
 	assert_preempt_disabled();
+	hw_refs[get_current_affinity() * nr_hw_refs + wq_idx] += count;
+}
 
-	if (hw_refs)
-		hw_refs[get_current_affinity() * nr_hw_refs + wq_idx] += count;
+static inline void dec_sw_ref(void *buf, uint64_t count)
+{
+	size_t idx = index_of_buf(buf);
+	assert_preempt_disabled();
+	if (__sync_sub_and_fetch(&sw_refs[idx], count) == 0)
+		tcache_free(perthread_ptr(directpath_buf_pt), headbuf_from_buf(buf));
 }
 
 static inline void ref_reset(void *buf, uint32_t post_idx)
 {
-	size_t i;
+	size_t i, idx = index_of_buf(buf);
+
+	ACCESS_ONCE(sw_refs[idx]) = DIRECTPATH_NUM_STRIDES;
 
 	if (!hw_refs)
 		return;
@@ -89,10 +106,8 @@ static inline void mlx5_stride_post_buf(struct mlx5_wq *wq, void *buf, uint32_t 
 
 static void directpath_strided_rx_completion(struct mbuf *m)
 {
-	struct release_data *rd = (struct release_data *)&m->release_data;
-
 	preempt_disable();
-	dec_hw_ref(rd->stride_idx, rd->stride_cnt);
+	dec_sw_ref(m->head, m->release_data);
 	tcache_free(perthread_ptr(mbuf_pt), m);
 	preempt_enable();
 }
@@ -168,14 +183,19 @@ static void mlx5_refill_strided_rxq_rmp(void)
 
 	while (likely(!preempt_cede_needed(k))) {
 		post_idx = rmp.rmp_head & (rmp.wq.cnt - 1);
-		buf = load_acquire(&rmp.wq.buffers[post_idx]);
-		if (unlikely(!buf))
+		if (unlikely(!load_acquire(&rmp.wq.buffers[post_idx])))
 			break;
 
 		if (get_hw_ref(post_idx) != DIRECTPATH_NUM_STRIDES)
 			break;
 
-		ref_reset(buf, post_idx);
+		buf = tcache_alloc(perthread_ptr(directpath_buf_pt));
+		if (unlikely(!buf)) {
+			log_warn_ratelimited("out of rx buffers");
+			break;
+		}
+
+		mlx5_stride_post_buf(&rmp.wq, buf, post_idx);
 		rmp.rmp_head++;
 	}
 
@@ -196,8 +216,7 @@ static __noinline void panic_error_cqe(struct mlx5_cqe64 *cqe, uint8_t opcode)
 }
 
 static struct mbuf *mbuf_fill_cqe(void *dbuf, struct mlx5_cqe64 *cqe,
-	                              uint32_t len, uint64_t num_strides,
-	                              uint64_t wqe_idx)
+	                              uint32_t len, uint64_t num_strides)
 {
 	struct mbuf *m;
 
@@ -208,9 +227,6 @@ static struct mbuf *mbuf_fill_cqe(void *dbuf, struct mlx5_cqe64 *cqe,
 		return NULL;
 	}
 
-	assert(num_strides < UINT32_MAX);
-	assert(wqe_idx < UINT32_MAX);
-
 	// NIC pads two 0 bytes for alignment of IP headers etc
 	mbuf_init(m, dbuf + 2, len, 0);
 	m->len = len;
@@ -218,10 +234,7 @@ static struct mbuf *mbuf_fill_cqe(void *dbuf, struct mlx5_cqe64 *cqe,
 	m->csum = 0;
 	m->rss_hash = mlx5_get_rss_result(cqe);
 	m->release = directpath_strided_rx_completion;
-
-	struct release_data *rd = (struct release_data *)&m->release_data;
-	rd->stride_idx = wqe_idx;
-	rd->stride_cnt = num_strides;
+	m->release_data = num_strides;
 
 	return m;
 }
@@ -263,16 +276,18 @@ int mlx5_gather_rx_strided(struct mlx5_rxq *v, struct mbuf **ms,
 				   MLX5_MPRQ_STRIDE_NUM_SHIFT;
 		len = byte_cnt & MLX5_MPRQ_LEN_MASK;
 
+		if (shared_rmp_enabled())
+			dec_hw_ref(wqe_idx, stride_cnt);
 		buf = load_acquire(&wq->buffers[wqe_idx]);
 		strides_consumed += stride_cnt;
 
 		if (byte_cnt & MLX5_MPRQ_FILLER_MASK) {
-			dec_hw_ref(wqe_idx, stride_cnt);
+			dec_sw_ref(buf, stride_cnt);
 		} else {
 			buf += stride_idx * DIRECTPATH_STRIDE_SIZE;
-			ms[rx_cnt] = mbuf_fill_cqe(buf, cqe, len, stride_cnt, wqe_idx);
+			ms[rx_cnt] = mbuf_fill_cqe(buf, cqe, len, stride_cnt);
 			if (unlikely(!ms[rx_cnt])) {
-				dec_hw_ref(wqe_idx, stride_cnt);
+				dec_sw_ref(buf, stride_cnt);
 				break;
 			}
 			rx_cnt++;
@@ -300,6 +315,12 @@ int mlx5_gather_rx_strided(struct mlx5_rxq *v, struct mbuf **ms,
 
 int mlx5_rx_stride_init_bufs(void)
 {
+	nrbufs = iok.rx_len / DIRECTPATH_STRIDE_MODE_BUF_SZ;
+	nrbufs = align_up(nrbufs, CACHE_LINE_SIZE / sizeof(uint16_t));
+
+	sw_refs = calloc(nrbufs * maxks, sizeof(int16_t));
+	if (!sw_refs)
+		return -ENOMEM;
 
 	if (shared_rmp_enabled()) {
 		nr_hw_refs = align_up(DIRECTPATH_STRIDE_RQ_NUM_DESC,
