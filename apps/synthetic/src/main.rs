@@ -6,7 +6,6 @@ extern crate byteorder;
 extern crate dns_parser;
 extern crate itertools;
 extern crate libc;
-extern crate lockstep;
 extern crate mersenne_twister;
 extern crate net2;
 extern crate rand;
@@ -37,6 +36,8 @@ use shenango::udp::UdpSpawner;
 
 mod backend;
 use backend::*;
+
+mod lockstep;
 
 mod payload;
 use payload::{Payload, SyntheticProtocol, PAYLOAD_SIZE};
@@ -1219,17 +1220,24 @@ fn main() {
                 .help("Mean number of work iterations per request"),
         )
         .arg(
-            Arg::with_name("barrier-peers")
-                .long("barrier-peers")
-                .requires("barrier-leader")
+            Arg::with_name("leader-ip")
+                .long("leader-ip")
                 .takes_value(true)
-                .help("Number of peers in barrier group"),
+                .help("IP address of leader instance")
+                .conflicts_with("leader"),
         )
         .arg(
-            Arg::with_name("barrier-leader")
-                .long("barrier-leader")
-                .requires("barrier-peers")
+            Arg::with_name("barrier-peers")
+                .long("barrier-peers")
                 .takes_value(true)
+                .requires("leader")
+                .help("Number of connected loadgen instances"),
+        )
+        .arg(
+            Arg::with_name("leader")
+                .long("leader")
+                .requires("barrier-peers")
+                .takes_value(false)
                 .help("Leader of barrier group"),
         )
         .arg(
@@ -1424,14 +1432,18 @@ fn main() {
             let matches = matches.clone();
             backend.init_and_run(config, move || {
 
-                let mut barrier_group = matches.value_of("barrier-leader").map(|leader| {
-                    lockstep::Group::from_hostname(
-                        leader,
-                        23232,
-                        value_t_or_exit!(matches, "barrier-peers", usize),
-                    )
-                    .unwrap()
-                });
+                let mut barrier_group = match (matches.is_present("leader"), matches.value_of("leader-ip")) {
+			(true, _) => {
+				let addr =  SocketAddrV4::new(FromStr::from_str("0.0.0.0").unwrap(), 23232);
+				let npeers = value_t_or_exit!(matches, "barrier-peers", usize);
+				Some(lockstep::Group::new_server(npeers - 1, addr, backend.clone()).unwrap())
+			},
+			(_, Some(ipstr)) => {
+				let addr = SocketAddrV4::new(FromStr::from_str(ipstr).unwrap(), 23232);
+				Some(lockstep::Group::new_client(addr, backend.clone()).unwrap())
+			}
+			(_, _) => None,
+		};
 
                 if !live_mode {
                     println!("Distribution, Target, Actual, Dropped, Never Sent, Median, 90th, 99th, 99.9th, 99.99th, Start, StartTsc");
