@@ -11,8 +11,8 @@
 #include "defs.h"
 #include "mlx5_ifc.h"
 
-#define QUEUE_DEMOTION_US 500
-#define QUEUE_PROMOTION_US 100
+#define QUEUE_DEMOTION_US 1500
+#define QUEUE_PROMOTION_US 300
 
 static void directpath_arm_queue(struct directpath_ctx *ctx, struct cq *cq, uint32_t cons_idx)
 {
