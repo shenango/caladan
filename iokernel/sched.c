@@ -142,16 +142,15 @@ static void sched_steer_flows(struct proc *p)
 	}
 }
 
-static void sched_enable_kthread(struct thread *th, unsigned int core)
+static void sched_enable_kthread(struct proc *p, struct thread *th, unsigned int core)
 {
-	struct proc *p = th->p;
-
 	ACCESS_ONCE(th->q_ptrs->curr_grant_gen) = ++th->wake_gen;
 	thread_enable_sched_poll(th);
 	proc_enable_sched_poll(p);
 	th->change_tsc = cur_tsc;
 	th->active = true;
 	th->core = core;
+	p->last_core[th - p->threads] = NCPU;
 	list_del_from(&p->idle_threads, &th->idle_link);
 	if (p->has_vfio_directpath) {
 		p->active_thread_count++;
@@ -168,12 +167,13 @@ static void sched_enable_kthread(struct thread *th, unsigned int core)
 		p->started = true;
 }
 
-static void sched_disable_kthread(struct thread *th)
+static void sched_disable_kthread(struct thread *th, unsigned int last_core)
 {
 	struct proc *p = th->p;
 
 	th->active = false;
 	th->change_tsc = cur_tsc;
+	p->last_core[th - p->threads] = last_core;
 	list_add(&p->idle_threads, &th->idle_link);
 	if (!p->has_directpath)
 		sched_steer_flows(p);
@@ -187,24 +187,13 @@ static void sched_disable_kthread(struct thread *th)
 	}
 }
 
-static struct thread *sched_pick_kthread(struct proc *p, unsigned int core)
+static struct thread *sched_pick_kthread(struct proc *p, uint16_t core)
 {
-	struct thread *th;
+	uint16_t i;
 
-	/* TODO: investigate whether O(n) time is an issue here */
-
-	/* first try to find a thread that last ran on this core */
-	list_for_each(&p->idle_threads, th, idle_link) {
-		if (th->core == core)
-			return th;
-	}
-
-	if (!cfg.noht) {
-		/* then try to find a thread that last ran on this core's sibling */
-		list_for_each(&p->idle_threads, th, idle_link) {
-			if (th->core == sched_siblings[core])
-				return th;
-		}
+	for (i = 0; i < p->thread_count; i++) {
+		if (p->last_core[i] == core || p->last_core[i] == sched_siblings[core])
+			return &p->threads[i];
 	}
 
 	/* finally pick the least recently used thread (to avoid thrashing) */
@@ -217,7 +206,7 @@ __sched_run(struct core_state *s, struct thread *th, unsigned int core)
 	/* if we're still busy with the last run request than stop here */
 	if (s->wait) {
 		if (s->pending_th) {
-			sched_disable_kthread(s->pending_th);
+			sched_disable_kthread(s->pending_th, UINT16_MAX);
 			proc_put(s->pending_th->p);
 		}
 		s->pending_th = th;
@@ -267,8 +256,8 @@ int sched_run_on_core(struct proc *p, unsigned int core)
 	th = sched_pick_kthread(p, core);
 	if (unlikely(!th))
 		return -ENOENT;
-	proc_get(th->p);
-	sched_enable_kthread(th, core);
+	proc_get(p);
+	sched_enable_kthread(p, th, core);
 
 	/* issue the command to run the thread */
 	return __sched_run(s, th, core);
@@ -801,7 +790,7 @@ void sched_poll(void)
 		/* check if a pending context switch finished */
 		if (s->wait && ksched_poll_run_done(core)) {
 			if (s->last_th) {
-				sched_disable_kthread(s->last_th);
+				sched_disable_kthread(s->last_th, core);
 				proc_put(s->last_th->p);
 				s->last_th = NULL;
 			}
@@ -826,9 +815,9 @@ void sched_poll(void)
 		/* check if a core went idle */
 		if (!s->wait && !s->idle && ksched_poll_idle(core)) {
 			if (s->cur_th) {
-				if (sched_try_fast_rewake(s->cur_th) == 0)
+				if (!cfg.vfio_directpath && sched_try_fast_rewake(s->cur_th) == 0)
 					continue;
-				sched_disable_kthread(s->cur_th);
+				sched_disable_kthread(s->cur_th, core);
 				proc_put(s->cur_th->p);
 				s->cur_th = NULL;
 			}
@@ -880,6 +869,7 @@ int sched_attach_proc(struct proc *p)
 	p->active_thread_count = 0;
 	list_head_init(&p->idle_threads);
 	for (i = 0; i < p->thread_count; i++) {
+		p->last_core[i] = UINT16_MAX;
 		p->threads[i].core = UINT16_MAX;
 		p->threads[i].active = false;
 		list_add(&p->idle_threads, &p->threads[i].idle_link);

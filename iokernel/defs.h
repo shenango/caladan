@@ -185,6 +185,7 @@ struct proc {
 	/* runtime threads */
 	struct list_head	idle_threads;
 	struct thread		threads[NCPU];
+	uint16_t		last_core[NCPU];
 
 	/* COLD */
 
