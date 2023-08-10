@@ -5818,13 +5818,17 @@ struct mlx5_ifc_destroy_rq_in_bits {
 };
 
 struct mlx5_ifc_create_rqt_out_bits {
-	u8         reserved_at_0[0x40];
+	u8         status[0x8];
+	u8         reserved_at_8[0x18];
+
+	u8         syndrome[0x20];
 
 	u8         reserved_at_40[0x8];
 	u8         rqtn[0x18];
 
 	u8         reserved_at_60[0x20];
 };
+
 
 struct mlx5_ifc_destroy_rqt_in_bits {
 	u8         opcode[0x10];

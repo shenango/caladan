@@ -595,8 +595,11 @@ static void sched_measure_delay(struct proc *p)
 	dl.min_delay_us = UINT64_MAX;
 	dl.avg_delay_us = 0;
 
+	directpath_poll_proc_prefetch(p);
+
+	prefetch(&p->runtime_info->directpath_strides_consumed);
+
 	next_poll_tsc = UINT64_MAX;
-	consumed_strides = atomic64_read(&p->runtime_info->directpath_strides_consumed);
 
 	/* detect per-kthread delay */
 	for (i = 0; i < p->thread_count; i++) {
@@ -604,35 +607,39 @@ static void sched_measure_delay(struct proc *p)
 		uint64_t delay = 0, next_timer_tsc;
 		th = &p->threads[i];
 
+
 		if (!thread_sched_should_poll(th, cur_tsc)) {
 			next_poll_tsc = MIN(next_poll_tsc, th->next_poll_tsc);
 			continue;
 		}
 
+		void *prefetch1 = directpath_poll_proc_prefetch_th0(p, i);
+
 		sched_measure_kthread_delay(p, th, &delay, &rxq_delay, &busy,
 			                        &dl.standing_queue, &next_timer_tsc);
 
-		if (th->active)
-			consumed_strides += ACCESS_ONCE(th->q_ptrs->directpath_strides_consumed);
+		consumed_strides += ACCESS_ONCE(th->q_ptrs->directpath_strides_consumed);
+
+		directpath_poll_proc_prefetch_th1(prefetch1, ACCESS_ONCE(th->q_ptrs->directpath_rx_tail));
 
 		dl.has_work |= busy;
 		dl.parked_thread_busy |= busy && !th->active;
 		dl.max_delay_us = MAX(delay, dl.max_delay_us);
 		dl.avg_delay_us += delay;
 
-		if (th->active && delay < dl.min_delay_us) {
-			dl.min_delay_us = delay;
-			dl.min_delay_core = th->core;
-		}
-
-		if (th->active)
+		if (th->active) {
 			sched_update_kthread_metrics(th, busy);
-
-		if (!th->active && !busy && sched_proc_can_unpoll(p)) {
+			if (delay < dl.min_delay_us) {
+				dl.min_delay_us = delay;
+				dl.min_delay_core = th->core;
+			}
+		} else if (!busy && sched_proc_can_unpoll(p)) {
 			thread_set_next_poll(th, next_timer_tsc);
 			next_poll_tsc = MIN(next_poll_tsc, next_timer_tsc);
 		}
 	}
+
+	consumed_strides = atomic64_read(&p->runtime_info->directpath_strides_consumed);
 
 	bool directpath_armed = true;
 	if (p->has_vfio_directpath)
@@ -640,7 +647,7 @@ static void sched_measure_delay(struct proc *p)
 
 	posted_strides = ACCESS_ONCE(p->runtime_info->directpath_strides_posted);
 
-	if (posted_strides &&
+	if (posted_strides > consumed_strides &&
 	    posted_strides - consumed_strides < DIRECTPATH_STRIDE_REFILL_THRESH_HI) {
 		rx_send_to_runtime(p, 0, RX_REFILL_BUFS, 0);
 		STAT_INC(RX_REFILL, 1);

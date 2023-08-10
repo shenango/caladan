@@ -685,7 +685,7 @@ static int create_rqt(struct directpath_ctx *dp)
 	size_t inlen;
 	uint32_t *in, i;
 	uint32_t out[DEVX_ST_SZ_DW(create_rqt_out)] = {0};
-	uint32_t nr_entries = u32_round_pow2(dp->nr_qs);
+	uint32_t nr_entries = u16_round_pow2(dp->nr_qs);
 	void *rqtc;
 
 	inlen = DEVX_ST_SZ_BYTES(create_rqt_in) + DEVX_ST_SZ_BYTES(rq_num) * nr_entries;
@@ -707,7 +707,7 @@ static int create_rqt(struct directpath_ctx *dp)
 	dp->rqt_obj = mlx5dv_devx_obj_create(vfcontext, in, inlen, out, sizeof(out));
 	free(in);
 	if (!dp->rqt_obj) {
-		log_err("create rqt obj failed");
+		LOG_CMD_FAIL("create rqt", create_rqt_out, out);
 		return -1;
 	}
 

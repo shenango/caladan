@@ -475,6 +475,11 @@ extern bool directpath_poll_proc(struct proc *p, uint64_t *delay_cycles, uint64_
 extern void directpath_notify_waking(struct proc *p, struct thread *th);
 extern void directpath_dataplane_notify_kill(struct proc *p);
 extern void directpath_dataplane_attach(struct proc *p);
+
+extern void directpath_poll_proc_prefetch(struct proc *p);
+extern void *directpath_poll_proc_prefetch_th0(struct proc *p, uint32_t qidx);
+extern void directpath_poll_proc_prefetch_th1(void *cq, uint32_t cons_idx);
+
 #else
 
 static inline int alloc_directpath_ctx(struct proc *p, ...)
@@ -486,6 +491,15 @@ static inline void release_directpath_ctx(struct proc *p) {}
 static inline void directpath_preallocate(bool use_rmp, unsigned int nrqs, unsigned int cnt) {}
 static inline void directpath_dataplane_notify_kill(struct proc *p) {}
 static inline void directpath_dataplane_attach(struct proc *p) {}
+
+static inline void directpath_poll_proc_prefetch(struct proc *p) {}
+static inline void *directpath_poll_proc_prefetch_th0(struct proc *p, uint32_t qidx)
+{
+	return NULL;
+}
+
+static inline void directpath_poll_proc_prefetch_th1(void *cq, uint32_t cons_idx) {}
+
 
 static inline bool directpath_poll(void)
 {

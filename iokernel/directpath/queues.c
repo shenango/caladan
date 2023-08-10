@@ -103,6 +103,40 @@ static uint64_t directpath_poll_cq_delay(struct directpath_ctx *ctx,
 	return hw_timestamp_delay_us(cqe);
 }
 
+void directpath_poll_proc_prefetch(struct proc *p)
+{
+	if (p->directpath_data)
+		prefetch((struct directpath_ctx *)p->directpath_data);
+}
+
+void *directpath_poll_proc_prefetch_th0(struct proc *p, uint32_t qidx)
+{
+	struct directpath_ctx *ctx = (struct directpath_ctx *)p->directpath_data;
+	struct cq *cq;
+
+	if (!cfg.vfio_directpath)
+		return NULL;
+
+	if (bitmap_test(ctx->armed_rx_queues, qidx))
+		return NULL;
+
+	cq = &ctx->qps[qidx].rx_cq;
+	prefetch(cq);
+	return cq;
+}
+
+void directpath_poll_proc_prefetch_th1(void *cqp, uint32_t cons_idx)
+{
+	struct cq *cq = (struct cq *)cqp;
+	struct mlx5_cqe64 *cqe;
+
+	if (cqp == NULL)
+		return;
+
+	cqe = &cq->buf[cons_idx & (cq->cqe_cnt - 1)];
+	prefetch(cqe);
+}
+
 bool directpath_poll_proc(struct proc *p, uint64_t *delay_cycles, uint64_t cur_tsc)
 {
 	struct directpath_ctx *ctx = (struct directpath_ctx *)p->directpath_data;

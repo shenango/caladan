@@ -63,7 +63,7 @@ static void command_rss_update(struct directpath_ctx *ctx, struct cmd_slot *s)
 	uint32_t active_qs[ctx->nr_qs];
 	unsigned int i, j = 0, inlen, nr_entries, nr_active = 0;
 
-	nr_entries = u32_round_pow2(ctx->nr_qs);
+	nr_entries = u16_round_pow2(ctx->nr_qs);
 	inlen = DEVX_ST_SZ_BYTES(modify_rqt_in);
 	inlen += DEVX_ST_SZ_BYTES(rq_num) * nr_entries;
 

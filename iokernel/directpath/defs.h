@@ -110,27 +110,30 @@ struct qp {
 
 struct directpath_ctx {
 	/* hot data */
-	struct proc *p;
+	struct proc		*p;
 
-	unsigned int kill:1;
-	unsigned int use_rmp:1;
+	uint16_t		nr_armed;
+	uint16_t		nr_qs;
+	uint16_t		active_rx_count;
+	uint16_t		disabled_rx_count;
 
-	uint32_t	nr_armed;
-	uint32_t	nr_qs;
+	uint64_t		sw_rss_gen;
+	uint64_t		hw_rss_gen;
 
 	DEFINE_BITMAP(armed_rx_queues, NCPU);
 
+	/* semi hot data */
 	/* command data */
 	int8_t command_slot;
 	struct list_node command_slot_wait_link;
 
-	uint64_t sw_rss_gen;
-	uint64_t hw_rss_gen;
-	uint32_t active_rx_count;
-	uint32_t disabled_rx_count;
+	uint32_t *rqns;
+
 	DEFINE_BITMAP(active_rx_queues, NCPU);
 
-	uint32_t *rqns;
+	unsigned int kill:1;
+	unsigned int use_rmp:1;
+
 
 	/* cold data */
 	struct ibv_pd *pd;
@@ -166,6 +169,8 @@ struct directpath_ctx {
 	struct qp qps[];
 };
 
+BUILD_ASSERT(offsetof(struct directpath_ctx, command_slot) == CACHE_LINE_SIZE);
+
 static inline bool directpath_command_queued(struct directpath_ctx *ctx)
 {
 	return ctx->command_slot >= COMMAND_SLOT_WAITING;
@@ -190,6 +195,10 @@ static inline struct mlx5_cqe64 *get_cqe(struct cq *cq, uint32_t idx)
 #define u32_round_pow2(val) 		\
 	({assert(sizeof(val) == 4);		\
 		 1U << u32_log(val - 1);})
+
+#define u16_round_pow2(val) 		\
+	({assert(sizeof(val) == 2);		\
+		 1U << u32_log((uint32_t)val);})
 
 #define LOG_CMD_FAIL(msg, cmdtype, out)                      \
   do {                                                       \
