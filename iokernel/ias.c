@@ -83,6 +83,7 @@ static void ias_cleanup_core(unsigned int core)
 	struct ias_data *sd = cores[core];
 
 	if (sd) {
+		sd->last_run_us = now_us;
 		sd->loc_last_us[core] = now_us;
 		sd->threads_active--;
 	}
@@ -120,6 +121,7 @@ static int ias_attach(struct proc *p, struct sched_spec *sched_cfg)
 
 	/* reserve priority cores */
 	i = sd->threads_guaranteed;
+	sd->has_core_resv = i > 0;
 	while (i > 0) {
 		core = bitmap_find_next_cleared(ias_reserved_cores, NCPU, 0);
 		if (core == NCPU)
@@ -261,15 +263,15 @@ static bool ias_can_preempt_core(struct ias_data *sd, unsigned int core)
 	if (sd == cur)
 		return false;
 	/* can't preempt if the current task reserved this core */
-	if (bitmap_test(cur->reserved_cores, core))
+	if (cur->has_core_resv && bitmap_test(cur->reserved_cores, core))
 		return false;
 	/* BE tasks can't preempt LC tasks */
 	if (cur->is_lc && !sd->is_lc)
 		return false;
 	/* can't preempt a task that will be using <= burst cores */
 	if (cur->is_lc == sd->is_lc &&
-	    (int)cur->threads_active - (int)cur->threads_guaranteed <=
-	    (int)sd->threads_active - (int)sd->threads_guaranteed + 1) {
+	    cur->threads_active - cur->threads_guaranteed <=
+	    sd->threads_active - sd->threads_guaranteed + 1) {
 		return false;
 	}
 
@@ -294,6 +296,10 @@ static float ias_locality_score(struct ias_data *sd, unsigned int core)
 	if (!cfg.noht && cores[sib] == sd)
 		return 1.0f;
 
+	/* avoid checking loc_last_us array for very cold procs */
+	if (now_us - sd->last_run_us > IAS_LOC_EVICTED_US)
+		return 0.0f;
+
 	delta_us = now_us - MAX(sd->loc_last_us[core],
 				cfg.noht ? 0 : sd->loc_last_us[sib]);
 	if (delta_us >= IAS_LOC_EVICTED_US)
@@ -308,7 +314,7 @@ static float ias_core_score(struct ias_data *sd, unsigned int core)
 
 	score = ias_locality_score(sd, core);
 
-	if (bitmap_test(sd->reserved_cores, core))
+	if (sd->has_core_resv && bitmap_test(sd->reserved_cores, core))
 		score += 7.0f;
 
 	if (cfg.noht)

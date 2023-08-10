@@ -27,21 +27,23 @@
 struct ias_data {
 	struct proc		*p;
 	unsigned int		is_congested:1;
+	unsigned int       	has_core_resv:1;
 	unsigned int		is_bwlimited:1;
 	unsigned int		is_lc:1;
 	unsigned int		is_starved:1;
 	uint64_t		qdelay_us;
-	uint64_t		quantum_us;
-	struct list_node	all_link;
-	struct list_node	congested_link;
-	struct list_node	starved_link;
-	DEFINE_BITMAP(reserved_cores, NCPU);
+	uint64_t		last_run_us;
 
 	/* thread usage limits */
-	int			threads_guaranteed;/* the number promised */
-	int			threads_max;	/* the most possible */
-	int			threads_limit;	/* the most allowed */
-	int			threads_active;	/* the number active */
+	int16_t			threads_guaranteed;/* the number promised */
+	int16_t			threads_max;	/* the most possible */
+	int16_t			threads_limit;	/* the most allowed */
+	int16_t			threads_active;	/* the number active */
+
+	struct list_node	congested_link;
+	struct list_node	starved_link;
+
+	DEFINE_BITMAP(reserved_cores, NCPU);
 
 	/* locality subcontroller */
 	uint64_t		loc_last_us[NCPU];
@@ -50,7 +52,11 @@ struct ias_data {
 	uint64_t		ht_punish_us;
 	uint64_t		ht_punish_count;
 
+	/* the time sharing subcontroller */
+	uint64_t		quantum_us;
+
 	/* memory bandwidth subcontroller */
+	struct list_node	all_link;
 	float			bw_llc_miss_rate;
 };
 
