@@ -30,7 +30,6 @@ struct ias_data {
 	unsigned int       	has_core_resv:1;
 	unsigned int		is_bwlimited:1;
 	unsigned int		is_lc:1;
-	unsigned int		is_starved:1;
 	uint64_t		qdelay_us;
 	uint64_t		last_run_us;
 
