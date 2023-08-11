@@ -194,7 +194,7 @@ static inline struct mlx5_cqe64 *get_cqe(struct cq *cq, uint32_t idx)
 
 #define u32_round_pow2(val) 		\
 	({assert(sizeof(val) == 4);		\
-		 1U << u32_log(val - 1);})
+		 1U << u32_log(val);})
 
 #define u16_round_pow2(val) 		\
 	({assert(sizeof(val) == 2);		\

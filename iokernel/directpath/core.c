@@ -1228,7 +1228,7 @@ int directpath_init(void)
 
 	if (nr_vfio_prealloc) {
 		directpath_preallocate(vfio_prealloc_rmp, vfio_prealloc_nrqs, nr_vfio_prealloc);
-		log_info("control: preallocated %u 1-thread directpath contexts", nr_vfio_prealloc);
+		log_info("control: preallocated %u %u-thread directpath contexts", nr_vfio_prealloc, vfio_prealloc_nrqs);
 	}
 
 	poll_thread_stop = true;
