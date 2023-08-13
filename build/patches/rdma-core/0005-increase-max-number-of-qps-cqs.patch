@@ -1,0 +1,25 @@
+From 150491685a48592a331bb919da78264221924290 Mon Sep 17 00:00:00 2001
+From: Josh Fried <joshuafried@gmail.com>
+Date: Wed, 9 Aug 2023 21:45:10 +0000
+Subject: [PATCH 5/5] increase max number of qps/cqs
+
+---
+ providers/mlx5/mlx5_vfio.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/providers/mlx5/mlx5_vfio.c b/providers/mlx5/mlx5_vfio.c
+index 614bd604..b0a94965 100644
+--- a/providers/mlx5/mlx5_vfio.c
++++ b/providers/mlx5/mlx5_vfio.c
+@@ -1939,6 +1939,8 @@ static int handle_hca_cap(struct mlx5_vfio_context *ctx, void *set_ctx, int set_
+ 		DEVX_SET(cmd_hca_cap, set_hca_cap, disable_link_up_by_init_hca, 1);
+ 
+ 	DEVX_SET(cmd_hca_cap, set_hca_cap, log_uar_page_sz, sys_page_shift - 12);
++	DEVX_SET(cmd_hca_cap, set_hca_cap, log_max_qp, MLX5_VFIO_CAP_GEN_MAX(ctx, log_max_qp));
++	DEVX_SET(cmd_hca_cap, set_hca_cap, log_max_cq, MLX5_VFIO_CAP_GEN_MAX(ctx, log_max_cq));
+ 
+ 	if (MLX5_VFIO_CAP_GEN_MAX(ctx, mkey_by_name))
+ 		DEVX_SET(cmd_hca_cap, set_hca_cap, mkey_by_name, 1);
+-- 
+2.39.2
+
