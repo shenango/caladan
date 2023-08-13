@@ -20,7 +20,7 @@ extern void preempt(void);
  */
 static inline void preempt_disable(void)
 {
-	perthread_incr(preempt_cnt);
+	asm volatile("addl $1, %%gs:__perthread_preempt_cnt(%%rip)" ::: "memory", "cc");
 	barrier();
 }
 
