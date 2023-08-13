@@ -70,6 +70,7 @@ extern struct ibv_context *context;
 struct mlx5_rmp {
 	struct mlx5_wq wq;
 	uint64_t rmp_head;
+	uint64_t rmp_tail;
 	spinlock_t lock;
 };
 

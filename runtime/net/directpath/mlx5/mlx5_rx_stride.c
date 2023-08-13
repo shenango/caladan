@@ -79,16 +79,20 @@ static inline void dec_sw_ref(void *buf, uint64_t count)
 
 }
 
-static inline void ref_reset_rmp(void *buf, uint32_t post_idx)
+static inline void ref_reset_hw(uint32_t post_idx)
+{
+	size_t i;
+
+	for (i = 0; i < maxks; i++)
+		hw_refs[i * nr_hw_refs + post_idx] = 0;
+}
+
+static inline void ref_reset_sw(void *buf)
 {
 	size_t i, idx = index_of_buf(buf);
 
 	for (i = 0; i < maxks; i++)
 		sw_refs[i * nrbufs + idx] = 0;
-
-	for (i = 0; i < maxks; i++)
-		hw_refs[i * nr_hw_refs + post_idx] = 0;
-
 }
 
 static inline void ref_reset_normp(void *buf, uint32_t post_idx)
@@ -97,12 +101,12 @@ static inline void ref_reset_normp(void *buf, uint32_t post_idx)
 	ACCESS_ONCE(sw_refs[idx]) = DIRECTPATH_NUM_STRIDES;
 }
 
-static inline uint64_t get_sw_ref(uint32_t buf_idx)
+static inline uint64_t get_sw_ref(void *buf)
 {
-	size_t i, count = 0;
+	size_t i, idx = index_of_buf(buf), count = 0;
 
 	for (i = 0; i < maxks; i++)
-		count += sw_refs[i * nrbufs + buf_idx];
+		count += sw_refs[i * nrbufs + idx];
 
 	return count;
 }
@@ -152,20 +156,20 @@ int mlx5_init_rxq_wq_stride(struct mlx5_wq *wq, void *seg_buf, uint32_t *dbr,
 		if (unlikely(!buf))
 			return -ENOMEM;
 
-		if (shared_rmp_enabled())
-			ref_reset_rmp(buf, i);
-		else
+		if (!shared_rmp_enabled())
 			ref_reset_normp(buf, i);
+
 		mlx5_stride_post_buf(wq, buf, i);
 	}
 
-	if (shared_rmp_enabled())
-		ACCESS_ONCE(runtime_info->directpath_strides_posted) = size * DIRECTPATH_NUM_STRIDES;
+	if (shared_rmp_enabled()) {
+		rmp.rmp_head = size;
+		ACCESS_ONCE(runtime_info->directpath_strides_posted) = size;
+	}
 
 	udma_to_device_barrier();
 	wq->dbr[0] = htobe32(size & 0xffff);
 	wq->head = size;
-	rmp.rmp_head = size;
 	return 0;
 }
 
@@ -197,9 +201,9 @@ static void mlx5_refill_strided_rxq(struct mlx5_rxq *v, uint32_t nrdesc)
 
 static void mlx5_refill_strided_rxq_rmp(void)
 {
-	uint32_t post_idx;
-	uint64_t start_head;
 	struct kthread *k;
+	uint32_t idx;
+	uint64_t start_head;
 	void *buf;
 
 	if (!spin_try_lock_np(&rmp.lock))
@@ -208,34 +212,22 @@ static void mlx5_refill_strided_rxq_rmp(void)
 	k = myk();
 	start_head = rmp.rmp_head;
 
-	while (likely(!preempt_cede_needed(k))) {
-		post_idx = rmp.rmp_head & (rmp.wq.cnt - 1);
-		buf = rmp.wq.buffers[post_idx];
-		if (unlikely(!buf))
+	/* scan RX buffer slots to find ones that hardware is done with */
+	while (rmp.rmp_tail < rmp.rmp_head) {
+		idx = rmp.rmp_tail & (rmp.wq.cnt - 1);
+		buf = rmp.wq.buffers[idx];
+
+		if (get_hw_ref(idx) != DIRECTPATH_NUM_STRIDES)
 			break;
 
-		if (get_hw_ref(post_idx) != DIRECTPATH_NUM_STRIDES)
-			break;
+		ref_reset_hw(idx);
 
+		/* record completed buffer */
 		sw_pending_buffers[sw_pending_head++ & (nrbufs - 1)] = buf;
-
-		buf = mempool_alloc(&directpath_buf_mp);
-		if (unlikely(!buf)) {
-			log_warn_ratelimited("out of rx buffers");
-			break;
-		}
-
-		ref_reset_rmp(buf, post_idx);
-		mlx5_stride_post_buf(&rmp.wq, buf, post_idx);
-		rmp.rmp_head++;
+		rmp.rmp_tail++;
 	}
 
-	if (rmp.rmp_head != start_head) {
-		udma_to_device_barrier();
-		rmp.wq.dbr[0] = htobe32(rmp.rmp_head & 0xffff);
-		ACCESS_ONCE(runtime_info->directpath_strides_posted) = rmp.rmp_head * DIRECTPATH_NUM_STRIDES;
-	}
-
+	/* check if any buffers are now free */
 	while (sw_pending_tail != sw_pending_head) {
 		if (unlikely(preempt_cede_needed(k)))
 			break;
@@ -243,17 +235,37 @@ static void mlx5_refill_strided_rxq_rmp(void)
 		buf = sw_pending_buffers[sw_pending_tail & (nrbufs - 1)];
 		assert(buf);
 
-		size_t buf_idx = index_of_buf(buf);
-
-		if (get_sw_ref(buf_idx) != DIRECTPATH_NUM_STRIDES)
+		if (get_sw_ref(buf) != DIRECTPATH_NUM_STRIDES)
 			break;
 
+		ref_reset_sw(buf);
 		mempool_free(&directpath_buf_mp, buf);
 		sw_pending_tail++;
 	}
 
+	/* keep cache footprint low */
 	if (sw_pending_head == sw_pending_tail)
 		sw_pending_head = sw_pending_tail = 0;
+
+	/* refill any free slots in the RX queue */
+	while (rmp.rmp_head - rmp.rmp_tail < rmp.wq.cnt) {
+		idx = rmp.rmp_head & (rmp.wq.cnt - 1);
+		buf = mempool_alloc(&directpath_buf_mp);
+		if (unlikely(!buf)) {
+			log_warn_ratelimited("out of rx buffers");
+			break;
+		}
+
+		mlx5_stride_post_buf(&rmp.wq, buf, idx);
+		rmp.rmp_head++;
+	}
+
+	/* notify NIC of newly posted buffers */
+	if (rmp.rmp_head != start_head) {
+		udma_to_device_barrier();
+		rmp.wq.dbr[0] = htobe32(rmp.rmp_head & 0xffff);
+		ACCESS_ONCE(runtime_info->directpath_strides_posted) = rmp.rmp_head;
+	}
 
 	spin_unlock_np(&rmp.lock);
 }

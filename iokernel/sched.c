@@ -582,7 +582,7 @@ static void sched_measure_delay(struct proc *p)
 {
 	struct delay_info dl;
 	struct thread *th;
-	uint64_t rxq_delay = 0, consumed_strides, posted_strides, next_poll_tsc;
+	uint64_t rxq_delay = 0, consumed_strides = 0, posted_strides, next_poll_tsc;
 	unsigned int i;
 
 	if (!proc_sched_should_poll(p, cur_tsc))
@@ -639,20 +639,22 @@ static void sched_measure_delay(struct proc *p)
 		}
 	}
 
-	consumed_strides = atomic64_read(&p->runtime_info->directpath_strides_consumed);
 
 	bool directpath_armed = true;
-	if (p->has_vfio_directpath)
+	if (p->has_vfio_directpath) {
 		directpath_armed = directpath_poll_proc(p, &rxq_delay, cur_tsc);
 
-	posted_strides = ACCESS_ONCE(p->runtime_info->directpath_strides_posted);
+		consumed_strides += atomic64_read(&p->runtime_info->directpath_strides_consumed);
+		posted_strides = ACCESS_ONCE(p->runtime_info->directpath_strides_posted);
+		posted_strides <<= DIRECTPATH_STRIDE_SHIFT;
 
-	if (posted_strides > consumed_strides &&
-	    posted_strides - consumed_strides < DIRECTPATH_STRIDE_REFILL_THRESH_HI) {
-		rx_send_to_runtime(p, 0, RX_REFILL_BUFS, 0);
-		STAT_INC(RX_REFILL, 1);
-		dl.has_work = true;
-		dl.parked_thread_busy |= sched_threads_active(p) == 0;
+		if (posted_strides > consumed_strides &&
+		    posted_strides - consumed_strides < DIRECTPATH_STRIDE_REFILL_THRESH_HI) {
+			rx_send_to_runtime(p, 0, RX_REFILL_BUFS, 0);
+			STAT_INC(RX_REFILL, 1);
+			dl.has_work = true;
+			dl.parked_thread_busy |= sched_threads_active(p) == 0;
+		}
 	}
 
 	if (rxq_delay) {
