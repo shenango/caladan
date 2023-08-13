@@ -6,9 +6,10 @@ extern crate byteorder;
 extern crate dns_parser;
 extern crate itertools;
 extern crate libc;
-extern crate mersenne_twister;
 extern crate net2;
 extern crate rand;
+extern crate rand_distr;
+extern crate rand_mt;
 extern crate shenango;
 extern crate test;
 
@@ -29,9 +30,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use clap::{App, Arg};
 use itertools::Itertools;
-use mersenne_twister::MersenneTwister;
-use rand::distributions::{Exp, IndependentSample};
-use rand::{Rng, SeedableRng};
+use rand::Rng;
+use rand_mt::Mt64;
 use shenango::udp::UdpSpawner;
 
 mod backend;
@@ -68,56 +68,8 @@ use reflex::ReflexProtocol;
 mod http;
 use http::HttpProtocol;
 
-#[derive(Copy, Clone, Debug)]
-enum Distribution {
-    Zero,
-    Constant(u64),
-    Exponential(f64),
-    Bimodal1(f64),
-    Bimodal2(f64),
-    Bimodal3(f64),
-}
-impl Distribution {
-    fn name(&self) -> &'static str {
-        match *self {
-            Distribution::Zero => "zero",
-            Distribution::Constant(_) => "constant",
-            Distribution::Exponential(_) => "exponential",
-            Distribution::Bimodal1(_) => "bimodal1",
-            Distribution::Bimodal2(_) => "bimodal2",
-            Distribution::Bimodal3(_) => "bimodal3",
-        }
-    }
-    fn sample<R: Rng>(&self, rng: &mut R) -> u64 {
-        match *self {
-            Distribution::Zero => 0,
-            Distribution::Constant(m) => m,
-            Distribution::Exponential(m) => Exp::new(1.0 / m).ind_sample(rng) as u64,
-            Distribution::Bimodal1(m) => {
-                if rng.gen_weighted_bool(10) {
-                    (m * 5.5) as u64
-                } else {
-                    (m * 0.5) as u64
-                }
-            }
-            Distribution::Bimodal2(m) => {
-                if rng.gen_weighted_bool(1000) {
-                    (m * 500.5) as u64
-                } else {
-                    (m * 0.5) as u64
-                }
-            }
-
-            Distribution::Bimodal3(m) => {
-                if rng.gen_weighted_bool(100) {
-                    (m * 5.5) as u64
-                } else {
-                    (m * 0.5) as u64
-                }
-            }
-        }
-    }
-}
+mod distribution;
+use distribution::Distribution;
 
 arg_enum! {
 #[derive(Copy, Clone)]
@@ -669,7 +621,7 @@ fn process_result(sched: &RequestSchedule, packets: &mut [Packet]) -> Option<Sch
 
 fn gen_packets_for_schedule(schedules: &Arc<Vec<RequestSchedule>>) -> (Vec<Packet>, Vec<usize>) {
     let mut packets: Vec<Packet> = Vec::new();
-    let mut rng: MersenneTwister = SeedableRng::from_seed(rand::thread_rng().gen::<u64>());
+    let mut rng: Mt64 = Mt64::new(rand::thread_rng().gen::<u64>());
     let mut sched_boundaries = Vec::new();
     let mut last = 100_000_000;
     let mut end = 100_000_000;
@@ -1197,6 +1149,14 @@ fn main() {
                 .help("How to display loadgen results"),
         )
         .arg(
+            Arg::with_name("distspec")
+                .long("distspec")
+                .takes_value(true)
+                .help("Distribution of request lengths to use, new format")
+                .conflicts_with("distribution")
+                .conflicts_with("mean"),
+        )
+        .arg(
             Arg::with_name("distribution")
                 .long("distribution")
                 .short("d")
@@ -1311,28 +1271,38 @@ fn main() {
     let dowarmup = matches.is_present("warmup");
     let live_mode = matches.is_present("live");
 
+    let distspec = match matches.is_present("distspec") {
+        true => value_t_or_exit!(matches, "distspec", String),
+        false => {
+            let mean = value_t_or_exit!(matches, "mean", f64);
+            match matches.value_of("distribution").unwrap() {
+                "zero" => "zero".to_string(),
+                "constant" => format!("constant:{}", mean),
+                "exponential" => format!("exponential:{}", mean),
+                "bimodal1" => format!("bimodal:0.9:{}:{}", mean * 0.5, mean * 5.5),
+                "bimodal2" => format!("bimodal:0.999:{}:{}", mean * 0.5, mean * 500.5),
+                "bimodal3" => format!("bimodal:0.99:{}:{}", mean * 0.5, mean * 5.5),
+                _ => unreachable!(),
+            }
+        }
+    };
+    let distribution = Distribution::create(&distspec).unwrap();
     let tport = value_t_or_exit!(matches, "transport", Transport);
     let proto: Arc<Box<dyn LoadgenProtocol>> = match matches.value_of("protocol").unwrap() {
         "synthetic" => Arc::new(Box::new(SyntheticProtocol::with_args(&matches, tport))),
         "memcached" => Arc::new(Box::new(MemcachedProtocol::with_args(&matches, tport))),
         "dns" => Arc::new(Box::new(DnsProtocol::with_args(&matches, tport))),
-        "reflex" => Arc::new(Box::new(ReflexProtocol::with_args(&matches, tport))),
+        "reflex" => Arc::new(Box::new(ReflexProtocol::with_args(
+            &matches,
+            tport,
+            distribution,
+        ))),
         "http" => Arc::new(Box::new(HttpProtocol::with_args(&matches, tport))),
         _ => unreachable!(),
     };
 
     let intersample_sleep = value_t_or_exit!(matches, "intersample_sleep", u64);
     let output = value_t_or_exit!(matches, "output", OutputMode);
-    let mean = value_t_or_exit!(matches, "mean", f64);
-    let distribution = match matches.value_of("distribution").unwrap() {
-        "zero" => Distribution::Zero,
-        "constant" => Distribution::Constant(mean as u64),
-        "exponential" => Distribution::Exponential(mean),
-        "bimodal1" => Distribution::Bimodal1(mean),
-        "bimodal2" => Distribution::Bimodal2(mean),
-        "bimodal3" => Distribution::Bimodal3(mean),
-        _ => unreachable!(),
-    };
     let samples = value_t_or_exit!(matches, "samples", usize);
     let rampup = value_t_or_exit!(matches, "rampup", usize);
     let mode = matches.value_of("mode").unwrap();

@@ -3,11 +3,10 @@ extern crate test;
 use std::result::Result;
 use std::time::Instant;
 
-extern crate mersenne_twister;
 extern crate rand;
 use duration_to_ns;
-use mersenne_twister::MersenneTwister;
-use rand::{Rng, SeedableRng};
+use rand::Rng;
+use rand_mt::Mt64;
 
 pub enum FakeWorker {
     Sqrt,
@@ -20,7 +19,7 @@ pub enum FakeWorker {
 impl FakeWorker {
     pub fn create(spec: &str) -> Result<Self, &str> {
         let seed: u64 = rand::thread_rng().gen();
-        let mut rng: MersenneTwister = SeedableRng::from_seed(seed);
+        let mut rng: Mt64 = Mt64::new(seed);
 
         let tokens: Vec<&str> = spec.split(":").collect();
         assert!(tokens.len() > 0);
@@ -40,7 +39,7 @@ impl FakeWorker {
                     "pointerchase" => {
                         assert!(tokens.len() > 2);
                         let seed: u64 = tokens[2].parse().unwrap();
-                        let mut rng: MersenneTwister = SeedableRng::from_seed(seed);
+                        let mut rng: Mt64 = Mt64::new(seed);
                         let nwords = size / 8;
                         let buf: Vec<usize> =
                             (0..nwords).map(|_| rng.gen::<usize>() % nwords).collect();
