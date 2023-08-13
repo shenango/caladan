@@ -205,6 +205,7 @@ static int ias_run_kthread_on_core(struct ias_data *sd, unsigned int core)
 	ias_gen[core]++;
 	bitmap_clear(ias_idle_cores, core);
 	sd->threads_active++;
+	sd->waking = true;
 	ias_update_congestion(sd);
 	return 0;
 }
@@ -457,6 +458,11 @@ static bool ias_notify_congested(struct proc *p, struct delay_info *delay)
 	/* stop if there is no congestion */
 	if (!congested) {
 		ias_unmark_congested(sd);
+		return false;
+	}
+
+	if (sd->waking) {
+		sd->waking = false;
 		return false;
 	}
 
