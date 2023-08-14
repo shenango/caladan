@@ -36,6 +36,7 @@
  */
 
 #include <inttypes.h>
+#include <rte_bus_pci.h>
 #include <rte_eal.h>
 #include <rte_ethdev.h>
 #include <rte_ether.h>
@@ -161,6 +162,18 @@ static inline int dpdk_port_init(uint8_t port, struct rte_mempool *mbuf_pool)
 			addr.addr_bytes[0], addr.addr_bytes[1],
 			addr.addr_bytes[2], addr.addr_bytes[3],
 			addr.addr_bytes[4], addr.addr_bytes[5]);
+
+	/* record the PCI address */
+	if (!nic_pci_addr_str && dev_info.device &&
+	    rte_bus_find_by_device(dev_info.device)) {
+		struct rte_pci_device *pci_dev = RTE_DEV_TO_PCI(dev_info.device);
+		nic_pci_addr.domain = pci_dev->addr.domain;
+		nic_pci_addr.bus = pci_dev->addr.bus;
+		nic_pci_addr.slot = pci_dev->addr.devid;
+		nic_pci_addr.func = pci_dev->addr.function;
+		nic_pci_addr_str = "";
+		memcpy(&iok_info->directpath_pci, &nic_pci_addr, sizeof(nic_pci_addr));
+	}
 
 	/* Enable RX in promiscuous mode for the Ethernet device. */
 	rte_eth_promiscuous_enable(port);
