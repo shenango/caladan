@@ -135,6 +135,7 @@ struct iokernel_info {
 	int			cycles_per_us;
 	struct eth_addr		host_mac;
 	bool			external_directpath_enabled;
+	bool			external_directpath_rmp;
 };
 
 BUILD_ASSERT(sizeof(struct iokernel_info) <= IOKERNEL_INFO_SIZE);

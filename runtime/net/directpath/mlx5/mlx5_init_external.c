@@ -133,6 +133,18 @@ int mlx5_init_ext_late(struct directpath_spec *spec, int bar_fd, int mem_fd)
 	if (unlikely(ret))
 		return ret;
 
+	if (!cfg_directpath_strided) {
+		directpath_buf_tcache = mempool_create_tcache(&directpath_buf_mp,
+			"runtime_rx_bufs", TCACHE_DEFAULT_MAG_SIZE);
+
+		if (unlikely(!directpath_buf_tcache))
+			return -ENOMEM;
+
+		for (i = 0; i < maxks; i++)
+			tcache_init_perthread(directpath_buf_tcache,
+			                      &perthread_get_remote(directpath_buf_pt, i));
+	}
+
 	iok.tx_buf = iok.rx_buf + iok.rx_len;
 	iok.tx_len = spec->tx_buf_region_size;
 	ret = net_init_mempool_late();

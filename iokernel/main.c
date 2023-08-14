@@ -284,6 +284,7 @@ int main(int argc, char *argv[])
 
 	iok_info->cycles_per_us = cycles_per_us;
 	iok_info->external_directpath_enabled = cfg.vfio_directpath;
+	iok_info->external_directpath_rmp = vfio_prealloc_rmp;
 
 	pthread_barrier_wait(&init_barrier);
 

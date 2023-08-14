@@ -12,7 +12,7 @@
 #define LOG_EQ_SIZE 10
 
 #define DEFAULT_CQ_LOG_SZ 8
-#define DEFAULT_RQ_LOG_SZ 7
+#define DEFAULT_RQ_LOG_SZ 10
 #define DEFAULT_SQ_LOG_SZ 7
 
 #define DIRECTPATH_PORT 1
