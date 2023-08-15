@@ -273,11 +273,11 @@ static size_t estimate_region_size(struct directpath_ctx *dp)
 
 	/* rx buffer region */
 	ALLOC(ctx_rx_buffer_region(dp), PGSIZE_2MB);
-	log_err("allocating %lu bytes for rx buf pool", ctx_rx_buffer_region(dp));
+	log_debug("allocating %lu bytes for rx buf pool", ctx_rx_buffer_region(dp));
 
 	/* tx buffer region */
 	ALLOC(ctx_tx_buffer_region(dp), PGSIZE_2MB);
-	log_err("allocating %lu bytes for tx buf pool", ctx_tx_buffer_region(dp));
+	log_debug("allocating %lu bytes for tx buf pool", ctx_tx_buffer_region(dp));
 
 	log_debug("reg size %lu, wasted %lu", total, wasted);
 
