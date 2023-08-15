@@ -648,7 +648,7 @@ static void sched_measure_delay(struct proc *p)
 		posted_strides = ACCESS_ONCE(p->runtime_info->directpath_strides_posted);
 		posted_strides <<= DIRECTPATH_STRIDE_SHIFT;
 
-		if (posted_strides > consumed_strides &&
+		if (posted_strides >= consumed_strides &&
 		    posted_strides - consumed_strides < DIRECTPATH_STRIDE_REFILL_THRESH_HI) {
 			rx_send_to_runtime(p, 0, RX_REFILL_BUFS, 0);
 			STAT_INC(RX_REFILL, 1);
