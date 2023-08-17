@@ -121,9 +121,8 @@ uint64_t timer_earliest_deadline(void)
 	return deadline_us;
 }
 
-static void timer_start_locked(struct timer_entry *e, uint64_t deadline_us)
+static void timer_start_locked(struct kthread *k, struct timer_entry *e, uint64_t deadline_us)
 {
-	struct kthread *k = myk();
 	int i;
 
 	assert_spin_lock_held(&k->timer_lock);
@@ -143,7 +142,6 @@ static void timer_start_locked(struct timer_entry *e, uint64_t deadline_us)
 	e->localk = k;
 	sift_up(k->timers, i);
 	e->armed = true;
-	e->executing = false;
 }
 
 /**
@@ -157,11 +155,75 @@ void timer_start(struct timer_entry *e, uint64_t deadline_us)
 {
 	struct kthread *k = getk();
 
+	e->cancelling = false;
+
 	spin_lock(&k->timer_lock);
-	timer_start_locked(e, deadline_us);
+	timer_start_locked(k, e, deadline_us);
 	update_q_ptrs(k);
 	spin_unlock(&k->timer_lock);
 	putk();
+}
+
+/**
+ * timer_restart - re-arms a timer on the same timer heap it previously used
+ * @e: the timer entry to start
+ * @deadline_us: the deadline in microseconds
+ *
+ * @e must have been formerly started with timer_start().
+ */
+void timer_restart(struct timer_entry *e, uint64_t deadline_us)
+{
+	struct kthread *k = e->localk;
+
+	spin_lock_np(&k->timer_lock);
+	if (likely(!e->cancelling)) {
+		timer_start_locked(k, e, deadline_us);
+		update_q_ptrs(k);
+	}
+	spin_unlock_np(&k->timer_lock);
+}
+
+static void timer_remove_armed(struct kthread *k, struct timer_entry *e)
+{
+	int last;
+
+	assert(e->armed);
+	assert_spin_lock_held(&k->timer_lock);
+
+	e->armed = false;
+
+	last = --k->timern;
+	if (e->idx != last) {
+		k->timers[e->idx] = k->timers[last];
+		k->timers[e->idx].e->idx = e->idx;
+		sift_up(k->timers, e->idx);
+		sift_down(k->timers, e->idx, k->timern);
+	}
+
+	update_q_ptrs(k);
+}
+
+bool timer_cancel_recurring(struct timer_entry *e)
+{
+	struct kthread *k = e->localk;
+
+	if (!k || load_acquire(&e->cancelling))
+		return false;
+
+	spin_lock_np(&k->timer_lock);
+	e->cancelling = true;
+	if (e->armed) {
+		timer_remove_armed(k, e);
+		spin_unlock_np(&k->timer_lock);
+		return true;
+	}
+
+	spin_unlock_np(&k->timer_lock);
+	if (unlikely(load_acquire(&e->executing))) {
+		while (load_acquire(&e->executing))
+			cpu_relax();
+	}
+	return false;
 }
 
 /**
@@ -174,7 +236,6 @@ void timer_start(struct timer_entry *e, uint64_t deadline_us)
 bool __timer_cancel(struct timer_entry *e)
 {
 	struct kthread *k = e->localk;
-	int last;
 
 	spin_lock_np(&k->timer_lock);
 
@@ -186,20 +247,8 @@ bool __timer_cancel(struct timer_entry *e)
 		}
 		return false;
 	}
-	e->armed = false;
 
-	last = --k->timern;
-	if (e->idx == last) {
-		update_q_ptrs(k);
-		spin_unlock_np(&k->timer_lock);
-		return true;
-	}
-
-	k->timers[e->idx] = k->timers[last];
-	k->timers[e->idx].e->idx = e->idx;
-	sift_up(k->timers, e->idx);
-	sift_down(k->timers, e->idx, k->timern);
-	update_q_ptrs(k);
+	timer_remove_armed(k, e);
 	spin_unlock_np(&k->timer_lock);
 
 	return true;
@@ -221,7 +270,7 @@ static void __timer_sleep(uint64_t deadline_us)
 	k = getk();
 	spin_lock_np(&k->timer_lock);
 	putk();
-	timer_start_locked(&e, deadline_us);
+	timer_start_locked(k, &e, deadline_us);
 	update_q_ptrs(k);
 	thread_park_and_unlock_np(&k->timer_lock);
 

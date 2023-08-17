@@ -15,6 +15,7 @@ struct kthread;
 struct timer_entry {
 	bool		armed;
 	bool		executing;
+	bool		cancelling;
 	unsigned int	idx;
 	timer_fn_t	fn;
 	unsigned long	arg;
@@ -39,6 +40,7 @@ timer_init(struct timer_entry *e, timer_fn_t fn, unsigned long arg)
 	e->executing = false;
 	e->fn = fn;
 	e->arg = arg;
+	e->localk = NULL;
 }
 
 /**
@@ -78,6 +80,10 @@ static inline bool timer_cancel(struct timer_entry *e)
 
 	return __timer_cancel(e);
 }
+
+extern void timer_restart(struct timer_entry *e, uint64_t deadline_us);
+extern bool timer_cancel_recurring(struct timer_entry *e);
+
 
 
 /*
