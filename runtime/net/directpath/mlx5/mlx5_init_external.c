@@ -153,6 +153,11 @@ int mlx5_init_ext_late(struct directpath_spec *spec, int bar_fd, int mem_fd)
 		return ret;
 	}
 
+	ret = net_init_mempool_threads();
+	if (unlikely(ret)) {
+		log_err("failed to setup late perthread tx buf caches");
+		return ret;
+	}
 	/*
 	 * The NIC memory registration is done using the VA of the shared memory
 	 * region as mapped in the iokernel. This computes the offset to add to

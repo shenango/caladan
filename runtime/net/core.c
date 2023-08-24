@@ -28,9 +28,20 @@ static struct mempool net_tx_buf_mp;
 static struct tcache *net_tx_buf_tcache;
 static DEFINE_PERTHREAD(struct tcache_perthread, net_tx_buf_pt);
 
+int net_init_mempool_threads(void)
+{
+	int i;
+
+	for (i = 0; i < maxks; i++)
+		tcache_init_perthread(net_tx_buf_tcache,
+			&perthread_get_remote(net_tx_buf_pt, i));
+
+	return 0;
+}
+
 int net_init_mempool(void)
 {
-	int i, ret;
+	int ret;
 
 	ret = mempool_create(&net_tx_buf_mp, iok.tx_buf, iok.tx_len, PGSIZE_2MB,
 			     align_up(net_get_mtu() + MBUF_HEAD_LEN + MBUF_DEFAULT_HEADROOM,
@@ -42,10 +53,6 @@ int net_init_mempool(void)
 		"runtime_tx_bufs", TCACHE_DEFAULT_MAG_SIZE);
 	if (unlikely(!net_tx_buf_tcache))
 		return -ENOMEM;
-
-	for (i = 0; i < maxks; i++)
-		tcache_init_perthread(net_tx_buf_tcache,
-			&perthread_get_remote(net_tx_buf_pt, i));
 
 	return 0;
 }
@@ -665,6 +672,10 @@ int net_init_thread(void)
 		return -ENOMEM;
 
 	k->iokernel_softirq = th;
+
+	if (!cfg_directpath_external())
+		tcache_init_perthread(net_tx_buf_tcache, &perthread_get(net_tx_buf_pt));
+
 	return 0;
 }
 
