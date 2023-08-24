@@ -740,10 +740,9 @@ extern int stat_init_late(void);
 extern int tcp_init_late(void);
 extern int rcu_init_late(void);
 extern int directpath_init_late(void);
-extern int net_init_late(void);
 
 extern int ioqueues_init_early(void);
-extern int net_init_mempool_late(void);
+extern int net_init_mempool(void);
 
 struct directpath_spec;
 extern int mlx5_init_ext_late(struct directpath_spec *spec, int bar_fd, int mem_fd);

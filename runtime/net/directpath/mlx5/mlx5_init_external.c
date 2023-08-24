@@ -147,7 +147,7 @@ int mlx5_init_ext_late(struct directpath_spec *spec, int bar_fd, int mem_fd)
 
 	iok.tx_buf = iok.rx_buf + iok.rx_len;
 	iok.tx_len = spec->tx_buf_region_size;
-	ret = net_init_mempool_late();
+	ret = net_init_mempool();
 	if (unlikely(ret)) {
 		log_err("failed to setup late tx mempools");
 		return ret;

@@ -79,7 +79,6 @@ static const struct init_entry thread_init_handlers[] = {
 
 static const struct init_entry late_init_handlers[] = {
 	/* network stack */
-	LATE_INITIALIZER(net),
 	LATE_INITIALIZER(arp),
 	LATE_INITIALIZER(stat),
 	LATE_INITIALIZER(tcp),

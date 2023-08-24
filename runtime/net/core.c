@@ -28,7 +28,7 @@ static struct mempool net_tx_buf_mp;
 static struct tcache *net_tx_buf_tcache;
 static DEFINE_PERTHREAD(struct tcache_perthread, net_tx_buf_pt);
 
-int net_init_mempool_late(void)
+int net_init_mempool(void)
 {
 	int i, ret;
 
@@ -702,14 +702,6 @@ static struct net_driver_ops iokernel_ops = {
 	.get_flow_affinity = compute_flow_affinity,
 };
 
-int net_init_late(void)
-{
-	/* iokernel may provide buffers later */
-	if (cfg_directpath_external())
-		return 0;
-
-	return net_init_mempool_late();
-}
 
 /**
  * net_init - initializes the network stack
@@ -724,5 +716,8 @@ int net_init(void)
 	if (!cfg_directpath_enabled())
 		net_ops = iokernel_ops;
 
-	return 0;
+	if (cfg_directpath_external())
+		return 0;
+
+	return net_init_mempool();
 }
