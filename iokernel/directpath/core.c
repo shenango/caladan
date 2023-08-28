@@ -417,8 +417,12 @@ static int fill_wqc(struct directpath_ctx *dp, struct qp *qp, struct wq *wq,
 	uint64_t bufs, dbr;
 	size_t bbsz = MLX5_SEND_WQE_BB;
 
-	if (is_rq && dp->use_rmp)
+	if (!is_rq)
+		bbsz = MLX5_SEND_WQE_BB;
+	else if (dp->use_rmp)
 		bbsz = sizeof(struct mlx5_mprq_wqe);
+	else
+		bbsz = sizeof(struct mlx5_wqe_data_seg);
 
 	ret = alloc_from_uregion(dp, bbsz * wqe_cnt, PGSIZE_4KB, &bufs);
 	if (ret)

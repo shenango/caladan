@@ -3682,7 +3682,7 @@ struct mlx5_ifc_qpc_bits {
 	u8         reserved_at_10[0x2];
 	u8         isolate_vl_tc[0x1];
 	u8         pm_state[0x2];
-	u8         reserved_at_15[0x1];
+	u8         rdma_wr_disabled[0x1];
 	u8	   req_e2e_credit_mode[0x2];
 	u8         offload_type[0x4];
 	u8         end_padding_mode[0x2];
@@ -3878,7 +3878,7 @@ struct mlx5_ifc_create_qp_in_bits {
 
 	struct mlx5_ifc_qpc_bits qpc;
 
-	u8         reserved_at_800[0x40];
+	u8         wq_umem_offset[0x40];
 
 	u8         wq_umem_id[0x20];
 
