@@ -228,19 +228,27 @@ static void mlx5_refill_strided_rxq_rmp(void)
 	}
 
 	/* check if any buffers are now free */
-	while (sw_pending_tail != sw_pending_head) {
+	uint64_t incr = 1;
+	for (size_t i = sw_pending_tail; i != sw_pending_head; i++) {
 		if (unlikely(preempt_cede_needed(k)))
 			break;
 
-		buf = sw_pending_buffers[sw_pending_tail & (nrbufs - 1)];
-		assert(buf);
+		buf = sw_pending_buffers[i & (nrbufs - 1)];
+		if (!buf) {
+			sw_pending_tail += incr;
+			continue;
+		}
 
-		if (get_sw_ref(buf) != DIRECTPATH_NUM_STRIDES)
-			break;
+		if (get_sw_ref(buf) != DIRECTPATH_NUM_STRIDES) {
+			/* stop incrementing the tail once we've hit a hole */
+			incr = 0;
+			continue;
+		}
 
 		ref_reset_sw(buf);
 		mempool_free(&directpath_buf_mp, buf);
-		sw_pending_tail++;
+		sw_pending_buffers[i & (nrbufs - 1)] = NULL;
+		sw_pending_tail += incr;
 	}
 
 	/* keep cache footprint low */
@@ -265,6 +273,16 @@ static void mlx5_refill_strided_rxq_rmp(void)
 		udma_to_device_barrier();
 		rmp.wq.dbr[0] = htobe32(rmp.rmp_head & 0xffff);
 		ACCESS_ONCE(runtime_info->directpath_strides_posted) = rmp.rmp_head;
+	}
+
+	/* if completely out of buffers, try reclaiming some from TCP stack */
+	if (unlikely(rmp.rmp_head == rmp.rmp_tail)) {
+		static uint64_t last_out_of_bufs;
+		if (rmp.rmp_head >= last_out_of_bufs) {
+			thread_spawn((thread_fn_t)tcp_free_rx_bufs, NULL);
+			/* only try this once per full cycle of RQ buffers */
+			last_out_of_bufs = rmp.rmp_head + rmp.wq.cnt;
+		}
 	}
 
 	spin_unlock_np(&rmp.lock);

@@ -151,6 +151,39 @@ static void tcp_worker(void *arg)
 }
 
 /**
+ * tcp_free_rx_bufs - try to free some buffers when we are running low
+ *
+ * This function scans all active TCP connections, dropping packets in the
+ * out-of-order queue and waking any waiters to handle in-order packets
+ */
+void tcp_free_rx_bufs(void)
+{
+	tcpconn_t *c;
+
+	LIST_HEAD(mbufs);
+	LIST_HEAD(waiters);
+
+	spin_lock_np(&tcp_lock);
+
+	list_for_each(&tcp_conns, c, global_link) {
+		if (list_empty_volatile(&c->rxq_ooo) && list_empty_volatile(&c->rxq))
+			continue;
+
+		spin_lock_np(&c->lock);
+		waitq_release_start(&c->rx_wq, &waiters);
+		list_append_list(&mbufs, &c->rxq_ooo);
+		c->rxq_ooo_len = 0;
+		spin_unlock_np(&c->lock);
+	}
+
+	spin_unlock_np(&tcp_lock);
+
+	mbuf_list_free(&mbufs);
+	waitq_release_finish(&waiters);
+}
+
+
+/**
  * tcp_conn_ack - removes acknowledged packets from TX queue
  * @c: the TCP connection to update
  * @freeq: a pointer to a list to store acknowledged buffers to later free

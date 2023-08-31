@@ -29,7 +29,8 @@ extern void net_rx_icmp(struct mbuf *m, const struct ip_hdr *iphdr,
 			uint16_t len);
 extern void net_rx_trans(struct mbuf *m);
 extern void tcp_rx_closed(struct mbuf *m);
-void net_rx_batch(struct mbuf **ms, unsigned int nr);
+extern void tcp_free_rx_bufs(void);
+extern void net_rx_batch(struct mbuf **ms, unsigned int nr);
 
 
 /*
