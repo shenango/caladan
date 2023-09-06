@@ -88,7 +88,8 @@ static void directpath_queue_update_state(struct directpath_ctx *ctx,
 }
 
 static uint64_t directpath_poll_cq_delay(struct directpath_ctx *ctx,
-	                                     struct thread *th, struct cq *cq)
+                                         struct thread *th, struct cq *cq,
+                                         bool do_arm)
 {
 	uint32_t cons_idx;
 	struct mlx5_cqe64 *cqe;
@@ -96,7 +97,7 @@ static uint64_t directpath_poll_cq_delay(struct directpath_ctx *ctx,
 	cons_idx = ACCESS_ONCE(th->q_ptrs->directpath_rx_tail);
 	cqe = get_cqe(cq, cons_idx);
 	if (!cqe) {
-		directpath_arm_queue(ctx, cq, cons_idx);
+		if (do_arm) directpath_arm_queue(ctx, cq, cons_idx);
 		return 0;
 	}
 
@@ -137,7 +138,8 @@ void directpath_poll_proc_prefetch_th1(void *cqp, uint32_t cons_idx)
 	prefetch(cqe);
 }
 
-bool directpath_poll_proc(struct proc *p, uint64_t *delay_cycles, uint64_t cur_tsc)
+bool directpath_poll_proc(struct proc *p, uint64_t *delay_cycles,
+                          uint64_t cur_tsc, bool should_arm)
 {
 	struct directpath_ctx *ctx = (struct directpath_ctx *)p->directpath_data;
 	struct cq *cq;
@@ -154,7 +156,7 @@ bool directpath_poll_proc(struct proc *p, uint64_t *delay_cycles, uint64_t cur_t
 		cq = &ctx->qps[i].rx_cq;
 
 		if (!bitmap_test(ctx->armed_rx_queues, i))
-			delay = MAX(directpath_poll_cq_delay(ctx, th, cq), delay);
+			delay = MAX(directpath_poll_cq_delay(ctx, th, cq, should_arm), delay);
 
 		if (!cfg.directpath_active_rss)
 			continue;

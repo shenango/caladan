@@ -639,7 +639,7 @@ static int create_cq(struct directpath_ctx *dp, struct cq *cq, uint32_t log_nr_c
 		CQ_PERIOD_MODE_UPON_CQE = 1,
 	};
 
-	DEVX_SET(cqc, cq_ctx, cq_period_mode, 1); // TODO figure this out
+	DEVX_SET(cqc, cq_ctx, cq_period_mode, 0); // TODO figure this out
 	DEVX_SET(cqc, cq_ctx, cqe_comp_en, 0 /* no compression */); // TODO enable this
 	// DEVX_SET(cqc, cq_ctx, mini_cqe_res_format, );
 	// DEVX_SET(cqc, cq_ctx, cqe_comp_layout, 0 /* BASIC_CQE_COMPRESSION */);

@@ -20,6 +20,8 @@
 #include "hw_timestamp.h"
 
 #define PROC_TIMER_WHEEL_THRESH_US 100
+#define PROC_TIMER_WHEEL_ENABLE_THRESH 200
+#define PROC_STANDARD_POLL_THRESH 16
 
 /* a bitmap of cores available to be allocated by the scheduler */
 DEFINE_BITMAP(sched_allowed_cores, NCPU);
@@ -40,6 +42,7 @@ unsigned int sched_cores_tbl[NCPU];
 int sched_cores_nr;
 
 static int nr_guaranteed;
+static unsigned long nr_procs;
 
 LIST_HEAD(poll_list);
 
@@ -576,6 +579,9 @@ static bool sched_proc_can_unpoll(struct proc *p)
 	if (unlikely(!p->started))
 		return false;
 
+	if (nr_procs < PROC_TIMER_WHEEL_ENABLE_THRESH)
+		return false;
+
 	return !p->has_directpath || p->has_vfio_directpath;
 }
 
@@ -643,7 +649,8 @@ static void sched_measure_delay(struct proc *p)
 
 	bool directpath_armed = true;
 	if (p->has_vfio_directpath) {
-		directpath_armed = directpath_poll_proc(p, &rxq_delay, cur_tsc);
+		bool do_arm = nr_procs > PROC_STANDARD_POLL_THRESH;
+		directpath_armed = directpath_poll_proc(p, &rxq_delay, cur_tsc, do_arm);
 
 		consumed_strides += atomic64_read(&p->runtime_info->directpath_strides_consumed);
 		posted_strides = ACCESS_ONCE(p->runtime_info->directpath_strides_posted);
@@ -700,6 +707,14 @@ static void sched_detect_io_for_idle_runtime(struct proc *p)
 	bool busy = false, standing_queue;
 	int i;
 	uint64_t delay;
+
+	if (p->has_vfio_directpath) {
+		delay = 0;
+		directpath_poll_proc(p, &delay, cur_tsc, false);
+		if (delay)
+			sched_add_core(p);
+		return;
+	}
 
 	for (i = 0; i < p->thread_count; i++) {
 		th = &p->threads[i];
@@ -780,12 +795,10 @@ void sched_poll(void)
 			prefetch(p_next);
 			sched_measure_delay(p);
 		}
-	} else if (!cfg.noidlefastwake && !cfg.vfio_directpath) {
+	} else if (!cfg.noidlefastwake && nr_procs < PROC_STANDARD_POLL_THRESH) {
 		/* check if any idle directpath runtimes have received I/Os */
 		for (i = 0; i < dp.nr_clients; i++) {
 			p = dp.clients[i];
-			if (p->has_vfio_directpath)
-				continue;
 			if (p->has_directpath && sched_threads_active(p) == 0)
 				sched_detect_io_for_idle_runtime(p);
 		}
@@ -893,6 +906,7 @@ int sched_attach_proc(struct proc *p)
 
 	nr_guaranteed += p->sched_cfg.guaranteed_cores;
 	proc_enable_sched_poll_nocheck(p);
+	nr_procs++;
 
 	return 0;
 }
@@ -906,6 +920,7 @@ void sched_detach_proc(struct proc *p)
 	proc_disable_sched_poll(p);
 	sched_ops->proc_detach(p);
 	nr_guaranteed -= p->sched_cfg.guaranteed_cores;
+	nr_procs--;
 }
 
 static int sched_scan_node(int node)

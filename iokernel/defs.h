@@ -559,7 +559,7 @@ extern void directpath_preallocate(bool use_rmp, unsigned int nrqs, unsigned int
 
 /* must be called from the dataplane thread */
 extern bool directpath_poll(void);
-extern bool directpath_poll_proc(struct proc *p, uint64_t *delay_cycles, uint64_t cur_tsc);
+extern bool directpath_poll_proc(struct proc *p, uint64_t *delay_cycles, uint64_t cur_tsc, bool should_arm);
 extern void directpath_notify_waking(struct proc *p, struct thread *th);
 extern void directpath_dataplane_notify_kill(struct proc *p);
 extern void directpath_dataplane_attach(struct proc *p);
