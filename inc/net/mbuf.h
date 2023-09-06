@@ -23,11 +23,11 @@ struct mbuf {
 	struct mbuf	*next;	   /* the next mbuf in the mbufq */
 	unsigned char	*head;	   /* start of the buffer */
 	unsigned char	*data;	   /* current position within the buffer */
-	unsigned int	head_len;  /* length of the entire buffer from @head */
-	unsigned int	len;	   /* length of the data */
-	uint8_t		csum_type; /* type of checksum */
+	unsigned short	head_len;  /* length of the entire buffer from @head */
+	unsigned short	len;	   /* length of the data */
+	unsigned short	transport_off;  /* the offset of the transport header */
+	unsigned short	network_off;    /* the offset of the network header */
 	uint32_t	tx_dst_ip; /* dest IP (hint for loopback) */
-
 	union {
 		struct {
 			uint16_t tx_l4_sport;	 /* used for loopback hash */
@@ -37,12 +37,13 @@ struct mbuf {
 	};
 
 	union {
-		unsigned int	txflags;  /* TX offload flags */
+		uint8_t		csum_type; /* RX: type of checksum */
+		uint8_t		txflags;  /* TX offload flags */
 	};
-
-	unsigned short	network_off;	/* the offset of the network header */
-	unsigned short	transport_off;	/* the offset of the transport header */
-	unsigned long   release_data;	/* data for the release method */
+	uint8_t		flags;	    /* TCP: which flags were set? */
+	uint16_t	pad;
+	atomic_t	ref;	    /* a reference count for the mbuf */
+	unsigned long	release_data;	/* data for the release method */
 	void		(*release)(struct mbuf *m); /* frees the mbuf */
 
 	/* TCP fields */
@@ -50,8 +51,6 @@ struct mbuf {
 	uint64_t	timestamp;  /* the time the packet was last sent */
 	uint32_t	seg_seq;    /* the first seg number */
 	uint32_t	seg_end;    /* the last seg number (noninclusive) */
-	uint8_t		flags;	    /* which flags were set? */
-	atomic_t	ref;	    /* a reference count for the mbuf */
 };
 
 static inline unsigned char *__mbuf_pull(struct mbuf *m, unsigned int len)
@@ -245,6 +244,19 @@ static inline unsigned char *mbuf_transport_offset(struct mbuf *m)
 
 #define mbuf_transport_hdr(mbuf, hdr) \
 	(typeof(hdr) *)mbuf_transport_offset(mbuf)
+
+static inline void mbuf_mark_l4_ports(struct mbuf *m, uint16_t sport,
+	                              uint16_t dport)
+{
+	m->tx_l4_sport = sport;
+	m->tx_l4_dport = dport;
+}
+
+static inline void mbuf_mark_dst_ip(struct mbuf *m, uint32_t daddr)
+{
+	m->tx_dst_ip = daddr;
+}
+
 
 /**
  * mbuf_init - initializes an mbuf

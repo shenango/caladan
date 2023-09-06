@@ -17,6 +17,8 @@
 #define MLX5_MPRQ_STRIDE_NUM_SHIFT 16
 #define MLX5_MPRQ_FILLER_MASK 0x80000000
 
+#define MBUF_COPY_THRESH (2 * CACHE_LINE_SIZE)
+
 /* number of total buffers in rx mempool */
 static size_t nrbufs;
 /* array of ref counters for buffers in rx mempool */
@@ -133,7 +135,8 @@ static inline void mlx5_stride_post_buf(struct mlx5_wq *wq, void *buf, uint32_t 
 static void directpath_strided_rx_completion(struct mbuf *m)
 {
 	preempt_disable();
-	dec_sw_ref(m->head, m->release_data);
+	if (m->release_data)
+		dec_sw_ref(m->head, m->release_data);
 	tcache_free(perthread_ptr(mbuf_pt), m);
 	preempt_enable();
 }
@@ -307,13 +310,19 @@ static struct mbuf *mbuf_fill_cqe(void *dbuf, struct mlx5_cqe64 *cqe,
 		return NULL;
 	}
 
-	prefetch(dbuf);
+	/* copy small packets directly into mbuf */
+	if (len <= MBUF_COPY_THRESH) {
+		void *buf = (void *)m + sizeof(*m);
+		memcpy(buf, dbuf + 2, len);
+		dec_sw_ref(dbuf, num_strides);
+		num_strides = 0;
+		dbuf = buf - 2;
+	}
 
 	// NIC pads two 0 bytes for alignment of IP headers etc
 	mbuf_init(m, dbuf + 2, len, 0);
 	m->len = len;
 	m->csum_type = mlx5_csum_ok(cqe);
-	m->csum = 0;
 	m->release = directpath_strided_rx_completion;
 	m->release_data = num_strides;
 
@@ -327,11 +336,17 @@ int mlx5_gather_rx_strided(struct mlx5_rxq *v, struct mbuf **ms,
 	uint8_t opcode;
 	uint16_t wqe_idx, stride_idx, stride_cnt, len;
 	uint32_t byte_cnt, start_head = v->cq.head, strides_consumed = 0;
-	int rx_cnt = 0;
+	int i, rx_cnt = 0;
 	void *buf;
 	struct kthread *k;
 	struct mlx5_cqe64 *cqe;
 	struct mlx5_wq *wq = get_rx_wq(v);
+
+	struct mlx5_cqe64 *cqes[budget];
+	void *bufs[budget];
+	uint32_t byte_cnts[budget];
+
+	assert(budget <= v->cq.cnt);
 
 	k = getk();
 
@@ -355,23 +370,39 @@ int mlx5_gather_rx_strided(struct mlx5_rxq *v, struct mbuf **ms,
 		byte_cnt = be32toh(cqe->byte_cnt);
 		stride_cnt = (byte_cnt & MLX5_MPRQ_STRIDE_NUM_MASK) >>
 				   MLX5_MPRQ_STRIDE_NUM_SHIFT;
-		len = byte_cnt & MLX5_MPRQ_LEN_MASK;
 
 		if (shared_rmp_enabled())
 			dec_hw_ref(wqe_idx, stride_cnt);
-		buf = load_acquire(&wq->buffers[wqe_idx]);
 		strides_consumed += stride_cnt;
 
+		buf = load_acquire(&wq->buffers[wqe_idx]);
 		if (byte_cnt & MLX5_MPRQ_FILLER_MASK) {
 			dec_sw_ref(buf, stride_cnt);
-		} else {
-			buf += stride_idx * DIRECTPATH_STRIDE_SIZE;
-			ms[rx_cnt] = mbuf_fill_cqe(buf, cqe, len, stride_cnt);
-			if (unlikely(!ms[rx_cnt])) {
-				dec_sw_ref(buf, stride_cnt);
-				break;
-			}
-			rx_cnt++;
+			continue;
+		}
+
+		buf += stride_idx * DIRECTPATH_STRIDE_SIZE;
+		prefetch(buf);
+		bufs[rx_cnt] = buf;
+		byte_cnts[rx_cnt] = byte_cnt;
+		cqes[rx_cnt++] = cqe;
+	}
+
+	for (i = 0; i < rx_cnt; i++) {
+		cqe = cqes[i];
+		buf = bufs[i];
+
+		stride_cnt = (byte_cnts[i] & MLX5_MPRQ_STRIDE_NUM_MASK) >>
+				   MLX5_MPRQ_STRIDE_NUM_SHIFT;
+		len = byte_cnts[i] & MLX5_MPRQ_LEN_MASK;
+		ms[i] = mbuf_fill_cqe(buf, cqe, len, stride_cnt);
+		if (unlikely(!ms[i])) {
+			// drop remaining packets
+			for (; i < rx_cnt; i++)
+				dec_sw_ref(bufs[i], (byte_cnts[i] & MLX5_MPRQ_STRIDE_NUM_MASK) >>
+				   MLX5_MPRQ_STRIDE_NUM_SHIFT);
+			rx_cnt = i;
+			break;
 		}
 	}
 
@@ -439,11 +470,13 @@ int mlx5_rx_stride_init_thread(void)
 int mlx5_rx_stride_init(void)
 {
 	int ret;
+	size_t sz;
 
 	if (!cfg_directpath_strided)
 		return 0;
 
-	ret = slab_create(&mbuf_slab, "mbufs", sizeof(struct mbuf), 0);
+	sz = sizeof(struct mbuf) + MBUF_COPY_THRESH;
+	ret = slab_create(&mbuf_slab, "mbufs", sz, 0);
 	if (ret)
 		return ret;
 

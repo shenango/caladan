@@ -301,7 +301,6 @@ static void mbuf_fill_cqe(struct mbuf *m, struct mlx5_cqe64 *cqe)
 	mbuf_init(m, (unsigned char *)m + RX_BUF_HEAD, len, 0);
 	m->len = len;
 	m->csum_type = mlx5_csum_ok(cqe);
-	m->csum = 0;
 	m->release = directpath_rx_completion;
 }
 

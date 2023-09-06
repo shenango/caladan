@@ -139,7 +139,6 @@ static struct mbuf *net_rx_alloc_mbuf(shmptr_t data, union rxq_cmd cmd)
 	mbuf_init(m, buf, cmd.len, 0);
 	m->len = cmd.len;
 	m->csum_type = cmd.csum_type;
-
 	m->release = (void (*)(struct mbuf *))sfree;
 
 out:
@@ -378,7 +377,6 @@ struct mbuf *net_tx_alloc_mbuf(size_t header_len)
 	// Set headroom so completion header is likely not on the same cache
 	// line as the payload.
 	mbuf_init(m, buf, net_get_mtu(), CACHE_LINE_SIZE + header_len);
-	m->csum_type = CHECKSUM_TYPE_NEEDED;
 	m->txflags = 0;
 	m->release_data = 0;
 	m->release = net_tx_release_mbuf;
@@ -618,7 +616,7 @@ int net_tx_ip(struct mbuf *m, uint8_t proto, uint32_t daddr)
 
 	/* add hints for loopback via IOKernel */
 	if (local && !cfg_directpath_enabled()) {
-		m->tx_dst_ip = daddr;
+		mbuf_mark_dst_ip(m, daddr);
 		m->hash = do_toeplitz(netcfg.addr, daddr, m->tx_l4_sport,
 			              m->tx_l4_dport);
 		m->txflags |= TXFLAG_LOCAL_HINT;

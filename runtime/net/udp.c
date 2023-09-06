@@ -36,8 +36,7 @@ static int udp_send_raw(struct mbuf *m, size_t len,
 	udphdr->len = hton16(len + sizeof(*udphdr));
 	udphdr->chksum = 0;
 
-	m->tx_l4_sport = laddr.port;
-	m->tx_l4_dport = raddr.port;
+	mbuf_mark_l4_ports(m, laddr.port, raddr.port);
 
 	/* send the IP packet */
 	return net_tx_ip(m, IPPROTO_UDP, raddr.ip);

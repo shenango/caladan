@@ -72,8 +72,8 @@ tcp_push_tcphdr(struct mbuf *m, tcpconn_t *c, uint8_t flags,
 	tcphdr->seq = hton32(m->seg_seq);
 	tcp_hdr_chksum(tcphdr, c->e.laddr.ip, c->e.raddr.ip, l4len);
 
-	m->tx_l4_sport = c->e.laddr.port;
-	m->tx_l4_dport = c->e.raddr.port;
+	mbuf_mark_l4_ports(m, c->e.laddr.port, c->e.raddr.port);
+
 	return tcphdr;
 }
 
@@ -108,8 +108,7 @@ int tcp_tx_raw_rst(struct netaddr laddr, struct netaddr raddr, tcp_seq seq)
 	tcphdr->win = hton16(0);
 	tcp_hdr_chksum(tcphdr, laddr.ip, raddr.ip, 0);
 
-	m->tx_l4_sport = laddr.port;
-	m->tx_l4_dport = raddr.port;
+	mbuf_mark_l4_ports(m, laddr.port, raddr.port);
 
 	/* transmit packet */
 	ret = net_tx_ip(m, IPPROTO_TCP, raddr.ip);
@@ -151,8 +150,7 @@ int tcp_tx_raw_rst_ack(struct netaddr laddr, struct netaddr raddr,
 	tcphdr->win = hton16(0);
 	tcp_hdr_chksum(tcphdr, laddr.ip, raddr.ip, 0);
 
-	m->tx_l4_sport = laddr.port;
-	m->tx_l4_dport = raddr.port;
+	mbuf_mark_l4_ports(m, laddr.port, raddr.port);
 
 	/* transmit packet */
 	ret = net_tx_ip(m, IPPROTO_TCP, raddr.ip);
