@@ -133,6 +133,74 @@ static int mlx5_modify_nic_vport_set_mac(uint8_t *mac)
 	return 0;
 }
 
+int directpath_query_cq(uint32_t cqn)
+{
+	uint32_t in[DEVX_ST_SZ_DW(query_cq_in)] = {0};
+	uint32_t out[DEVX_ST_SZ_DW(query_cq_out)];
+
+
+	DEVX_SET(query_cq_in, in, opcode, MLX5_CMD_OP_QUERY_CQ);
+	DEVX_SET(query_cq_in, in, cqn, cqn);
+
+	int ret = mlx5dv_devx_general_cmd(vfcontext, in, sizeof(in), out, sizeof(out));
+	if (ret) {
+		LOG_CMD_FAIL("query cq", query_cq_out, out);
+		return ret;
+	}
+
+	log_err("cq status is ok: %d", DEVX_GET(query_cq_out, out, cq_context.status) == 0);
+	log_err("cq head: %x", DEVX_GET(query_cq_out, out, cq_context.consumer_counter));
+	log_err("cq tail: %x", DEVX_GET(query_cq_out, out, cq_context.producer_counter));
+	return 0;
+}
+
+static void print_wq_status(void *wq)
+{
+	log_err("wq head: %x", DEVX_GET(wq, wq, sw_counter));
+	log_err("wq tail: %x", DEVX_GET(wq, wq, hw_counter));
+}
+
+int directpath_query_rq(uint32_t rqn)
+{
+	uint32_t in[DEVX_ST_SZ_DW(query_rq_in)] = {0};
+	uint32_t out[DEVX_ST_SZ_DW(query_rq_out)];
+
+
+	DEVX_SET(query_rq_in, in, opcode, MLX5_CMD_OP_QUERY_RQ);
+	DEVX_SET(query_rq_in, in, rqn, rqn);
+
+	int ret = mlx5dv_devx_general_cmd(vfcontext, in, sizeof(in), out, sizeof(out));
+	if (ret) {
+		LOG_CMD_FAIL("query rq", query_rq_out, out);
+		return ret;
+	}
+
+	log_err("rq status is ok: %d", DEVX_GET(query_rq_out, out, rq_context.state) == 1);
+	print_wq_status(DEVX_ADDR_OF(query_rq_out, out, rq_context.wq));
+	return 0;
+}
+
+int directpath_query_rmp(uint32_t rmpn)
+{
+	uint32_t in[DEVX_ST_SZ_DW(query_rmp_in)] = {0};
+	uint32_t out[DEVX_ST_SZ_DW(query_rmp_out)];
+
+
+	DEVX_SET(query_rmp_in, in, opcode, MLX5_CMD_OP_QUERY_RMP);
+	DEVX_SET(query_rmp_in, in, rmpn, rmpn);
+
+	int ret = mlx5dv_devx_general_cmd(vfcontext, in, sizeof(in), out, sizeof(out));
+	if (ret) {
+		LOG_CMD_FAIL("query rmp", query_rmp_out, out);
+		return ret;
+	}
+
+	log_err("rmp status is ok: %d", DEVX_GET(query_rmp_out, out, rmp_context.state) == 1);
+	print_wq_status(DEVX_ADDR_OF(query_rmp_out, out, rmp_context.wq));
+	return 0;
+}
+
+
 static int directpath_query_nic_vport(void)
 {
 	uint32_t in[DEVX_ST_SZ_DW(query_nic_vport_context_in)] = {0};
