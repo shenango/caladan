@@ -5,6 +5,7 @@
 #pragma once
 
 #include <asm/atomic.h>
+#include <asm/ops.h>
 #include <base/stddef.h>
 
 typedef void (*timer_fn_t)(unsigned long arg);
