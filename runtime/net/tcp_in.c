@@ -22,11 +22,17 @@ static void __tcp_rx_conn(tcpconn_t *c, struct mbuf *m, uint32_t ack,
 			  const unsigned char *optp, int optlen);
 
 /* four cases for the acceptability test for an incoming segment */
-static bool is_acceptable(tcpconn_t *c, uint32_t len, uint32_t seq)
+static bool is_acceptable(tcpconn_t *c, uint32_t len, uint32_t seq,
+                          uint8_t flags)
 {
 	assert_spin_lock_held(&c->lock);
 
 	if (len == 0 && c->pcb.rcv_wnd == 0) {
+               /* RFC 793 section 3.9 page 69: If the RCV.WND is zero,
+                  no segments will be acceptable, but special allowance
+                  should be made to accept valid ACKs, URGs and RSTs. */
+		if ((flags & TCP_ACK) || (flags & TCP_URG) || (flags & TCP_RST))
+			return true;
 		return seq == c->pcb.rcv_nxt;
 	} else if (len == 0 && c->pcb.rcv_wnd > 0) {
 		return wraps_lte(c->pcb.rcv_nxt, seq) &&
@@ -422,7 +428,7 @@ __tcp_rx_conn(tcpconn_t *c, struct mbuf *m, uint32_t ack, uint32_t snd_nxt,
 	 */
 
 	/* step 1 - acceptability testing */
-	if (unlikely(!is_acceptable(c, len, seq))) {
+	if (unlikely(!is_acceptable(c, len, seq, m->flags))) {
 		do_ack = (m->flags & TCP_RST) == 0;
 		goto done;
 	}
