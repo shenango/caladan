@@ -25,7 +25,6 @@ struct rwmutex_with_attr {
 
 BUILD_ASSERT(sizeof(pthread_barrier_t) >= sizeof(barrier_t));
 BUILD_ASSERT(sizeof(pthread_mutex_t) >= sizeof(struct mutex_with_attr));
-BUILD_ASSERT(sizeof(pthread_spinlock_t) >= sizeof(spinlock_t));
 BUILD_ASSERT(sizeof(pthread_cond_t) >= sizeof(struct condvar_with_attr));
 BUILD_ASSERT(sizeof(pthread_rwlock_t) >= sizeof(struct rwmutex_with_attr));
 
@@ -113,37 +112,63 @@ int pthread_barrier_destroy(pthread_barrier_t *barrier)
 	return 0;
 }
 
-int pthread_spin_destroy(pthread_spinlock_t *lock)
-{
-	NOTSELF(pthread_spin_destroy, lock);
-	return 0;
-}
-
-int pthread_spin_init(pthread_spinlock_t *lock, int pshared)
-{
-	NOTSELF(pthread_spin_init, lock, pshared);
-	spin_lock_init((spinlock_t *)lock);
-	return 0;
-}
-
 int pthread_spin_lock(pthread_spinlock_t *lock)
 {
-	NOTSELF(pthread_spin_lock, lock);
-	spin_lock_np((spinlock_t *)lock);
-	return 0;
+	int ret;
+	static typeof(pthread_spin_lock) *fn;
+	if (unlikely(!fn)) {
+		fn = dlsym(RTLD_NEXT, "pthread_spin_lock");
+		BUG_ON(!fn);
+	}
+
+	if (likely(shim_active()))
+		preempt_disable();
+
+	ret = fn(lock);
+
+	if (unlikely(ret != 0) && shim_active())
+		preempt_enable();
+
+	return ret;
 }
 
 int pthread_spin_trylock(pthread_spinlock_t *lock)
 {
-	NOTSELF(pthread_spin_trylock, lock);
-	return spin_try_lock_np((spinlock_t *)lock) ? 0 : EBUSY;
+	int ret;
+	static typeof(pthread_spin_trylock) *fn;
+
+	if (unlikely(!fn)) {
+		fn = dlsym(RTLD_NEXT, "pthread_spin_trylock");
+		BUG_ON(!fn);
+	}
+
+	if (likely(shim_active()))
+		preempt_disable();
+
+	ret = fn(lock);
+
+	if (ret != 0 && shim_active())
+		preempt_enable();
+
+	return ret;
 }
 
 int pthread_spin_unlock(pthread_spinlock_t *lock)
 {
-	NOTSELF(pthread_spin_unlock, lock);
-	spin_unlock_np((spinlock_t *)lock);
-	return 0;
+	int ret;
+	static typeof(pthread_spin_unlock) *fn;
+
+	if (unlikely(!fn)) {
+		fn = dlsym(RTLD_NEXT, "pthread_spin_unlock");
+		BUG_ON(!fn);
+	}
+
+	ret = fn(lock);
+
+	if (likely(shim_active()))
+		preempt_enable();
+
+	return ret;
 }
 
 int pthread_cond_init(pthread_cond_t *__restrict cond,
