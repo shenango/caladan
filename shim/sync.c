@@ -121,14 +121,13 @@ int pthread_spin_lock(pthread_spinlock_t *lock)
 		BUG_ON(!fn);
 	}
 
-	if (likely(shim_active()))
-		preempt_disable();
+	if (unlikely(!shim_active()))
+		return fn(lock);
 
+	preempt_disable();
 	ret = fn(lock);
-
-	if (unlikely(ret != 0) && shim_active())
+	if (unlikely(ret != 0))
 		preempt_enable();
-
 	return ret;
 }
 
@@ -142,12 +141,14 @@ int pthread_spin_trylock(pthread_spinlock_t *lock)
 		BUG_ON(!fn);
 	}
 
-	if (likely(shim_active()))
-		preempt_disable();
+	if (unlikely(!shim_active()))
+		return fn(lock);
+
+	preempt_disable();
 
 	ret = fn(lock);
 
-	if (ret != 0 && shim_active())
+	if (ret != 0)
 		preempt_enable();
 
 	return ret;
