@@ -61,7 +61,6 @@ enum {
 	MLX5_CMD_OP_CREATE_CQ = 0x400,
 	MLX5_CMD_OP_DESTROY_CQ = 0x401,
 	MLX5_CMD_OP_QUERY_CQ = 0x402,
-	MLX5_CMD_OP_QUERY_CQ = 0x402,
 	MLX5_CMD_OP_MODIFY_CQ = 0x403,
 	MLX5_CMD_OP_CREATE_QP = 0x500,
 	MLX5_CMD_OP_DESTROY_QP = 0x501,
@@ -6498,58 +6497,9 @@ struct mlx5_ifc_query_cq_in_bits {
 	u8         reserved_at_60[0x20];
 };
 
-struct mlx5_ifc_query_rmp_out_bits {
-	u8         status[0x8];
-	u8         reserved_at_8[0x18];
-
-	u8         syndrome[0x20];
-
-	u8         reserved_at_40[0xc0];
-
-	struct mlx5_ifc_rmpc_bits rmp_context;
-};
-
-struct mlx5_ifc_query_rmp_in_bits {
-	u8         opcode[0x10];
-	u8         reserved_at_10[0x10];
-
-	u8         reserved_at_20[0x10];
-	u8         op_mod[0x10];
-
-	u8         reserved_at_40[0x8];
-	u8         rmpn[0x18];
-
-	u8         reserved_at_60[0x20];
-};
-
-
 struct mlx5_ifc_rq_num_bits {
 	u8 reserved_at_0[0x8];
 	u8 rq_num[0x18];
-};
-
-struct mlx5_ifc_query_rq_out_bits {
-	u8         status[0x8];
-	u8         reserved_at_8[0x18];
-
-	u8         syndrome[0x20];
-
-	u8         reserved_at_40[0xc0];
-
-	struct mlx5_ifc_rqc_bits rq_context;
-};
-
-struct mlx5_ifc_query_rq_in_bits {
-	u8         opcode[0x10];
-	u8         reserved_at_10[0x10];
-
-	u8         reserved_at_20[0x10];
-	u8         op_mod[0x10];
-
-	u8         reserved_at_40[0x8];
-	u8         rqn[0x18];
-
-	u8         reserved_at_60[0x20];
 };
 
 struct mlx5_ifc_rqtc_bits {
