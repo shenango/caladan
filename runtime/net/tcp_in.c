@@ -498,7 +498,7 @@ __tcp_rx_conn(tcpconn_t *c, struct mbuf *m, uint32_t ack, uint32_t snd_nxt,
 	}
 	if (snd_was_full && !tcp_is_snd_full(c)) {
 		poll_set(&c->poll_src, POLLOUT);
-		waitq_release_start(&c->tx_wq, &waiters);
+		waitq_release_start(&c->tx_wq, &waiters, &c->lock);
 	}
 
 	/*

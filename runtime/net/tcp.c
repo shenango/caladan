@@ -171,7 +171,7 @@ void tcp_free_rx_bufs(void)
 			continue;
 
 		spin_lock_np(&c->lock);
-		waitq_release_start(&c->rx_wq, &waiters);
+		waitq_release_start(&c->rx_wq, &waiters, &c->lock);
 		list_append_list(&mbufs, &c->rxq_ooo);
 		c->rxq_ooo_len = 0;
 		spin_unlock_np(&c->lock);
@@ -231,7 +231,7 @@ void tcp_conn_set_state(tcpconn_t *c, int new_state)
 	/* unblock any threads waiting for the connection to be established */
 	if (c->pcb.state < TCP_STATE_ESTABLISHED &&
 	    new_state >= TCP_STATE_ESTABLISHED) {
-		waitq_release(&c->tx_wq);
+		waitq_release(&c->tx_wq, &c->lock);
 		poll_set(&c->poll_src, POLLOUT);
 	}
 
@@ -577,6 +577,7 @@ int tcp_listen(struct netaddr laddr, int backlog, tcpqueue_t **q_out)
  */
 int tcp_accept(tcpqueue_t *q, tcpconn_t **c_out)
 {
+	int ret;
 	tcpconn_t *c;
 
 	spin_lock_np(&q->l);
@@ -586,7 +587,11 @@ int tcp_accept(tcpqueue_t *q, tcpconn_t **c_out)
 			spin_unlock_np(&q->l);
 			return -EAGAIN;
 		}
-		waitq_wait(&q->wq, &q->l);
+		ret = waitq_wait(&q->wq, &q->l);
+		if (unlikely(ret)) {
+			spin_unlock_np(&q->l);
+			return ret;
+		}
 	}
 
 	/* was the queue drained and shutdown? */
@@ -616,6 +621,10 @@ static void __tcp_qshutdown(tcpqueue_t *q)
 	BUG_ON(q->shutdown);
 	q->shutdown = true;
 	poll_set(&q->poll_src, POLLRDHUP | POLLHUP | POLLIN);
+
+	/* wake up all pending threads */
+	waitq_release(&q->wq, &q->l);
+
 	spin_unlock_np(&q->l);
 
 	/* prevent ingress receive and error dispatch (after RCU period) */
@@ -634,9 +643,6 @@ void tcp_qshutdown(tcpqueue_t *q)
 {
 	/* shutdown the listen queue */
 	__tcp_qshutdown(q);
-
-	/* wake up all pending threads */
-	waitq_release(&q->wq);
 }
 
 /**
@@ -723,8 +729,13 @@ static int __tcp_dial(struct netaddr laddr, struct netaddr raddr,
 	}
 
 	/* wait until the connection is established or there is a failure */
-	while (!c->tx_closed && c->pcb.state < TCP_STATE_ESTABLISHED)
-		waitq_wait(&c->tx_wq, &c->lock);
+	while (!c->tx_closed && c->pcb.state < TCP_STATE_ESTABLISHED) {
+		ret = waitq_wait(&c->tx_wq, &c->lock);
+		if (!c->tx_closed && ret) {
+			spin_unlock_np(&c->lock);
+			return ret;
+		}
+	}
 
 	/* check if the connection failed */
 	if (c->tx_closed) {
@@ -856,6 +867,7 @@ struct netaddr tcp_remote_addr(tcpconn_t *c)
 static ssize_t tcp_read_wait(tcpconn_t *c, size_t len,
 			     struct list_head *q, struct mbuf **mout)
 {
+	int ret;
 	struct mbuf *m;
 	size_t readlen = 0;
 	bool do_ack = false;
@@ -869,7 +881,11 @@ static ssize_t tcp_read_wait(tcpconn_t *c, size_t len,
 			spin_unlock_np(&c->lock);
 			return -EAGAIN;
 		}
-		waitq_wait(&c->rx_wq, &c->lock);
+		ret = waitq_wait(&c->rx_wq, &c->lock);
+		if (unlikely(ret)) {
+			spin_unlock_np(&c->lock);
+			return ret;
+		}
 	}
 
 	/* is the socket closed? */
@@ -928,7 +944,7 @@ static void tcp_read_finish(tcpconn_t *c, struct mbuf *m)
 	list_head_init(&waiters);
 	spin_lock_np(&c->lock);
 	c->rx_exclusive = false;
-	waitq_release_start(&c->rx_wq, &waiters);
+	waitq_release_start(&c->rx_wq, &waiters, &c->lock);
 	spin_unlock_np(&c->lock);
 	waitq_release_finish(&waiters);
 }
@@ -1072,6 +1088,7 @@ ssize_t tcp_readv(tcpconn_t *c, const struct iovec *iov, int iovcnt)
 
 static int tcp_write_wait(tcpconn_t *c, size_t *winlen)
 {
+	int ret;
 	spin_lock_np(&c->lock);
 
 	/* block until there is an actionable event */
@@ -1088,7 +1105,11 @@ static int tcp_write_wait(tcpconn_t *c, size_t *winlen)
 			spin_unlock_np(&c->lock);
 			return -EAGAIN;
 		}
-		waitq_wait(&c->tx_wq, &c->lock);
+		ret = waitq_wait(&c->tx_wq, &c->lock);
+		if (unlikely(ret)) {
+			spin_unlock_np(&c->lock);
+			return ret;
+		}
 	}
 	c->zero_wnd = false;
 
@@ -1139,7 +1160,7 @@ static void tcp_write_finish(tcpconn_t *c)
 	}
 
 	tcp_timer_update(c);
-	waitq_release_start(&c->tx_wq, &waiters);
+	waitq_release_start(&c->tx_wq, &waiters, &c->lock);
 
 	if (tcp_is_snd_full(c))
 		poll_clear(&c->poll_src, POLLOUT);
@@ -1225,7 +1246,7 @@ static void tcp_retransmit(void *arg)
 	spin_lock_np(&c->lock);
 
 	while (c->tx_exclusive && c->pcb.state != TCP_STATE_CLOSED)
-		waitq_wait(&c->tx_wq, &c->lock);
+		waitq_wait_uninterruptible(&c->tx_wq, &c->lock);
 
 	if (c->pcb.state != TCP_STATE_CLOSED) {
 		c->tx_exclusive = true;
@@ -1258,7 +1279,7 @@ void tcp_conn_fail(tcpconn_t *c, int err)
 
 	if (!c->tx_closed) {
 		store_release(&c->tx_closed, true);
-		waitq_release(&c->tx_wq);
+		waitq_release(&c->tx_wq, &c->lock);
 		poll_set(&c->poll_src, POLLHUP);
 	}
 
@@ -1294,10 +1315,10 @@ void tcp_conn_shutdown_rx(tcpconn_t *c)
 
 	poll_set(&c->poll_src, POLLRDHUP | POLLIN);
 	c->rx_closed = true;
-	waitq_release(&c->rx_wq);
+	waitq_release(&c->rx_wq, &c->lock);
 }
 
-static int tcp_conn_shutdown_tx(tcpconn_t *c)
+static int tcp_conn_shutdown_tx(tcpconn_t *c, bool interruptible)
 {
 	int ret;
 
@@ -1312,8 +1333,16 @@ static int tcp_conn_shutdown_tx(tcpconn_t *c)
 		return 0;
 	}
 
-	while (c->tx_exclusive)
-		waitq_wait(&c->tx_wq, &c->lock);
+	while (c->tx_exclusive) {
+		if (interruptible) {
+			ret = waitq_wait(&c->tx_wq, &c->lock);
+			if (ret)
+				return ret;
+		} else {
+			waitq_wait_uninterruptible(&c->tx_wq, &c->lock);
+		}
+	}
+
 	ret = tcp_tx_ctl(c, TCP_FIN | TCP_ACK, NULL);
 	if (unlikely(ret)) {
 		tcp_conn_fail(c, ret);
@@ -1328,7 +1357,7 @@ static int tcp_conn_shutdown_tx(tcpconn_t *c)
 
 	poll_set(&c->poll_src, POLLHUP);
 	c->tx_closed = true;
-	waitq_release(&c->tx_wq);
+	waitq_release(&c->tx_wq, &c->lock);
 
 	return 0;
 }
@@ -1353,7 +1382,7 @@ int tcp_shutdown(tcpconn_t *c, int how)
 
 	spin_lock_np(&c->lock);
 	if (tx) {
-		ret = tcp_conn_shutdown_tx(c);
+		ret = tcp_conn_shutdown_tx(c, true);
 		if (ret) {
 			spin_unlock_np(&c->lock);
 			return ret;
@@ -1386,7 +1415,7 @@ void tcp_abort(tcpconn_t *c)
 	tcp_conn_fail(c, ECONNABORTED);
 
 	while (c->tx_exclusive)
-		waitq_wait(&c->tx_wq, &c->lock);
+		waitq_wait_uninterruptible(&c->tx_wq, &c->lock);
 
 	snd_nxt = c->pcb.snd_nxt;
 	spin_unlock_np(&c->lock);
@@ -1407,7 +1436,7 @@ void tcp_close(tcpconn_t *c)
 
 	spin_lock_np(&c->lock);
 	BUG_ON(!waitq_empty(&c->rx_wq));
-	ret = tcp_conn_shutdown_tx(c);
+	ret = tcp_conn_shutdown_tx(c, false);
 	if (ret)
 		tcp_conn_fail(c, -ret);
 	tcp_conn_shutdown_rx(c);
@@ -1425,8 +1454,8 @@ void tcp_set_nonblocking(tcpconn_t *c, bool nonblocking)
 	spin_lock_np(&c->lock);
 	c->nonblocking = nonblocking;
 	if (nonblocking) {
-		waitq_release(&c->tx_wq);
-		waitq_release(&c->rx_wq);
+		waitq_release(&c->tx_wq, &c->lock);
+		waitq_release(&c->rx_wq, &c->lock);
 	}
 	spin_unlock_np(&c->lock);
 }
@@ -1436,7 +1465,7 @@ void tcpq_set_nonblocking(tcpqueue_t *q, bool nonblocking)
 	spin_lock_np(&q->l);
 	q->nonblocking = nonblocking;
 	if (nonblocking)
-		waitq_release(&q->wq);
+		waitq_release(&q->wq, &q->l);
 	spin_unlock_np(&q->l);
 }
 

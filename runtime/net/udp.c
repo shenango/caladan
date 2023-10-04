@@ -115,19 +115,17 @@ static void udp_conn_err(struct trans_entry *e, int err)
 {
 	udpconn_t *c = container_of(e, udpconn_t, e);
 
-	bool do_release;
-
 	spin_lock_np(&c->inq_lock);
-	do_release = !c->inq_err && !c->shutdown;
-	c->inq_err = err;
 
-	if (do_release)
+	if (!c->inq_err && !c->shutdown) {
 		poll_set(&c->poll_src, POLLERR);
+		waitq_release(&c->inq_wq, &c->inq_lock);
+	}
+
+	c->inq_err = err;
 
 	spin_unlock_np(&c->inq_lock);
 
-	if (do_release)
-		waitq_release(&c->inq_wq);
 }
 
 /* operations for UDP sockets */
@@ -342,7 +340,11 @@ ssize_t udp_read_from(udpconn_t *c, void *buf, size_t len,
 			spin_unlock_np(&c->inq_lock);
 			return -EAGAIN;
 		}
-		waitq_wait(&c->inq_wq, &c->inq_lock);
+		ret = waitq_wait(&c->inq_wq, &c->inq_lock);
+		if (unlikely(ret)) {
+			spin_unlock_np(&c->inq_lock);
+			return ret;
+		}
 	}
 
 	/* is the socket drained and shutdown? */
@@ -444,7 +446,11 @@ ssize_t udp_write_to(udpconn_t *c, const void *buf, size_t len,
 			spin_unlock_np(&c->outq_lock);
 			return -EAGAIN;
 		}
-		waitq_wait(&c->outq_wq, &c->outq_lock);
+		ret = waitq_wait(&c->outq_wq, &c->outq_lock);
+		if (unlikely(ret)) {
+			spin_unlock_np(&c->outq_lock);
+			return ret;
+		}
 	}
 
 	/* is the socket shutdown? */
@@ -517,16 +523,26 @@ ssize_t udp_write(udpconn_t *c, const void *buf, size_t len)
 
 static void __udp_shutdown(udpconn_t *c)
 {
+	LIST_HEAD(waiters);
+
 	spin_lock_np(&c->outq_lock);
 	spin_lock(&c->inq_lock);
 	BUG_ON(c->shutdown);
 	c->shutdown = true;
 	poll_set(&c->poll_src, POLLIN | POLLHUP | POLLRDHUP);
+
+	/* wake all blocked threads */
+	if (!c->inq_err)
+		waitq_release_start(&c->inq_wq, &waiters, &c->inq_lock);
+	waitq_release_start(&c->outq_wq, &waiters ,&c->outq_lock);
+
 	spin_unlock(&c->inq_lock);
 	spin_unlock_np(&c->outq_lock);
 
 	/* prevent ingress receive and error dispatch (after RCU period) */
 	trans_table_remove(&c->e);
+
+	waitq_release_finish(&waiters);
 }
 
 /**
@@ -539,11 +555,6 @@ void udp_shutdown(udpconn_t *c)
 {
 	/* shutdown the UDP socket */
 	__udp_shutdown(c);
-
-	/* wake all blocked threads */
-	if (!c->inq_err)
-		waitq_release(&c->inq_wq);
-	waitq_release(&c->outq_wq);
 }
 
 /**
@@ -592,8 +603,8 @@ void udp_set_nonblocking(udpconn_t *c, bool nonblocking)
 	spin_lock(&c->inq_lock);
 	c->nonblocking = nonblocking;
 	if (nonblocking) {
-		waitq_release(&c->inq_wq);
-		waitq_release(&c->outq_wq);
+		waitq_release(&c->inq_wq, &c->inq_lock);
+		waitq_release(&c->outq_wq, &c->outq_lock);
 	}
 	spin_unlock(&c->inq_lock);
 	spin_unlock_np(&c->outq_lock);

@@ -6,11 +6,11 @@
 #include <base/list.h>
 #include <base/kref.h>
 #include <base/time.h>
-#include <runtime/sync.h>
-#include <runtime/tcp.h>
 #include <net/tcp.h>
 #include <net/mbuf.h>
 #include <net/mbufq.h>
+#include <runtime/sync.h>
+#include <runtime/tcp.h>
 
 #include "defs.h"
 #include "waitq.h"
