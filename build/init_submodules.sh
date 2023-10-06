@@ -40,7 +40,7 @@ cd ..
 
 echo building DPDK
 
-disable_driver='crypto/*,net/bnxt'
+disable_driver='crypto/*,raw/*,baseband/*,dma/*,net/af_packet,net/af_xdp,net/ark,net/atlantic,net/avp,net/axgbe,net/bnx2x,net/bnxt,net/bonding,net/cnxk,net/cxgbe,net/dpaa,net/dpaa2,net/e1000,net/ena,net/enetc,net/enetfec,net/enic,net/fm10k,net/hinic,net/hns3,net/iavf,net/ice,net/igc,net/ionic,net/ipn3ke,net/kni,net/liquidio,net/memif,net/mlx4,net/mvneta,net/mvpp2,net/nfb,net/nfp,net/ngbe,net/octeontx,net/octeontx_ep,net/pcap,net/pfe,net/qede,net/sfc,net/softnic,net/thunderx,net/txgbe,net/vdev_netvsc,net/vhost,net/virtio,net/vmxnet3'
 
 export EXTRA_CFLAGS=-I$PWD/rdma-core/build/include
 export EXTRA_LDFLAGS=-L$PWD/rdma-core/build/lib
@@ -56,7 +56,7 @@ export PKG_CONFIG_PATH=$PWD/rdma-core/build/lib/pkgconfig
 cd dpdk
 git apply ../build/dpdk.patch
 meson build
-meson configure -Ddisable_drivers=$disable_driver build
+meson configure -Ddisable_drivers=$disable_driver -Dexamples='' -Denable_kmods=false -Dtests=false build
 meson configure -Dprefix=$PWD/build build
 ninja -C build
 ninja -C build install
