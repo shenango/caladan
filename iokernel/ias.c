@@ -32,7 +32,7 @@ static int owners[NCPU];
 #endif
 
 /* process that are currently congested sorted by current active thread count */
-static struct list_head congested_procs[NCPU];
+static struct list_head congested_procs[NCPU + 1];
 /* number of congested lc procs */
 static uint64_t congested_lc_procs_nr;
 
@@ -664,7 +664,7 @@ int ias_init(void)
 	bitmap_xor(ias_reserved_cores, ias_reserved_cores, sched_allowed_cores,
 		   NCPU);
 
-	for (i = 0; i < sched_cores_nr; i++)
+	for (i = 0; i < sched_cores_nr + 1; i++)
 		list_head_init(&congested_procs[i]);
 
 	return ias_bw_init();
