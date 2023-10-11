@@ -48,7 +48,7 @@ $(iokernel_obj): INC += $(MLX5_INC)
 endif
 
 # must be first
-all: libbase.a libnet.a libruntime.a iokerneld $(test_targets)
+all: libbase.a libnet.a libruntime.a iokerneld $(test_targets) shim
 
 libbase.a: $(base_obj)
 	$(AR) rcs $@ $^
@@ -65,6 +65,11 @@ iokerneld: $(iokernel_obj) libbase.a libnet.a base/base.ld $(PCM_DEPS)
 
 $(test_targets): $(test_obj) libbase.a libruntime.a libnet.a base/base.ld
 	$(LD) $(LDFLAGS) -o $@ $@.o $(RUNTIME_LIBS)
+
+shim:
+	$(MAKE) -C shim/
+
+.PHONY: shim
 
 # general build rules for all targets
 src = $(base_src) $(net_src) $(runtime_src) $(iokernel_src) $(test_src)
@@ -97,3 +102,4 @@ submodules-clean:
 clean:
 	rm -f $(obj) $(dep) libbase.a libnet.a libruntime.a \
 	iokerneld $(test_targets)
+	$(MAKE) -C shim/ clean

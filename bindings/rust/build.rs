@@ -32,6 +32,9 @@ fn main() {
         link_script_path.to_str().unwrap()
     );
 
+    println!("cargo:rustc-flags=-L {}/shim/", lib_search_path.to_str().unwrap());
+    println!("cargo:rustc-link-lib=static=shim");
+
     // consult shared.mk for other libraries... sorry y'all.
     let output = Command::new("make")
         .args([
