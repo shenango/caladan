@@ -462,6 +462,7 @@ static int __init ksched_cpuidle_hijack(void)
 	backup_state = drv->states[0];
 	backup_state_count = drv->state_count;
 	drv->states[0].enter = ksched_idle;
+	drv->states[0].flags = CPUIDLE_FLAG_NONE;
 	drv->state_count = 1;
 	cpuidle_resume_and_unlock();
 
