@@ -52,6 +52,7 @@ struct mlx5_txq {
 	/* work queue */
 	struct mlx5_wq wq;
 	uint32_t bf_offset;
+	uint32_t bf_size;
 	void *bf_reg;
 
 	/* direct verbs cq */
@@ -104,7 +105,7 @@ extern int mlx5_init_rxq_wq_stride(struct mlx5_wq *wq, void *seg_buf, uint32_t *
 	                        uint64_t size, uint32_t stride, uint32_t lkey);
 extern int mlx5_init_txq_wq(struct mlx5_txq *v, void *buf, uint32_t *dbr,
 	                        uint32_t size, uint32_t stride, uint32_t lkey,
-	                        uint32_t sqn, void *bf_reg);
+	                        uint32_t sqn, void *bf_reg, uint32_t bf_size);
 
 static inline unsigned int nr_inflight_tx(struct mlx5_txq *v)
 {

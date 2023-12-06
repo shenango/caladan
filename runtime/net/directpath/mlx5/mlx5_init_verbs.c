@@ -435,9 +435,6 @@ static int mlx5_create_txq_verbs(int index, struct mlx5_txq *v)
 	if (ret)
 		return -ret;
 
-	if (unlikely(tx_qp_dv.bf.size != MLX5_BF_SIZE))
-		return -EINVAL;
-
 	if (unlikely(tx_cq_dv.cqe_size != sizeof(struct mlx5_cqe64)))
 		return -EINVAL;
 
@@ -447,7 +444,8 @@ static int mlx5_create_txq_verbs(int index, struct mlx5_txq *v)
 
 	return mlx5_init_txq_wq(v, tx_qp_dv.sq.buf, tx_qp_dv.dbrec,
 		                    tx_qp_dv.sq.wqe_cnt, tx_qp_dv.sq.stride,
-		                    mr->lkey, v->tx_qp->qp_num, tx_qp_dv.bf.reg);
+		                    mr->lkey, v->tx_qp->qp_num, tx_qp_dv.bf.reg,
+		                    tx_qp_dv.bf.size);
 }
 
 int mlx5_verbs_init_context(bool uses_qsteering)

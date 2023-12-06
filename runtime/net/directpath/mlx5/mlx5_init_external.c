@@ -90,7 +90,8 @@ static int mlx5_init_ext_thread_tx(struct shm_region *reg,
 		return -EINVAL;
 
 	ret = mlx5_init_txq_wq(t, buf, dbr, spec->tx_wq.nr_entries,
-	                       spec->tx_wq.stride, lkey, spec->sqn, bfreg);
+	                       spec->tx_wq.stride, lkey, spec->sqn, bfreg,
+	                       MLX5_BF_SIZE);
 	if (unlikely(ret))
 		return ret;
 

@@ -89,7 +89,7 @@ int mlx5_init_cq(struct mlx5_cq *cq, struct mlx5_cqe64 *cqes,
 
 int mlx5_init_txq_wq(struct mlx5_txq *v, void *buf, uint32_t *dbr,
 	                 uint32_t size, uint32_t stride, uint32_t lkey,
-	                 uint32_t sqn, void *bf_reg)
+	                 uint32_t sqn, void *bf_reg, uint32_t bf_size)
 {
 	int ret;
 	uint32_t i;
@@ -100,6 +100,7 @@ int mlx5_init_txq_wq(struct mlx5_txq *v, void *buf, uint32_t *dbr,
 
 	v->bf_reg = bf_reg;
 	v->bf_offset = 0;
+	v->bf_size = bf_size;
 
 	for (i = 0; i < size; i++)
 		mlx5_init_tx_segment(v, i, lkey, sqn);
@@ -283,7 +284,7 @@ int mlx5_transmit_one(struct mbuf *m)
 	mmio_write64_be(v->bf_reg + v->bf_offset, *(__be64 *)ctrl);
 	mmio_flush_writes();
 
-	v->bf_offset ^= MLX5_BF_SIZE;
+	v->bf_offset ^= v->bf_size;
 
 	putk();
 
