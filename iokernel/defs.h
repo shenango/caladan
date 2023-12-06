@@ -32,6 +32,7 @@ struct iokernel_cfg {
 	bool	no_hw_qdel; /* Disable use of hardware timestamps for qdelay */
 	bool	vfio_directpath; /* enable new directpath using vfio */
 	bool	no_directpath_active_rss; /* vfio directpath: keep all qs active */
+	bool    azure_arp_mode; /* support Azure by responding to local ARP messages */
 };
 
 extern struct iokernel_cfg cfg;

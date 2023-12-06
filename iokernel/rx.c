@@ -89,6 +89,28 @@ static bool rx_send_pkt_to_runtime(struct proc *p, struct rx_net_hdr *hdr)
 	return rx_send_to_runtime(p, hdr->rss_hash, RX_NET_RECV, shmptr);
 }
 
+static bool azure_arp_response(struct rte_mbuf *buf)
+{
+	struct rte_ether_hdr *ptr_mac_hdr;
+	struct rte_arp_hdr *arphdr;
+	static struct rte_ether_addr azure_eth_addr = {{0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc}};
+
+	log_debug("sending an arp response");
+
+	ptr_mac_hdr = rte_pktmbuf_mtod(buf, struct rte_ether_hdr *);
+	rte_ether_addr_copy(&ptr_mac_hdr->src_addr, &ptr_mac_hdr->dst_addr);
+	rte_ether_addr_copy(&azure_eth_addr, &ptr_mac_hdr->src_addr);
+
+	arphdr = rte_pktmbuf_mtod_offset(buf, struct rte_arp_hdr *,
+                        sizeof(*ptr_mac_hdr));
+	arphdr->arp_opcode = rte_cpu_to_be_16(RTE_ARP_OP_REPLY);
+	rte_ether_addr_copy(&azure_eth_addr, &arphdr->arp_data.arp_sha);
+        rte_ether_addr_copy(&ptr_mac_hdr->dst_addr, &arphdr->arp_data.arp_tha);
+	swapvars(arphdr->arp_data.arp_sip, arphdr->arp_data.arp_tip);
+
+	return rte_eth_tx_burst(dp.port, 0, &buf, 1) == 1;
+}
+
 static void rx_one_pkt(struct rte_mbuf *buf)
 {
 	int ret;
@@ -127,6 +149,12 @@ static void rx_one_pkt(struct rte_mbuf *buf)
 	/* lookup runtime by IP in hash table */
 	ret = rte_hash_lookup_data(dp.ip_to_proc, &dst_ip, (void **)&p);
 	if (unlikely(ret < 0)) {
+
+		if (cfg.azure_arp_mode && ether_type == ETHTYPE_ARP &&
+		    arphdr->arp_opcode == rte_cpu_to_be_16(RTE_ARP_OP_REQUEST) &&
+		    azure_arp_response(buf))
+			return;
+
 		STAT_INC(RX_UNREGISTERED_MAC, 1);
 		goto fail_free;
 	}

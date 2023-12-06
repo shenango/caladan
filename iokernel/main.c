@@ -9,6 +9,8 @@
 #include <base/log.h>
 #include <base/stddef.h>
 
+#include <sys/utsname.h>
+
 #include <unistd.h>
 
 #include "defs.h"
@@ -179,6 +181,7 @@ static void print_usage(void)
 int main(int argc, char *argv[])
 {
 	int i, ret;
+	struct utsname utsname;
 
 	if (getuid() != 0) {
 		fprintf(stderr, "Error: please run as root\n");
@@ -273,6 +276,17 @@ int main(int argc, char *argv[])
 		} else {
 			allowed_cores_supplied = true;
 		}
+	}
+
+	ret = uname(&utsname);
+	if (ret < 0) {
+		log_err("failed to get utsname");
+		return ret;
+	}
+
+	if (strstr(utsname.release, "azure")) {
+		log_info("Detected Azure VM, using Azure ARP mode");
+		cfg.azure_arp_mode = true;
 	}
 
 	pthread_barrier_init(&init_barrier, NULL, 2);
