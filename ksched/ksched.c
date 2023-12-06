@@ -165,12 +165,24 @@ static void ksched_next_tid(struct ksched_percpu *kp, int cpu, pid_t tid)
 	return;
 }
 
+static bool has_mwait;
+
 static int ksched_mwait_on_addr(const unsigned int *addr, unsigned int hint,
 				unsigned int val)
 {
 	unsigned int cur;
+	size_t i;
 
 	lockdep_assert_irqs_disabled();
+
+	if (!has_mwait) {
+		for (i = 0; i < 10; i++) {
+			cur = READ_ONCE(*addr);
+			if (cur != val) return cur;
+			udelay(1);
+		}
+		return cur;
+	}
 
 	/* first see if the condition is met without waiting */
 	cur = smp_load_acquire(addr);
@@ -464,6 +476,7 @@ static int __init ksched_cpuidle_hijack(void)
 	drv->states[0].enter = ksched_idle;
 	drv->states[0].flags = CPUIDLE_FLAG_NONE;
 	drv->state_count = 1;
+	try_module_get(drv->owner);
 	cpuidle_resume_and_unlock();
 
 	return 0;
@@ -480,6 +493,7 @@ static void __exit ksched_cpuidle_unhijack(void)
 	cpuidle_pause_and_lock();
 	drv->states[0] = backup_state;
 	drv->state_count = backup_state_count;
+	module_put(drv->owner);
 	cpuidle_resume_and_unlock();
 }
 
@@ -497,10 +511,9 @@ static int __init ksched_init(void)
 	dev_t devno_ksched = MKDEV(KSCHED_MAJOR, KSCHED_MINOR);
 	int ret;
 
-	if (!cpu_has(&boot_cpu_data, X86_FEATURE_MWAIT)) {
-		printk(KERN_ERR "ksched: mwait support is required");
-		return -ENOTSUPP;
-	}
+	has_mwait = cpu_has(&boot_cpu_data, X86_FEATURE_MWAIT);
+	if (!has_mwait)
+		printk(KERN_ERR "ksched: mwait support is missing");
 
 	ret = register_chrdev_region(devno_ksched, 1, "ksched");
 	if (ret)

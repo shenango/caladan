@@ -1,2 +1,1 @@
-obj-m += ksched.o
-# CFLAGS_ksched.o += -DSUPPRESS_CUSTOMIZED_IPI_HANDLER
+obj-m += ksched.o fake_idle.o

@@ -8,6 +8,11 @@ sysctl -w vm.hugetlb_shm_group=27
 sysctl -w vm.max_map_count=16777216
 sysctl -w net.core.somaxconn=3072
 
+# check to see if we need a fake idle driver
+if grep -q none /sys/devices/system/cpu/cpuidle/current_driver; then
+  insmod $(dirname $0)/../ksched/build/fake_idle.ko
+fi
+
 # set up the ksched module
 rmmod ksched
 rm /dev/ksched
