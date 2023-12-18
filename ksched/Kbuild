@@ -1,1 +1,3 @@
 obj-m += ksched.o fake_idle.o
+
+ksched-objs := ksched_main.o uintr.o

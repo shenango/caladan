@@ -3,29 +3,21 @@
  */
 
 #include <asm/io.h>
-#include <asm/irq.h>
 #include <asm/local.h>
-#include <asm/irq_vectors.h>
-#include <asm/set_memory.h>
 #include <asm/msr-index.h>
 #include <asm/msr.h>
 #include <asm/mwait.h>
-#include <asm/page.h>
-#include <asm/pgtable.h>
 #include <asm/tlbflush.h>
 #include <linux/capability.h>
 #include <linux/cdev.h>
 #include <linux/cpuidle.h>
 #include <linux/delay.h>
-#include <linux/dma-mapping.h>
 #include <linux/errno.h>
 #include <linux/fs.h>
 #include <linux/init.h>
-#include <linux/sort.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/moduleparam.h>
-#include <linux/mm.h>
 #include <linux/sched.h>
 #include <linux/sched/signal.h>
 #include <linux/sched/task.h>
@@ -35,6 +27,8 @@
 #include <linux/version.h>
 
 #include "ksched.h"
+#include "uintr.h"
+#include "defs.h"
 #include "../iokernel/pmc.h"
 
 #define CORE_PERF_GLOBAL_CTRL_ENABLE_PMC_0 (0x1)
@@ -50,18 +44,11 @@
 static struct cdev ksched_cdev;
 
 /* shared memory between the IOKernel and the Linux Kernel */
-static __read_mostly struct ksched_shm_cpu *shm;
+__read_mostly struct ksched_shm_cpu *shm;
 #define SHM_SIZE (NR_CPUS * sizeof(struct ksched_shm_cpu))
 
-struct ksched_percpu {
-	unsigned int		last_gen;
-	local_t			busy;
-	u64			last_sel;
-	struct task_struct	*running_task;
-};
-
 /* per-cpu data to coordinate context switching and signal delivery */
-static DEFINE_PER_CPU(struct ksched_percpu, kp);
+DEFINE_PER_CPU(struct ksched_percpu, kp);
 
 void mark_task_parked(struct task_struct *tsk)
 {
@@ -112,6 +99,15 @@ static struct task_struct *ksched_lookup_task(pid_t nr)
 	return pid_task(pid, PIDTYPE_PID);
 }
 
+static void ksched_cleanup_core(struct ksched_percpu *kp, int cpu)
+{
+	if (uintr_active(&kp->uintr))
+		uintr_cleanup_core(&kp->uintr, cpu);
+
+	put_task_struct(kp->running_task);
+	kp->running_task = NULL;
+}
+
 static void ksched_next_tid(struct ksched_percpu *kp, int cpu, pid_t tid)
 {
 	struct task_struct *p;
@@ -120,10 +116,8 @@ static void ksched_next_tid(struct ksched_percpu *kp, int cpu, pid_t tid)
 	bool already_running;
 
 	/* release previous task */
-	if (kp->running_task) {
-		put_task_struct(kp->running_task);
-		kp->running_task = NULL;
-	}
+	if (kp->running_task)
+		ksched_cleanup_core(kp, cpu);
 
 	if (unlikely(tid == 0))
 		return;
@@ -219,8 +213,7 @@ static int __cpuidle ksched_idle(struct cpuidle_device *dev,
 	/* check if we entered the idle loop with a process still active */
 	if (unlikely(p->running_task)) {
 		if (p->running_task->flags & PF_EXITING) {
-			put_task_struct(p->running_task);
-			p->running_task = NULL;
+			ksched_cleanup_core(p, cpu);
 		} else {
 			ksched_mwait_on_addr(&s->gen, 0, s->gen);
 			put_cpu();
@@ -250,23 +243,38 @@ static int __cpuidle ksched_idle(struct cpuidle_device *dev,
 	return index;
 }
 
-static inline long get_granted_core_id(void)
+static __always_inline long finish_wake(struct uintr_ctx *ctx, u64 next_stack)
 {
-	struct ksched_percpu *p = this_cpu_ptr(&kp);
+	int cpu;
+	struct ksched_percpu *p;
+	struct ksched_shm_cpu *s;
 
-	if (unlikely(p->running_task == NULL ||
-		     p->running_task->pid != task_pid_vnr(current))) {
+	cpu = get_cpu();
+	p = this_cpu_ptr(&kp);
+	s = &shm[cpu];
+
+	if (unlikely(p->running_task != current)) {
 		/* The thread is waken up by a user-sent signal instead of
 		 * the iokernel. In this case no core was granted. We should
 		 * put the thread back into sleep immediately after handling
 		 * the signal. */
+		put_cpu();
 		return -ERESTARTSYS;
 	}
 
-	return smp_processor_id();
+	if (ctx) {
+		uintr_assign_core(ctx, next_stack);
+
+		/* a UIPI might have arrived before we set up the context */
+		if (unlikely(smp_load_acquire(&s->sig) == p->last_gen))
+			uintr_signal_self();
+	}
+
+	put_cpu();
+	return cpu;
 }
 
-static long ksched_park(void)
+static long ksched_park(struct uintr_ctx *ctx, u64 next_stack)
 {
 	struct ksched_percpu *p;
 	struct ksched_shm_cpu *s;
@@ -290,7 +298,7 @@ static long ksched_park(void)
 	gen = smp_load_acquire(&s->gen);
 	if (gen == p->last_gen) {
 		WRITE_ONCE(s->busy, false);
-		ksched_next_tid(p, cpu, 0);
+		ksched_cleanup_core(p, cpu);
 		put_cpu();
 		goto park;
 	}
@@ -320,17 +328,17 @@ park:
 	mark_task_parked(current);
 	schedule();
 	__set_current_state(TASK_RUNNING);
-	return get_granted_core_id();
+	return finish_wake(ctx, next_stack);
 }
 
-static long ksched_start(void)
+static long ksched_start(struct uintr_ctx *ctx, u64 next_stack)
 {
 	/* put this task to sleep and reschedule so the next task can run */
 	__set_current_state(TASK_INTERRUPTIBLE);
 	mark_task_parked(current);
 	schedule();
 	__set_current_state(TASK_RUNNING);
-	return get_granted_core_id();
+	return finish_wake(ctx, next_stack);
 }
 
 static void ksched_deliver_signal(struct ksched_percpu *p, unsigned int signum)
@@ -339,7 +347,9 @@ static void ksched_deliver_signal(struct ksched_percpu *p, unsigned int signum)
 	if (!local_read(&p->busy))
 		return;
 
-	if (p->running_task)
+	if (uintr_active(&p->uintr))
+		uintr_signal_self();
+	else if (p->running_task)
 		send_sig(signum, p->running_task, 0);
 }
 
@@ -418,11 +428,17 @@ ksched_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 
 	switch (cmd) {
 	case KSCHED_IOC_START:
-		return ksched_start();
+		return ksched_start(to_uintr_ctx(filp), arg);
 	case KSCHED_IOC_PARK:
-		return ksched_park();
+		return ksched_park(to_uintr_ctx(filp), arg);
 	case KSCHED_IOC_INTR:
 		return ksched_intr((void __user *)arg);
+	case KSCHED_IOC_UINTR_MULTICAST:
+		return uintr_multicast((void __user *)arg);
+	case KSCHED_IOC_UINTR_SETUP_USER:
+		return uintr_setup_user(filp, arg);
+	case KSCHED_IOC_UINTR_SETUP_ADMIN:
+		return uintr_setup_admin(filp);
 	default:
 		break;
 	}
@@ -445,6 +461,7 @@ static int ksched_open(struct inode *inode, struct file *filp)
 
 static int ksched_release(struct inode *inode, struct file *filp)
 {
+	uintr_file_release(filp);
 	return 0;
 }
 
@@ -500,7 +517,7 @@ static void __exit ksched_cpuidle_unhijack(void)
 static void __init ksched_init_pmc(void *arg)
 {
 	wrmsrl(MSR_CORE_PERF_FIXED_CTR_CTRL, 0x333);
-        wrmsrl(MSR_CORE_PERF_GLOBAL_CTRL,
+	wrmsrl(MSR_CORE_PERF_GLOBAL_CTRL,
 	       CORE_PERF_GLOBAL_CTRL_ENABLE_PMC_0 |
 	       CORE_PERF_GLOBAL_CTRL_ENABLE_PMC_1 |
 	       (1UL << 32) | (1UL << 33) | (1UL << 34));
@@ -531,6 +548,10 @@ static int __init ksched_init(void)
 	}
 	memset(shm, 0, SHM_SIZE);
 
+	ret = uintr_init();
+	if (ret)
+		goto fail_uintr;
+
 	ret = ksched_cpuidle_hijack();
 	if (ret)
 		goto fail_hijack;
@@ -540,8 +561,10 @@ static int __init ksched_init(void)
 	printk(KERN_INFO "ksched: API V2 enabled");
 	return 0;
 
-fail_hijack:
+fail_uintr:
 	vfree(shm);
+fail_hijack:
+	uintr_exit();
 fail_shm:
 	cdev_del(&ksched_cdev);
 fail_ksched_cdev_add:
@@ -555,6 +578,8 @@ static void __exit ksched_exit(void)
 	struct ksched_percpu *p;
 
 	dev_t devno_ksched = MKDEV(KSCHED_MAJOR, KSCHED_MINOR);
+
+	uintr_exit();
 
 	ksched_cpuidle_unhijack();
 	vfree(shm);
