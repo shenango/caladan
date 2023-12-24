@@ -536,6 +536,7 @@ static int __init ksched_init(void)
 		goto fail_hijack;
 
 	smp_call_function(ksched_init_pmc, NULL, 1);
+	ksched_init_pmc(NULL);
 	printk(KERN_INFO "ksched: API V2 enabled");
 	return 0;
 
