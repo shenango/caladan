@@ -40,7 +40,7 @@ DEFINE_PERTHREAD(unsigned int, kthread_idx);
 /* Map of cpu to kthread */
 struct cpu_record cpu_map[NCPU] __attribute__((aligned(CACHE_LINE_SIZE)));
 /* the file descriptor for the ksched module */
-static int ksched_fd;
+int ksched_fd;
 
 static struct kthread *allock(void)
 {
@@ -97,7 +97,7 @@ static __always_inline void kthread_yield_to_iokernel(void)
 	/* yield to the iokernel */
 	do {
 		clear_preempt_needed();
-		s = ioctl(ksched_fd, KSCHED_IOC_PARK, 0);
+		s = ioctl(ksched_fd, KSCHED_IOC_PARK, perthread_read(uintr_stack));
 	} while (unlikely(s < 0 || preempt_cede_needed(k)));
 
 	k->curr_cpu = s;
@@ -289,7 +289,7 @@ void kthread_wait_to_attach(void)
 	int s;
 
 	do {
-		s = ioctl(ksched_fd, KSCHED_IOC_START, 0);
+		s = ioctl(ksched_fd, KSCHED_IOC_START, perthread_read(uintr_stack));
 	} while (s < 0);
 
 	k->curr_cpu = s;

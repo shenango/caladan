@@ -81,6 +81,15 @@ struct thread_tf {
 #define ARG4(tf)        ((tf)->r8)
 #define ARG5(tf)        ((tf)->r9)
 
+/* format of the trap frame set up by uintr_asm_entry */
+struct uintr_frame {
+	struct thread_tf general_regs;
+	unsigned long pad;
+	unsigned long uirrv;
+	unsigned long rip;
+	unsigned long rflags;
+	unsigned long rsp;
+};
 
 /*
  * Thread support
@@ -116,6 +125,8 @@ extern void __jmp_runtime(struct thread_tf *tf, runtime_fn_t fn,
 			  void *stack);
 extern void __jmp_runtime_nosave(runtime_fn_t fn, void *stack) __noreturn;
 
+/* uintr assembly routine */
+extern void uintr_asm_entry();
 
 /*
  * Stack support
@@ -471,6 +482,8 @@ static inline bool preempt_park_needed(struct kthread *k)
 	       ACCESS_ONCE(k->q_ptrs->park_gen);
 }
 
+DECLARE_PERTHREAD(void *, uintr_stack);
+
 #ifdef DIRECT_STORAGE
 static inline bool storage_available_completions(struct kthread *k)
 {
@@ -513,6 +526,8 @@ extern uint64_t cfg_quantum_us;
 extern void kthread_park(void);
 extern void kthread_park_now(void);
 extern void kthread_wait_to_attach(void);
+
+extern int ksched_fd;
 
 struct cpu_record {
 	struct kthread *recent_kthread;

@@ -64,7 +64,7 @@ iokerneld: $(iokernel_obj) libbase.a libnet.a base/base.ld $(PCM_DEPS)
 	$(PCM_DEPS) $(PCM_LIBS) -lpthread -lnuma -ldl
 
 $(test_targets): $(test_obj) libbase.a libruntime.a libnet.a base/base.ld
-	$(LD) $(LDFLAGS) -o $@ $@.o $(RUNTIME_LIBS)
+	$(LD) $(FLAGS) $(LDFLAGS) -o $@ $@.o $(RUNTIME_LIBS)
 
 shim:
 	$(MAKE) -C shim/

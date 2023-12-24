@@ -430,6 +430,8 @@ extern int hw_timestamp_init(void);
 extern int stats_init(void);
 extern int proc_timer_init(void);
 
+extern void ksched_uintr_init(void);
+
 extern char *nic_pci_addr_str;
 extern struct pci_addr nic_pci_addr;
 extern bool allowed_cores_supplied;

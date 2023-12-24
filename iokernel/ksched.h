@@ -15,7 +15,8 @@
 #define __user
 #include "../ksched/ksched.h"
 
-extern int ksched_fd, ksched_count;
+extern int ksched_fd, ksched_count, ksched_pmc_count, last_intr_core;
+extern bool ksched_has_uintr;
 extern struct ksched_shm_cpu *ksched_shm;
 extern cpu_set_t ksched_set;
 extern unsigned int ksched_gens[NCPU];
@@ -93,10 +94,13 @@ static inline void ksched_enqueue_intr(unsigned int core, int type)
 		return;
 	}
 
+	assert(signum - 1 < 64);
+	ksched_shm[core].upid.puir |= 1UL << (signum - 1);
 	ksched_shm[core].signum = signum;
 	store_release(&ksched_shm[core].sig, ksched_gens[core]);
 	CPU_SET(core, &ksched_set);
 	ksched_count++;
+	last_intr_core = core;
 }
 
 /**
@@ -110,6 +114,7 @@ static inline void ksched_enqueue_pmc(unsigned int core, uint64_t sel)
 	store_release(&ksched_shm[core].pmc, 1);
 	CPU_SET(core, &ksched_set);
 	ksched_count++;
+	ksched_pmc_count++;
 }
 
 /**
@@ -135,16 +140,31 @@ static inline bool ksched_poll_pmc(unsigned int core, uint64_t *val, uint64_t *t
 static inline void ksched_send_intrs(void)
 {
 	struct ksched_intr_req req;
+	unsigned long request;
 	int ret;
 
 	if (ksched_count == 0)
 		return;
 
-	ksched_count = 0;
-	req.len = sizeof(ksched_set); 
+	request = KSCHED_IOC_INTR;
+
+	/* use UINTR if available (and not collecting pmc samples) */
+	if (ksched_has_uintr && !ksched_pmc_count) {
+		/* use senduipi instruction if there's just one interrupt */
+		if (ksched_count == 1) {
+			__builtin_ia32_senduipi(last_intr_core);
+			goto done;
+		}
+		request = KSCHED_IOC_UINTR_MULTICAST;
+		ksched_pmc_count = 0;
+	}
+
+	req.len = sizeof(ksched_set);
 	req.mask = &ksched_set;
-	ret = ioctl(ksched_fd, KSCHED_IOC_INTR, &req);
+	ret = ioctl(ksched_fd, request, &req);
 	BUG_ON(ret);
 
+done:
+	ksched_count = 0;
 	CPU_ZERO(&ksched_set);
 }

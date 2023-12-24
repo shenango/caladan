@@ -302,6 +302,8 @@ int main(int argc, char *argv[])
 
 	pthread_barrier_wait(&init_barrier);
 
+	ksched_uintr_init();
+
 	if (cfg.vfio_directpath)
 		dataplane_loop_vfio();
 	else
