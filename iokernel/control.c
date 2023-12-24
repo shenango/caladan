@@ -499,7 +499,7 @@ static void control_loop(void)
  * this function can always fail with error ESRCH, because threads can be
  * killed at any time.
  */
-static int control_pin_thread(pid_t tid, int core)
+int pin_thread(pid_t tid, int core)
 {
 	cpu_set_t cpuset;
 	int ret;
@@ -522,7 +522,7 @@ static void *control_thread(void *data)
 	int ret;
 
 	/* pin to our assigned core */
-	ret = control_pin_thread(thread_gettid(), sched_ctrl_core);
+	ret = pin_thread(thread_gettid(), sched_ctrl_core);
 	if (ret < 0) {
 		log_err("control: failed to pin control thread to core %d",
 			sched_ctrl_core);

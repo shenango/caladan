@@ -512,7 +512,7 @@ static struct ias_data *ias_choose_kthread(unsigned int core)
 	}
 
 	/* check remaining congested procs */
-	for (rank = 1; rank < sched_cores_nr; rank++) {
+	for (rank = 1; rank < sched_cores_nr + 1; rank++) {
 		list_for_each(&congested_procs[rank], sd, congested_link) {
 			/* check if we're constrained by the thread limit */
 			if (sd->threads_active >= sd->threads_limit)

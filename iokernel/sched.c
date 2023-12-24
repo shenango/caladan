@@ -989,7 +989,7 @@ int sched_init(void)
 	}
 	/* check for minimum number of cores required */
 	i = bitmap_popcount(sched_allowed_cores, NCPU);
-	if (i < 4) {
+	if (i < 3 + !cfg.noht) {
 		log_err("sched: %d is not enough cores\n", i);
 		return -EINVAL;
 	}

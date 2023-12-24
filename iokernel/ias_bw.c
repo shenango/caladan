@@ -278,6 +278,8 @@ int ias_bw_init(void)
 		return 0;
 	}
 
+	/* ensure threads created by pcm are pinned to control core */
+	pin_thread(0, sched_ctrl_core);
 
 	ret = pcm_caladan_init(0);
 	if (ret)

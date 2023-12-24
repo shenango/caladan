@@ -32,7 +32,7 @@ struct iokernel_cfg {
 	bool	no_hw_qdel; /* Disable use of hardware timestamps for qdelay */
 	bool	vfio_directpath; /* enable new directpath using vfio */
 	bool	no_directpath_active_rss; /* vfio directpath: keep all qs active */
-	bool    azure_arp_mode; /* support Azure by responding to local ARP messages */
+	bool	azure_arp_mode; /* support Azure by responding to local ARP messages */
 };
 
 extern struct iokernel_cfg cfg;
@@ -438,6 +438,8 @@ extern char **dpdk_argv;
 extern int dpdk_argc;
 extern int managed_numa_node;
 extern pthread_barrier_t init_barrier;
+
+extern int pin_thread(pid_t tid, int core);
 
 /*
  * dataplane RX/TX functions
