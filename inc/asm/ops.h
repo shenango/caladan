@@ -28,9 +28,11 @@ struct cpuid_info {
 	unsigned int eax, ebx, ecx, edx;
 };
 
-static inline void cpuid(int leaf, struct cpuid_info *regs)
+static inline void cpuid(int leaf, int subleaf, struct cpuid_info *regs)
 {
-	asm volatile("cpuid" : "=a" (regs->eax), "=b" (regs->ebx), "=c" (regs->ecx), "=d" (regs->edx) : "a" (leaf));
+	asm volatile("cpuid" : "=a" (regs->eax), "=b" (regs->ebx),
+		     "=c" (regs->ecx), "=d" (regs->edx) : "a" (leaf),
+		     "c"(subleaf));
 }
 
 static inline uint64_t rdtsc(void)

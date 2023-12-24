@@ -260,7 +260,7 @@ int ias_bw_init(void)
 	if (cfg.nobw)
 		return 0;
 
-	cpuid(0, &regs);
+	cpuid(0, 0, &regs);
 	namebytes[0] = regs.ebx;
 	namebytes[1] = regs.edx;
 	namebytes[2] = regs.ecx;
@@ -271,7 +271,7 @@ int ias_bw_init(void)
 		return 0;
 	}
 
-	cpuid(1, &regs);
+	cpuid(1, 0, &regs);
 	if (regs.ecx & (1UL << 31UL)) {
 		log_warn("Detected CPU virtualization. Disabling memory bandwidth monitoring!");
 		cfg.nobw = true;
