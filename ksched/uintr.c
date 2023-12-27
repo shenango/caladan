@@ -1,5 +1,8 @@
 
 #include <asm/apic.h>
+#include <asm/cpufeature.h>
+#include <asm/fpu/xcr.h>
+#include <asm/fpu/xstate.h>
 #include <asm/msr-index.h>
 #include <asm/msr.h>
 #include <asm/tlbflush.h>
@@ -54,7 +57,7 @@ static inline struct uintr_percpu *get_uintr_this_cpu(void)
 	return &this_cpu_ptr(&kp)->uintr;
 }
 
-static void uintr_xrstors(struct uintr_percpu *p, struct uintr_xstate *xs)
+static void uintr_xrstors(struct uintr_xstate *xs)
 {
 	int err;
 
@@ -88,7 +91,7 @@ void uintr_cleanup_core(struct uintr_percpu *p, int cpu)
 
 	/* load NULL state */
 	wrmsrl(MSR_IA32_UINTR_MISC, 0);
-	uintr_xrstors(p, &uintr_null_state);
+	uintr_xrstors(&uintr_null_state);
 
 	/* remove any existing posted interrupts */
 	shm[cpu].upid.puir = 0;
@@ -118,7 +121,7 @@ void uintr_assign_core(struct uintr_ctx *ctx, u64 stack)
 	p->cur_xstate.uintr.upid_addr = (u64)&shm[cpu].upid;
 	p->cur_xstate.uintr.uirr = 0;
 	p->cur_xstate.uintr.uitt_addr = (u64)(&ctx->uitt[0]) | 1UL;
-	uintr_xrstors(p, &p->cur_xstate);
+	uintr_xrstors(&p->cur_xstate);
 
 	/* allow other cores in this ctx to send to this one */
 	ctx->uitt[cpu].valid = BIT(UINTR_UITT_VALID_BIT);
@@ -170,7 +173,7 @@ static void sched_switch_tracepoint(void *data, bool preempt,
 		if (p->cur_xstate.uintr.uirr) {
 			// We need two wrmsrs in this case, one to clear UIRR and one
 			// to update UITT. It's faster to just load the NULL context.
-			uintr_xrstors(p, &uintr_null_state);
+			uintr_xrstors(&uintr_null_state);
 		} else {
 			// Just do one wrmsr to disable the UITT
 			wrmsrl(MSR_IA32_UINTR_TT, 0);
@@ -183,7 +186,7 @@ static void sched_switch_tracepoint(void *data, bool preempt,
 		p->state_loaded = true;
 
 		/* reload saved state */
-		uintr_xrstors(p, &p->cur_xstate);
+		uintr_xrstors(&p->cur_xstate);
 
 		/* enable notifications */
 		clear_bit(UINTR_UPID_STATUS_SN, &upid->word_val);

@@ -1,8 +1,5 @@
 #pragma once
 
-#include <asm/cpufeature.h>
-#include <asm/fpu/xstate.h>
-#include <asm/fpu/xcr.h>
 #include <asm/local.h>
 
 #include "ksched.h"
@@ -14,7 +11,7 @@ struct ksched_percpu {
 	u64			last_sel;
 	struct task_struct	*running_task;
 
-	struct uintr_percpu uintr;
+	struct uintr_percpu	uintr;
 };
 
 extern __read_mostly struct ksched_shm_cpu *shm;
