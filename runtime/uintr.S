@@ -32,6 +32,10 @@ uintr_asm_entry:
 
 	call     uintr_entry
 
+.align 16
+.globl uintr_asm_return
+uintr_asm_return:
+
 	// restore trap frame
 	popq   %rdi;
 	popq   %rsi;

@@ -37,6 +37,7 @@
 #define __weak __attribute__((weak))
 #define __malloc __attribute__((malloc))
 #define __assume_aligned(x) __attribute__((assume_aligned(x)))
+#define __nofp __attribute__((target("general-regs-only")))
 
 #define GCC_VERSION (__GNUC__ * 10000        \
 		     + __GNUC_MINOR__ * 100  \

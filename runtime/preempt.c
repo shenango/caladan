@@ -10,9 +10,9 @@
 #include <sys/ioctl.h>
 #include <sys/syscall.h>
 
-#include "base/log.h"
-#include "runtime/thread.h"
-#include "runtime/preempt.h"
+#include <base/log.h>
+#include <runtime/thread.h>
+#include <runtime/preempt.h>
 
 #include "defs.h"
 
@@ -23,13 +23,15 @@
 
 /* the current preemption count */
 DEFINE_PERTHREAD(unsigned int, preempt_cnt);
+/* perthread stack to use supply for UIPIs */
 DEFINE_PERTHREAD(void *, uintr_stack);
-
-static size_t xsave_max_size;
-static size_t xsave_features;
+/* maximum size in bytes needed for xsave */
+size_t xsave_max_size;
+/* extended processor features to save */
+size_t xsave_features;
 
 /* set a flag to indicate a preemption request is pending */
-static void set_preempt_needed(void)
+static __nofp inline void set_preempt_needed(void)
 {
 	BUILD_ASSERT(~PREEMPT_NOT_PENDING == 0x7fffffff);
 	perthread_andi(preempt_cnt, 0x7fffffff);
@@ -70,8 +72,11 @@ static void handle_sigusr2(int s, siginfo_t *si, void *c)
 	thread_yield();
 }
 
-__weak  __attribute__((target("general-regs-only")))
-void uintr_entry(struct uintr_frame *uintr_frame)
+/*
+ * WARNING: any functions called from this function before xsavec is called
+ * must be marked with __nofp.
+ */
+__weak __nofp void uintr_entry(struct uintr_frame *uintr_frame)
 {
 	struct kthread *k;
 	unsigned char *xsave_buf;

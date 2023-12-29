@@ -8,7 +8,13 @@
 #include <base/thread.h>
 
 DECLARE_PERTHREAD(unsigned int, preempt_cnt);
+DECLARE_PERTHREAD(void *, uintr_stack);
+
 extern void preempt(void);
+extern void uintr_asm_return(void);
+
+extern size_t xsave_max_size;
+extern size_t xsave_features;
 
 /* this flag is set whenever there is _not_ a pending preemption */
 #define PREEMPT_NOT_PENDING	(1 << 31)
@@ -18,7 +24,7 @@ extern void preempt(void);
  *
  * Can be nested.
  */
-static inline void preempt_disable(void)
+static inline __nofp void preempt_disable(void)
 {
 	asm volatile("addl $1, %%gs:__perthread_preempt_cnt(%%rip)" ::: "memory", "cc");
 	barrier();
@@ -40,7 +46,7 @@ static inline void preempt_enable_nocheck(void)
  *
  * Can be nested.
  */
-static inline void preempt_enable(void)
+static inline __nofp void preempt_enable(void)
 {
 #ifndef __GCC_ASM_FLAG_OUTPUTS__
 	preempt_enable_nocheck();
@@ -67,7 +73,7 @@ static inline bool preempt_needed(void)
 /**
  * preempt_enabled - returns true if preemption is enabled
  */
-static inline bool preempt_enabled(void)
+static inline __nofp bool preempt_enabled(void)
 {
 	return (perthread_read(preempt_cnt) & ~PREEMPT_NOT_PENDING) == 0;
 }
