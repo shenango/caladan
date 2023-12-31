@@ -24,7 +24,7 @@ extern size_t xsave_features;
  *
  * Can be nested.
  */
-static inline __nofp void preempt_disable(void)
+static __always_inline __nofp void preempt_disable(void)
 {
 	asm volatile("addl $1, %%gs:__perthread_preempt_cnt(%%rip)" ::: "memory", "cc");
 	barrier();
@@ -46,7 +46,7 @@ static inline void preempt_enable_nocheck(void)
  *
  * Can be nested.
  */
-static inline __nofp void preempt_enable(void)
+static __always_inline __nofp void preempt_enable(void)
 {
 #ifndef __GCC_ASM_FLAG_OUTPUTS__
 	preempt_enable_nocheck();
@@ -73,7 +73,7 @@ static inline bool preempt_needed(void)
 /**
  * preempt_enabled - returns true if preemption is enabled
  */
-static inline __nofp bool preempt_enabled(void)
+static __always_inline __nofp bool preempt_enabled(void)
 {
 	return (perthread_read(preempt_cnt) & ~PREEMPT_NOT_PENDING) == 0;
 }

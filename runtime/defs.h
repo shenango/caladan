@@ -448,7 +448,7 @@ static inline struct kthread *myk(void)
  * WARNING: If you're using myk() instead of getk(), that's a bug if preemption
  * is enabled. The local kthread can change at anytime.
  */
-static inline __nofp struct kthread *getk(void)
+static __always_inline __nofp struct kthread *getk(void)
 {
 	preempt_disable();
 	return perthread_read(mykthread);
@@ -457,26 +457,26 @@ static inline __nofp struct kthread *getk(void)
 /**
  * putk - reenables preemption after calling getk()
  */
-static inline __nofp void putk(void)
+static __always_inline __nofp void putk(void)
 {
 	preempt_enable();
 }
 
 /* preempt_cede_needed - check if kthread should cede */
-static inline __nofp bool preempt_cede_needed(struct kthread *k)
+static __always_inline __nofp bool preempt_cede_needed(struct kthread *k)
 {
 	return k->q_ptrs->curr_grant_gen ==
 	       ACCESS_ONCE(k->q_ptrs->cede_gen);
 }
 
 /* preempt_yield_needed - check if current uthread should yield */
-static inline __nofp bool preempt_yield_needed(struct kthread *k)
+static __always_inline __nofp bool preempt_yield_needed(struct kthread *k)
 {
         return ACCESS_ONCE(k->q_ptrs->yield_rcu_gen) == k->rcu_gen;
 }
 
 /* preempt_park_needed - check if kthread should park itself */
-static inline __nofp bool preempt_park_needed(struct kthread *k)
+static __always_inline __nofp bool preempt_park_needed(struct kthread *k)
 {
 	return k->q_ptrs->curr_grant_gen ==
 	       ACCESS_ONCE(k->q_ptrs->park_gen);
