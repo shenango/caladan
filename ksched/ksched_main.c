@@ -294,12 +294,15 @@ static long ksched_park(struct uintr_ctx *ctx, u64 next_stack)
 		return -ERESTARTSYS;
 	}
 
+	/* may have unparked from a signal */
+	if (unlikely(current != p->running_task))
+		goto park;
+
 	/* check if a new request is available yet */
 	gen = smp_load_acquire(&s->gen);
 	if (gen == p->last_gen) {
 		WRITE_ONCE(s->busy, false);
 		ksched_cleanup_core(p, cpu);
-		put_cpu();
 		goto park;
 	}
 
@@ -320,9 +323,9 @@ static long ksched_park(struct uintr_ctx *ctx, u64 next_stack)
 	WRITE_ONCE(s->busy, p->running_task != NULL);
 	local_set(&p->busy, p->running_task != NULL);
 	smp_store_release(&s->last_gen, gen);
-	put_cpu();
 
 park:
+	put_cpu();
 	/* put this task to sleep and reschedule so the next task can run */
 	__set_current_state(TASK_INTERRUPTIBLE);
 	mark_task_parked(current);
