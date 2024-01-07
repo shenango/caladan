@@ -59,7 +59,7 @@ static inline void timer_finish(struct timer_entry *e)
 			cpu_relax();
 }
 
-static inline bool timer_busy(struct timer_entry *e)
+static inline bool timer_busy(const struct timer_entry *e)
 {
 	return load_acquire(&e->armed) || load_acquire(&e->executing);
 }
