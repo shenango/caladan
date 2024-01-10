@@ -3,6 +3,7 @@
 #include <asm/cpufeature.h>
 #include <asm/fpu/xcr.h>
 #include <asm/fpu/xstate.h>
+#include <asm/irq.h>
 #include <asm/msr-index.h>
 #include <asm/msr.h>
 #include <asm/tlbflush.h>
@@ -57,6 +58,17 @@ static inline struct uintr_percpu *get_uintr_this_cpu(void)
 	return &this_cpu_ptr(&kp)->uintr;
 }
 
+static void uintr_ipi(void)
+{
+	/*
+	 * Set a flag indicating that an interrupt was delivered to this CPU when no
+	 * UINTR context is loaded. This helps ensure that interrupts that arrive
+	 * when a task is temporarily scheduled out are ultimately delivered to the
+	 * task.
+	 */
+	local_set(&get_uintr_this_cpu()->ipi_received, true);
+}
+
 static void uintr_xrstors(struct uintr_xstate *xs)
 {
 	int err;
@@ -88,6 +100,9 @@ void uintr_cleanup_core(struct uintr_percpu *p, int cpu)
 
 	/* suppress notifications */
 	set_bit(UINTR_UPID_STATUS_SN, &shm[cpu].upid.word_val);
+
+	/* clear existing interrupt flag */
+	local_set(&p->ipi_received, false);
 
 	/* load NULL state */
 	wrmsrl(MSR_IA32_UINTR_MISC, 0);
@@ -135,6 +150,12 @@ void uintr_assign_core(struct uintr_ctx *ctx, u64 stack)
 	p->assigned_task = current;
 	p->state_loaded = true;
 
+	/* check if a signal was sent before we loaded the context */
+	if (unlikely(local_read(&p->ipi_received))) {
+		uintr_signal_self();
+		local_set(&p->ipi_received, false);
+	}
+
 	put_cpu();
 }
 
@@ -164,9 +185,6 @@ static void sched_switch_tracepoint(void *data, bool preempt,
 		if (!p->state_loaded)
 			return;
 
-		/* suppress UIPI notifications */
-		set_bit(UINTR_UPID_STATUS_SN, &upid->word_val);
-
 		/* save state (and clear UINV) */
 		uintr_xsaves(&p->cur_xstate);
 
@@ -188,8 +206,11 @@ static void sched_switch_tracepoint(void *data, bool preempt,
 		/* reload saved state */
 		uintr_xrstors(&p->cur_xstate);
 
-		/* enable notifications */
-		clear_bit(UINTR_UPID_STATUS_SN, &upid->word_val);
+		/* check if an interrupt was delivered while the state was unloaded */
+		if (unlikely(local_read(&p->ipi_received))) {
+			uintr_signal_self();
+			local_set(&p->ipi_received, false);
+		}
 	}
 }
 
@@ -450,6 +471,9 @@ int __init uintr_init(void)
 	}
 
 	init_compact_xstate(&uintr_null_state);
+
+	/* setup callback for the UINTR interrupt vector (borrowed from KVM) */
+	kvm_set_posted_intr_wakeup_handler(uintr_ipi);
 
 	uintr_enabled = true;
 	printk(KERN_INFO "UINTR: enabled");

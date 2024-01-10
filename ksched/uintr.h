@@ -3,12 +3,13 @@
 #pragma once
 
 #include <asm/apic.h>
+#include <asm/local.h>
 #include <asm/irq_vectors.h>
 
 #include "uintr_hw.h"
 
 /* Use KVM's posted interrupt vector */
-#define UIPI_APIC_VECTOR			POSTED_INTR_VECTOR
+#define UIPI_APIC_VECTOR			POSTED_INTR_WAKEUP_VECTOR
 
 struct uintr_ctx {
 	unsigned long handler;
@@ -29,6 +30,7 @@ struct uintr_percpu {
 
 	struct uintr_xstate cur_xstate;
 	bool		state_loaded;
+	local_t		ipi_received;
 };
 
 extern void uintr_cleanup_core(struct uintr_percpu *p, int cpu);
