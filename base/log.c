@@ -19,15 +19,21 @@
 /* log levels greater than this value won't be printed */
 int max_loglevel = LOG_DEBUG;
 
+__weak void log_message_begin(uint64_t *cb_data) { }
+__weak void log_message_end(uint64_t *cb_data) { }
+
 void logk(int level, const char *fmt, ...)
 {
 	char buf[MAX_LOG_LEN];
 	va_list ptr;
 	off_t off;
 	int cpu, ret;
+	uint64_t cb_data;
 
 	if (level > max_loglevel)
 		return;
+
+	log_message_begin(&cb_data);
 
 	cpu = sched_getcpu();
 
@@ -51,6 +57,8 @@ void logk(int level, const char *fmt, ...)
 	off = MIN(MAX_LOG_LEN - 1, off + ret);
 	buf[off] = '\n';
 	syscall_write(1, buf, off + 1);
+
+	log_message_end(&cb_data);
 }
 
 #define MAX_CALL_DEPTH	256
