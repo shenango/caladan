@@ -13,13 +13,16 @@ if grep -q none /sys/devices/system/cpu/cpuidle/current_driver; then
   insmod $(dirname $0)/../ksched/build/fake_idle.ko
 fi
 
-sym_addr=$(sudo grep __tracepoint_sched_switch /proc/kallsyms | awk {'print $1}' | tr '[:lower:]' '[:upper:]')
-tracepoint=$((echo -n "ibase=16; "; echo $sym_addr) | bc)
-
 # set up the ksched module
 rmmod ksched
 rm /dev/ksched
-insmod $(dirname $0)/../ksched/build/ksched.ko tracepoint_sched_switch=$tracepoint
+
+if [[ "$1x" = "nouintrx" ]]; then
+  insmod $(dirname $0)/../ksched/build/ksched.ko nouintr=1
+else
+  insmod $(dirname $0)/../ksched/build/ksched.ko
+fi
+
 mknod /dev/ksched c 280 0
 chmod uga+rwx /dev/ksched
 

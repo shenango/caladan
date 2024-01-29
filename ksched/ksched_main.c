@@ -50,12 +50,12 @@ __read_mostly struct ksched_shm_cpu *shm;
 /* per-cpu data to coordinate context switching and signal delivery */
 DEFINE_PER_CPU(struct ksched_percpu, kp);
 
-void mark_task_parked(struct task_struct *tsk)
+static void mark_task_parked(struct task_struct *tsk)
 {
 	tsk->flags |= PF_KSCHED_PARKED;
 }
 
-bool try_mark_task_unparked(struct task_struct *tsk)
+static bool try_mark_task_unparked(struct task_struct *tsk)
 {
 	if ((tsk->flags & PF_KSCHED_PARKED) > 0) {
 		tsk->flags &= ~PF_KSCHED_PARKED;
@@ -236,6 +236,10 @@ static int __cpuidle ksched_idle(struct cpuidle_device *dev,
 		WRITE_ONCE(s->busy, p->running_task != NULL);
 		local_set(&p->busy, true);
 		smp_store_release(&s->last_gen, gen);
+
+		/* HACK: calling wake_up_process might have enabled interrupts. */
+		if (!irqs_disabled())
+			raw_local_irq_disable();
 	}
 
 	put_cpu();
@@ -350,10 +354,12 @@ static void ksched_deliver_signal(struct ksched_percpu *p, unsigned int signum)
 	if (!local_read(&p->busy))
 		return;
 
-	if (uintr_active(&p->uintr))
+	if (uintr_enabled) {
+		uintr_deliver_ipi(&p->uintr);
 		uintr_signal_self();
-	else if (p->running_task)
+	} else if (p->running_task) {
 		send_sig(signum, p->running_task, 0);
+	}
 }
 
 static void ksched_ipi(void *unused)

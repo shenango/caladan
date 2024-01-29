@@ -155,14 +155,16 @@ static inline void ksched_send_intrs(void)
 			__builtin_ia32_senduipi(last_intr_core);
 			goto done;
 		}
+
+		/* otherwise use ksched to multicast the UIPI */
 		request = KSCHED_IOC_UINTR_MULTICAST;
-		ksched_pmc_count = 0;
 	}
 
 	req.len = sizeof(ksched_set);
 	req.mask = &ksched_set;
 	ret = ioctl(ksched_fd, request, &req);
 	BUG_ON(ret);
+	ksched_pmc_count = 0;
 
 done:
 	ksched_count = 0;
