@@ -303,6 +303,11 @@ static struct proc *control_create_proc(mem_key_t key, size_t len,
 		p->has_storage |= th->storage_hwq.enabled;
 	}
 
+	if (cfg.azure_arp_mode && !p->has_directpath) {
+		log_err("control: runtimes must use directpath when running on Azure");
+		goto fail;
+	}
+
 	/* initialize the table of physical page addresses */
 	ret = mem_lookup_page_phys_addrs(p->region.base, p->region.len, PGSIZE_2MB,
 			p->page_paddrs);

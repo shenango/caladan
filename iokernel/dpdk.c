@@ -249,6 +249,9 @@ int dpdk_init(void)
 		ARGV("--vdev=net_tap0");
 		ARGV("--allow");
 		ARGV("0000:00:00.0");
+	} else if (cfg.azure_arp_mode) {
+		ARGV("--allow");
+		ARGV("0000:00:00.0");
 	} else if (nic_pci_addr_str) {
 		ARGV("--allow");
 		ARGV(nic_pci_addr_str);
