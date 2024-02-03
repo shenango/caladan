@@ -113,12 +113,19 @@ static inline bool uintr_pending(struct uintr_percpu *p)
 {
 	int cpu = smp_processor_id();
 
+	/* ignore interrupts if user interrupt flag is 0 */
+	if (!p->cur_xstate.uintr.misc.uif)
+		return false;
+
+	/* check if an interrupt has been recognized */
 	if (p->cur_xstate.uintr.uirr)
 		return true;
 
+	/* check if software has posted an interrupt */
 	if (shm[cpu].upid.puir)
 		return true;
 
+	/* check this for good measure, may not be necessary */
 	if (test_bit(UINTR_UPID_STATUS_ON, &shm[cpu].upid.word_val))
 		return true;
 
