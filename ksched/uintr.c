@@ -109,12 +109,12 @@ static void uintr_xsaves(struct uintr_xstate *xs)
 	WARN_ON_ONCE(err);
 }
 
-static inline bool uintr_pending(struct uintr_percpu *p)
+static inline bool uintr_pending(struct uintr_percpu *p, bool ignore_uif)
 {
 	int cpu = smp_processor_id();
 
 	/* ignore interrupts if user interrupt flag is 0 */
-	if (!p->cur_xstate.uintr.misc.uif)
+	if (!ignore_uif && !p->cur_xstate.uintr.misc.uif)
 		return false;
 
 	/* check if an interrupt has been recognized */
@@ -138,7 +138,7 @@ static void uintr_switch_to_kernel(struct uintr_percpu *p)
 	uintr_xsaves(&p->cur_xstate);
 
 	/* detect a UIPI that arrived while we were in the kernel (before xsave) */
-	if (uintr_pending(p))
+	if (uintr_pending(p, false))
 		set_tsk_thread_flag(p->assigned_task, TIF_NOTIFY_SIGNAL);
 }
 
@@ -148,7 +148,7 @@ static bool uintr_return_from_kernel(struct uintr_percpu *p)
 	uintr_xrstors(&p->cur_xstate);
 	p->state_loaded = true;
 
-	if (uintr_pending(p)) {
+	if (uintr_pending(p, true)) {
 		uintr_signal_self();
 		return true;
 	}
