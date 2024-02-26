@@ -45,7 +45,8 @@
 
 #if __has_include(<asm/fpu/internal.h>)
 #include <asm/fpu/internal.h>
-#else
+#endif
+#ifndef XSTATE_OP
 #define XSTATE_OP(op, st, lmask, hmask, err)				\
 	asm volatile("1:" op "\n\t"					\
 		     "xor %[err], %[err]\n"				\
