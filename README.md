@@ -39,8 +39,7 @@ sudo ./scripts/setup_machine.sh
 5) Install Rust and build a synthetic client-server application.
 
 ```
-curl https://sh.rustup.rs -sSf | sh
-rustup default nightly
+curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain=nightly
 ```
 ```
 cd apps/synthetic
