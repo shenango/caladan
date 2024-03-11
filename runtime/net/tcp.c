@@ -444,6 +444,11 @@ struct netaddr tcpq_local_addr(tcpqueue_t *q)
 	return q->e.laddr;
 }
 
+int tcpq_backlog(tcpqueue_t *q)
+{
+	return q->backlog;
+}
+
 static void tcp_queue_recv(struct trans_entry *e, struct mbuf *m)
 {
 	tcpqueue_t *q = container_of(e, tcpqueue_t, e);

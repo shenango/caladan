@@ -30,6 +30,7 @@ extern void tcp_qshutdown(tcpqueue_t *q);
 extern void tcp_qclose(tcpqueue_t *q);
 extern void tcpq_set_nonblocking(tcpqueue_t *q, bool nonblocking);
 extern struct netaddr tcpq_local_addr(tcpqueue_t *q);
+extern int tcpq_backlog(tcpqueue_t *q);
 extern struct netaddr tcp_local_addr(tcpconn_t *c);
 extern struct netaddr tcp_remote_addr(tcpconn_t *c);
 extern int tcp_get_status(tcpconn_t *c);
