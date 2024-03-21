@@ -526,7 +526,7 @@ int control_init(void)
 	int sfd, ret;
 	void *shbuf;
 
-	BUILD_ASSERT(strlen(CONTROL_SOCK_PATH) <= sizeof(addr.sun_path) - 1);
+	BUILD_ASSERT(strlen(CONTROL_SOCK_PATH + 1) + 1 <= sizeof(addr.sun_path) - 1);
 
 	shbuf = mem_map_shm(INGRESS_MBUF_SHM_KEY, NULL, INGRESS_MBUF_SHM_SIZE,
 			PGSIZE_2MB, true);
@@ -549,7 +549,11 @@ int control_init(void)
 
 	memset(&addr, 0x0, sizeof(struct sockaddr_un));
 	addr.sun_family = AF_UNIX;
-	strncpy(addr.sun_path, CONTROL_SOCK_PATH, sizeof(addr.sun_path) - 1);
+
+	// Make sure it's an abstract namespace path.
+	assert(CONTROL_SOCK_PATH[0] == '\0');
+
+	strncpy(addr.sun_path + 1, CONTROL_SOCK_PATH + 1, sizeof(addr.sun_path) - 2);
 
 	sfd = socket(AF_UNIX, SOCK_STREAM, 0);
 	if (sfd == -1) {
@@ -558,8 +562,8 @@ int control_init(void)
 	}
 
 	if (bind(sfd, (struct sockaddr *)&addr,
-		 sizeof(struct sockaddr_un)) == -1) {
-		log_err("control: bind() failed [%s]", strerror(errno));
+		 sizeof(addr.sun_family) + strlen(addr.sun_path + 1) + 1) == -1) {
+		log_err("control: bind() failed %i [%s]", errno, strerror(errno));
 		close(sfd);
 		return -errno;
 	}

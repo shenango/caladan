@@ -265,11 +265,14 @@ int ioqueues_register_iokernel(void)
 	hdr->sched_cfg.quantum_us = cfg_quantum_us;
 	hdr->thread_specs = ptr_to_shmptr(r, iok.threads, sizeof(*iok.threads) * maxks);
 
+	// Make sure it's an abstract namespace path.
+	assert(CONTROL_SOCK_PATH[0] == '\0');
+
 	/* register with iokernel */
-	BUILD_ASSERT(strlen(CONTROL_SOCK_PATH) <= sizeof(addr.sun_path) - 1);
+	BUILD_ASSERT(strlen(CONTROL_SOCK_PATH + 1) <= sizeof(addr.sun_path) - 2);
 	memset(&addr, 0x0, sizeof(struct sockaddr_un));
 	addr.sun_family = AF_UNIX;
-	strncpy(addr.sun_path, CONTROL_SOCK_PATH, sizeof(addr.sun_path) - 1);
+	strncpy(addr.sun_path + 1, CONTROL_SOCK_PATH + 1, sizeof(addr.sun_path) - 2);
 
 	iok.fd = socket(AF_UNIX, SOCK_STREAM, 0);
 	if (iok.fd == -1) {
