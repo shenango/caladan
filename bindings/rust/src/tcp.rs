@@ -6,7 +6,7 @@ use byteorder::{ByteOrder, NetworkEndian};
 
 use super::*;
 
-fn isize_to_result(i: i64) -> io::Result<usize> {
+fn isize_to_result(i: isize) -> io::Result<usize> {
     if i >= 0 {
         Ok(i as usize)
     } else {

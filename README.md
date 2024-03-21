@@ -40,7 +40,7 @@ sudo ./scripts/setup_machine.sh
 
 ```
 curl https://sh.rustup.rs -sSf | sh
-rustup default nightly
+rustup default nightly-2023-05-31
 ```
 ```
 cd apps/synthetic
