@@ -1,0 +1,2 @@
+# Ignore custom config files.
+config_*
