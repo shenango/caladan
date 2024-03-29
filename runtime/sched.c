@@ -797,6 +797,8 @@ static __always_inline thread_t *__thread_create(void)
 	th->thread_running = false;
 	th->tlsvar = 0;
 	th->cur_kthread = NCPU;
+	// Can be used to detect newly created thread.
+	th->ready_tsc = 0;
 	atomic8_write(&th->interrupt_state, 0);
 
 	return th;
