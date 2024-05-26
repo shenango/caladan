@@ -2,7 +2,8 @@
  * assert.h - support for assertions
  */
 
-#pragma once
+#ifndef __BASE_ASSERT_H
+#define __BASE_ASSERT_H
 
 #include <base/stddef.h>
 
@@ -18,26 +19,6 @@ extern void logk_bug(bool fatal, const char *expr,
 #else /* __CHECKER__ */
 #define __build_assert_if_constant(cond)
 #endif /* __CHECKER__ */
-
-#undef assert
-/* these assertions will get compiled out in release builds (fails on false) */
-#if DEBUG
-#define assert(cond)						\
-        do {							\
-		__build_assert_if_constant(cond);		\
-		if (unlikely(!(cond))) {			\
-			logk_bug(true, __cstr(cond),		\
-				 __FILE__, __LINE__, __func__);	\
-			__builtin_unreachable();		\
-		}						\
-        } while (0)
-#else /* DEBUG */
-#define assert(cond)						\
-	do {							\
-		__build_assert_if_constant(cond);		\
-		(void)sizeof(cond);				\
-	} while (0)
-#endif /* DEBUG */
 
 /**
  * BUG - a fatal code-path that doesn't compile out in release builds
@@ -129,3 +110,24 @@ extern void logk_bug(bool fatal, const char *expr,
 #else /* __CHECKER__ */
 #define BUILD_ASSERT_MSG(cond, msg)
 #endif /* __CHECKER__ */
+
+#endif // __BASE_ASSERT_H
+#undef assert
+/* these assertions will get compiled out in release builds (fails on false) */
+#if DEBUG
+#define assert(cond)						\
+        do {							\
+		__build_assert_if_constant(cond);		\
+		if (unlikely(!(cond))) {			\
+			logk_bug(true, __cstr(cond),		\
+				 __FILE__, __LINE__, __func__);	\
+			__builtin_unreachable();		\
+		}						\
+        } while (0)
+#else /* DEBUG */
+#define assert(cond)						\
+	do {							\
+		__build_assert_if_constant(cond);		\
+		(void)sizeof(cond);				\
+	} while (0)
+#endif /* DEBUG */
