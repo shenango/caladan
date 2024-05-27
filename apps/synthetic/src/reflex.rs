@@ -1,3 +1,10 @@
+use crate::Buffer;
+use crate::Connection;
+use crate::Distribution;
+use crate::LoadgenProtocol;
+use crate::Packet;
+use crate::Transport;
+
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use clap::Arg;
 use std::io;
@@ -9,13 +16,6 @@ use rand_distr::Distribution as DistR;
 use rand_mt::Mt64;
 
 use std::cmp::min;
-
-use Buffer;
-use Connection;
-use Distribution;
-use LoadgenProtocol;
-use Packet;
-use Transport;
 
 const REFLEX_HDR_SZ: usize = 32;
 const REFLEX_MAGIC: u16 = REFLEX_HDR_SZ as u16;

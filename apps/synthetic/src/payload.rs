@@ -1,4 +1,8 @@
-use Packet;
+use crate::Buffer;
+use crate::Connection;
+use crate::LoadgenProtocol;
+use crate::Packet;
+use crate::Transport;
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use std::io;
@@ -11,11 +15,6 @@ pub struct Payload {
 }
 
 pub const PAYLOAD_SIZE: usize = 24;
-
-use Buffer;
-use Connection;
-use LoadgenProtocol;
-use Transport;
 
 #[derive(Clone, Copy)]
 pub struct SyntheticProtocol {}

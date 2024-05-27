@@ -6,11 +6,11 @@ use std::io::{Error, ErrorKind, Read};
 use std::net::SocketAddrV4;
 use std::str::FromStr;
 
-use Buffer;
-use Connection;
-use LoadgenProtocol;
-use Packet;
-use Transport;
+use crate::Buffer;
+use crate::Connection;
+use crate::LoadgenProtocol;
+use crate::Packet;
+use crate::Transport;
 
 #[derive(Copy, Clone)]
 pub struct HttpProtocol {

@@ -48,7 +48,7 @@ pub struct Packet {
     randomness: u64,
     target_start: Duration,
     actual_start: Option<Duration>,
-    completion_time_ns: AtomicU64,
+    completion_time_ns: Arc<AtomicU64>,
     completion_server_tsc: Option<u64>,
     completion_time: Option<Duration>,
 }
@@ -961,9 +961,6 @@ fn run_local(
     let start_unix = SystemTime::now();
     let start = Instant::now();
 
-    struct AtomicU64Pointer(*const AtomicU64);
-    unsafe impl Send for AtomicU64Pointer {}
-
     let mut send_threads = Vec::new();
     for mut packets in packet_schedules {
         let worker = worker.clone();
@@ -974,15 +971,17 @@ fn run_local(
                 let (work_iterations, completion_time_ns, rnd) = {
                     let packet = &mut packets[i];
 
-                    let mut t = start.elapsed();
-                    while t < packet.target_start {
-                        t = start.elapsed();
+                    {
+                        let mut t = start.elapsed();
+                        while t < packet.target_start {
+                            t = start.elapsed();
+                        }
                     }
 
                     packet.actual_start = Some(start.elapsed());
                     (
                         packet.work_iterations,
-                        AtomicU64Pointer(&packet.completion_time_ns as *const AtomicU64),
+                        packet.completion_time_ns.clone(),
                         packet.randomness,
                     )
                 };
@@ -991,10 +990,7 @@ fn run_local(
                 let worker = worker.clone();
                 backend.spawn_thread(move || {
                     worker.work(work_iterations, rnd);
-                    unsafe {
-                        (*completion_time_ns.0)
-                            .store(start.elapsed().as_nanos() as u64, Ordering::SeqCst);
-                    }
+                    completion_time_ns.store(start.elapsed().as_nanos() as u64, Ordering::SeqCst);
                     remaining.fetch_sub(1, Ordering::SeqCst);
                 });
             }

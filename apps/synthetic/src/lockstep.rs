@@ -4,8 +4,8 @@ use std::io::{self, Read, Write};
 use std::net::SocketAddrV4;
 use std::time::Duration;
 
-use Backend;
-use Connection;
+use crate::Backend;
+use crate::Connection;
 
 pub enum Group {
     Server(Vec<Connection>),

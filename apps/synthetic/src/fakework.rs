@@ -4,7 +4,7 @@ use std::result::Result;
 use std::time::Instant;
 
 extern crate rand;
-use duration_to_ns;
+use crate::duration_to_ns;
 use rand::Rng;
 use rand_mt::Mt64;
 

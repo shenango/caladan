@@ -3,11 +3,11 @@ use clap::Arg;
 use std::io;
 use std::io::{Error, ErrorKind, Read};
 
-use Buffer;
-use Connection;
-use LoadgenProtocol;
-use Packet;
-use Transport;
+use crate::Buffer;
+use crate::Connection;
+use crate::LoadgenProtocol;
+use crate::Packet;
+use crate::Transport;
 
 /** Packet code from https://github.com/aisk/rust-memcache **/
 

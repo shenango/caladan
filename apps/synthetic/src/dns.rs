@@ -1,8 +1,8 @@
-use Buffer;
-use Connection;
-use LoadgenProtocol;
-use Packet;
-use Transport;
+use crate::Buffer;
+use crate::Connection;
+use crate::LoadgenProtocol;
+use crate::Packet;
+use crate::Transport;
 
 use byteorder::{BigEndian, WriteBytesExt};
 use dns_parser::{Header, Opcode, QueryClass, QueryType, ResponseCode};
