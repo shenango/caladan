@@ -612,8 +612,6 @@ int control_init(void)
 	int sfd, ret;
 	void *shbuf;
 
-	BUILD_ASSERT(strlen(CONTROL_SOCK_PATH + 1) + 1 <= sizeof(addr.sun_path) - 1);
-
 	shbuf = mem_map_shm(INGRESS_MBUF_SHM_KEY, NULL, INGRESS_MBUF_SHM_SIZE,
 			PGSIZE_2MB, true);
 	if (shbuf == MAP_FAILED) {
@@ -641,13 +639,13 @@ int control_init(void)
 	if (nic_pci_addr_str)
 		memcpy(&iok_info->directpath_pci, &nic_pci_addr, sizeof(nic_pci_addr));
 
-	memset(&addr, 0x0, sizeof(struct sockaddr_un));
 	addr.sun_family = AF_UNIX;
 
 	// Make sure it's an abstract namespace path.
 	assert(CONTROL_SOCK_PATH[0] == '\0');
 
-	strncpy(addr.sun_path + 1, CONTROL_SOCK_PATH + 1, sizeof(addr.sun_path) - 2);
+	BUILD_ASSERT(sizeof(CONTROL_SOCK_PATH) <= sizeof(addr.sun_path));
+	memcpy(addr.sun_path, CONTROL_SOCK_PATH, sizeof(CONTROL_SOCK_PATH));
 
 	sfd = socket(AF_UNIX, SOCK_STREAM, 0);
 	if (sfd == -1) {
@@ -656,7 +654,7 @@ int control_init(void)
 	}
 
 	if (bind(sfd, (struct sockaddr *)&addr,
-		 sizeof(addr.sun_family) + strlen(addr.sun_path + 1) + 1) == -1) {
+		 sizeof(addr.sun_family) + sizeof(CONTROL_SOCK_PATH)) == -1) {
 		log_err("control: bind() failed %i [%s]", errno, strerror(errno));
 		close(sfd);
 		return -errno;

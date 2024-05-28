@@ -390,10 +390,9 @@ int ioqueues_register_iokernel(void)
 	assert(CONTROL_SOCK_PATH[0] == '\0');
 
 	/* register with iokernel */
-	BUILD_ASSERT(strlen(CONTROL_SOCK_PATH + 1) <= sizeof(addr.sun_path) - 2);
-	memset(&addr, 0x0, sizeof(struct sockaddr_un));
+	BUILD_ASSERT(sizeof(CONTROL_SOCK_PATH) <= sizeof(addr.sun_path));
 	addr.sun_family = AF_UNIX;
-	strncpy(addr.sun_path + 1, CONTROL_SOCK_PATH + 1, sizeof(addr.sun_path) - 2);
+	memcpy(addr.sun_path, CONTROL_SOCK_PATH, sizeof(CONTROL_SOCK_PATH));
 
 	iok.fd = socket(AF_UNIX, SOCK_STREAM, 0);
 	if (iok.fd == -1) {
@@ -402,7 +401,7 @@ int ioqueues_register_iokernel(void)
 	}
 
 	if (connect(iok.fd, (struct sockaddr *)&addr,
-		 sizeof(struct sockaddr_un)) == -1) {
+		 sizeof(addr.sun_family) + sizeof(CONTROL_SOCK_PATH)) == -1) {
 		log_err("register_iokernel: connect() failed [%s]", strerror(errno));
 		goto fail_close_fd;
 	}
