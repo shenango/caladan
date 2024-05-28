@@ -10,7 +10,7 @@ fn isize_to_result(i: isize) -> io::Result<usize> {
     if i >= 0 {
         Ok(i as usize)
     } else {
-        Err(io::Error::from_raw_os_error(i as i32))
+        Err(io::Error::from_raw_os_error(-i as i32))
     }
 }
 
@@ -24,7 +24,7 @@ impl TcpQueue {
         let mut queue = ptr::null_mut();
         let ret = unsafe { ffi::tcp_listen(laddr, backlog, &mut queue as *mut _) };
         if ret < 0 {
-            Err(io::Error::from_raw_os_error(ret as i32))
+            Err(io::Error::from_raw_os_error(-ret as i32))
         } else {
             Ok(TcpQueue(queue))
         }
@@ -33,7 +33,7 @@ impl TcpQueue {
         let mut conn = ptr::null_mut();
         let ret = unsafe { ffi::tcp_accept(self.0, &mut conn as *mut _) };
         if ret < 0 {
-            Err(io::Error::from_raw_os_error(ret as i32))
+            Err(io::Error::from_raw_os_error(-ret as i32))
         } else {
             Ok(TcpConnection(conn))
         }
@@ -65,7 +65,7 @@ impl TcpConnection {
         let mut conn = ptr::null_mut();
         let ret = unsafe { ffi::tcp_dial(laddr, raddr, &mut conn as *mut _) };
         if ret < 0 {
-            Err(io::Error::from_raw_os_error(ret as i32))
+            Err(io::Error::from_raw_os_error(-ret as i32))
         } else {
             Ok(TcpConnection(conn))
         }
@@ -86,7 +86,7 @@ impl TcpConnection {
         if res == 0 {
             Ok(())
         } else {
-            Err(io::Error::from_raw_os_error(res as i32))
+            Err(io::Error::from_raw_os_error(-res as i32))
         }
     }
 
