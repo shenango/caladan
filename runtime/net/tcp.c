@@ -864,17 +864,8 @@ struct netaddr tcp_remote_addr(tcpconn_t *c)
 	return c->e.raddr;
 }
 
-static ssize_t tcp_read_wait(tcpconn_t *c, size_t len,
-			     struct list_head *q, struct mbuf **mout)
-{
+static int tcp_wait_rx(tcpconn_t *c) {
 	int ret;
-	struct mbuf *m;
-	size_t readlen = 0;
-	bool do_ack = false;
-
-	*mout = NULL;
-	spin_lock_np(&c->lock);
-
 	/* block until there is an actionable event */
 	while (!c->rx_closed && (c->rx_exclusive || list_empty(&c->rxq))) {
 		if (c->nonblocking) {
@@ -888,10 +879,134 @@ static ssize_t tcp_read_wait(tcpconn_t *c, size_t len,
 		}
 	}
 
+	return 0;
+}
+
+/**
+ * tcp_read_peek - reads data from a TCP connection without consuming the data.
+ * @c: the TCP connection
+ * @buf: a buffer to store the read data
+ * @len: the length of @buf
+ *
+ * Returns the number of bytes read, 0 if the connection is closed, or < 0
+ * if an error occurred.
+ */
+ssize_t tcp_read_peek(tcpconn_t *c, void *buf, size_t len) {
+	int ret;
+	struct mbuf *m;
+	size_t tocopy, readlen = 0;
+
+	spin_lock_np(&c->lock);
+
+	if(unlikely(ret = tcp_wait_rx(c))) return ret;
+
 	/* is the socket closed? */
 	if (c->rx_closed) {
 		spin_unlock_np(&c->lock);
-		return -c->err;
+		return 0;
+	}
+
+	list_for_each(&c->rxq, m, link) {
+	tocopy = MIN(mbuf_length(m), len - readlen);
+	memcpy(buf + readlen, mbuf_data(m), tocopy);
+	readlen += tocopy;
+
+	if (len == readlen)
+		break;
+	}
+
+	spin_unlock_np(&c->lock);
+	return readlen;
+}
+
+static size_t iov_len(const struct iovec *iov, int iovcnt)
+{
+	size_t len = 0;
+	int i;
+
+	for (i = 0; i < iovcnt; i++)
+		len += iov[i].iov_len;
+
+	return len;
+}
+
+/**
+ * tcp_readv_peek - reads vectorized data from a TCP connection without consuming the data.
+ * @c: the TCP connection
+ * @iov: a pointer to the IO vector
+ * @iovcnt: the number of vectors in @iov
+ *
+ * Returns the number of bytes read, 0 if the connection is closed, or < 0
+ * if an error occurred.
+ */
+ssize_t tcp_readv_peek(tcpconn_t *c, const struct iovec *iov,
+			     int iovcnt) {
+	int ret, i = 0;
+	struct mbuf *m;
+	const struct iovec *vp;
+	size_t tocopy, readlen = 0;
+	off_t mbuf_off = 0, iov_off = 0;
+	size_t len = iov_len(iov, iovcnt);
+
+	spin_lock_np(&c->lock);
+
+	if(unlikely(ret = tcp_wait_rx(c))) return ret;
+
+	/* is the socket closed? */
+	if (c->rx_closed) {
+		spin_unlock_np(&c->lock);
+		return 0;
+	}
+
+	m = list_top(&c->rxq, struct mbuf, link);
+
+	do {
+		vp = &iov[i];
+
+		tocopy = MIN(len - readlen,
+			MIN(vp->iov_len - iov_off,
+			mbuf_length(m) - mbuf_off));
+		memcpy((char *)vp->iov_base + iov_off,
+		mbuf_data(m) + mbuf_off, tocopy);
+
+		iov_off += tocopy;
+		mbuf_off += tocopy;
+		readlen += tocopy;
+
+		if (mbuf_off == mbuf_length(m)) {
+			m = list_next(&c->rxq, m, link);
+			mbuf_off = 0;
+		}
+
+		if (iov_off == vp->iov_len) {
+			iov_off = 0;
+			i++;
+		}
+
+		assert(i <= iovcnt);
+	}  while ((len != readlen) && (m != NULL));
+
+	spin_unlock_np(&c->lock);
+	return readlen;
+}
+
+static ssize_t tcp_read_wait(tcpconn_t *c, size_t len,
+			     struct list_head *q, struct mbuf **mout)
+{
+	int ret;
+	struct mbuf *m;
+	size_t tocopy, readlen = 0;
+	bool do_ack = false;
+
+	*mout = NULL;
+	spin_lock_np(&c->lock);
+
+	if(unlikely(ret = tcp_wait_rx(c))) return ret;
+
+	/* is the socket closed? */
+	if (c->rx_closed) {
+	  spin_unlock_np(&c->lock);
+	  return -c->err;
 	}
 
 	/* pop off the mbufs that will be read */
@@ -996,17 +1111,6 @@ ssize_t tcp_read(tcpconn_t *c, void *buf, size_t len)
 	tcp_read_finish(c, m);
 
 	return ret;
-}
-
-static size_t iov_len(const struct iovec *iov, int iovcnt)
-{
-	size_t len = 0;
-	int i;
-
-	for (i = 0; i < iovcnt; i++)
-		len += iov[i].iov_len;
-
-	return len;
 }
 
 /**

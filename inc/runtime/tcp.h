@@ -38,6 +38,8 @@ extern int tcp_get_status(tcpconn_t *c);
 extern ssize_t tcp_read(tcpconn_t *c, void *buf, size_t len);
 extern ssize_t tcp_write(tcpconn_t *c, const void *buf, size_t len);
 extern ssize_t tcp_readv(tcpconn_t *c, const struct iovec *iov, int iovcnt);
+extern ssize_t tcp_readv_peek(tcpconn_t *c, const struct iovec *iov, int iovcnt);
+extern ssize_t tcp_read_peek(tcpconn_t *c, void *buf, size_t len);
 extern ssize_t tcp_writev(tcpconn_t *c, const struct iovec *iov, int iovcnt);
 extern int tcp_shutdown(tcpconn_t *c, int how);
 extern void tcp_abort(tcpconn_t *c);

@@ -41,7 +41,7 @@ extern struct netaddr udp_local_addr(udpconn_t *c);
 extern struct netaddr udp_remote_addr(udpconn_t *c);
 extern int udp_set_buffers(udpconn_t *c, int read_mbufs, int write_mbufs);
 extern ssize_t udp_read_from(udpconn_t *c, void *buf, size_t len,
-			     struct netaddr *raddr);
+			     struct netaddr *raddr, bool peek);
 extern ssize_t udp_write_to(udpconn_t *c, const void *buf, size_t len,
 			    const struct netaddr *raddr);
 extern ssize_t udp_read(udpconn_t *c, void *buf, size_t len);

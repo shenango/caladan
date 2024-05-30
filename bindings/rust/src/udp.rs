@@ -63,6 +63,7 @@ impl UdpConnection {
                 buf.as_mut_ptr() as *mut c_void,
                 buf.len() as _,
                 &mut raddr as *mut _,
+                false, /* peek */
             )
         })
         .map(|u| (u, SocketAddrV4::new(raddr.ip.into(), raddr.port)))
