@@ -20,7 +20,6 @@ net_obj = $(net_src:.c=.o)
 # iokernel - a soft-NIC service
 iokernel_src = $(wildcard iokernel/*.c) $(wildcard iokernel/directpath/*.c)
 iokernel_obj = $(iokernel_src:.c=.o)
-$(iokernel_obj): INC += -I$(DPDK_PATH)/build/include
 
 # runtime - a user-level threading and networking library
 runtime_src = $(wildcard runtime/*.c) $(wildcard runtime/net/*.c)
@@ -42,13 +41,16 @@ PCM_LIBS = -lm -lstdc++
 # dpdk libs
 DPDK_LIBS=$(shell PKG_CONFIG_PATH=$(PKG_CONFIG_PATH) pkg-config --libs --static libdpdk)
 
+
+# must be first
+all: libbase.a libnet.a libruntime.a iokerneld $(test_targets) shim
+
+$(iokernel_obj): INC += -I$(DPDK_PATH)/build/include
+
 # additional libs for running with Mellanox NICs
 ifeq ($(CONFIG_MLX5),y)
 $(iokernel_obj): INC += $(MLX5_INC)
 endif
-
-# must be first
-all: libbase.a libnet.a libruntime.a iokerneld $(test_targets) shim
 
 libbase.a: $(base_obj)
 	$(AR) rcs $@ $^
