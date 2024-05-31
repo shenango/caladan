@@ -12,6 +12,7 @@ byteorder = "1.5"
 bindgen = "0.69.1"
 build-deps = "0.1.4"
 proc-macro2 = "1.0.66"
+anyhow = "1.0.86"
 
 [[bin]]
 name = "runtime_threads"

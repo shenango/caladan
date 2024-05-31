@@ -2,38 +2,46 @@ extern crate bindgen;
 extern crate build_deps;
 
 use std::env;
+use std::fs::canonicalize;
 use std::path::PathBuf;
 
+use anyhow::Context;
 use std::process::Command;
 
-fn main() {
-    build_deps::rerun_if_changed_paths("../../inc/**").unwrap();
-    build_deps::rerun_if_changed_paths("../../*.a").unwrap();
+fn main() -> anyhow::Result<()> {
+    build_deps::rerun_if_changed_paths(
+        canonicalize("./build.rs")
+            .context("canonicalize error")?
+            .to_str()
+            .unwrap(),
+    )
+    .map_err(|e| anyhow::anyhow!("failed to add rerun command: {:?}", e))?;
+
+    let root_dir = canonicalize("../../").context("failed to canonicalize root dir")?;
+    let inc_glob = format!("{}/inc/**", root_dir.to_str().unwrap());
+    build_deps::rerun_if_changed_paths(&inc_glob)
+        .map_err(|e| anyhow::anyhow!("failed to add rerun command: {:?}", e))?;
+
+    let static_lib_glob = format!("{}/inc/**", root_dir.to_str().unwrap());
+    build_deps::rerun_if_changed_paths(&static_lib_glob)
+        .map_err(|e| anyhow::anyhow!("failed to add rerun command: {:?}", e))?;
 
     // Tell cargo to tell rustc to link the library.
-    println!("cargo:rustc-link-lib=static=base");
-    println!("cargo:rustc-link-lib=static=net");
-    println!("cargo:rustc-link-lib=static=runtime");
-    let manifest_path: PathBuf = std::env::var("CARGO_MANIFEST_DIR")
-        .unwrap()
-        .parse()
-        .unwrap();
-    // the parent/parent is bindings/rust
-    let lib_search_path = manifest_path.parent().unwrap().parent().unwrap();
-    println!("cargo:rustc-flags=-L {}", lib_search_path.to_str().unwrap());
-    let link_script_path = manifest_path
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .join("base/base.ld");
+    println!("cargo::rustc-link-lib=static=base");
+    println!("cargo::rustc-link-lib=static=net");
+    println!("cargo::rustc-link-lib=static=runtime");
+    println!("cargo::rustc-flags=-L {}", root_dir.to_str().unwrap());
+    let link_script_path = root_dir.join("base/base.ld");
     println!(
-        "cargo:rustc-link-arg=-T{}",
+        "cargo::rustc-link-arg=-T{}",
         link_script_path.to_str().unwrap()
     );
 
-    println!("cargo:rustc-flags=-L {}/shim/", lib_search_path.to_str().unwrap());
-    println!("cargo:rustc-link-lib=static=shim");
+    println!(
+        "cargo::rustc-flags=-L {}",
+        root_dir.join("shim").to_str().unwrap()
+    );
+    println!("cargo::rustc-link-lib=static=shim");
 
     // consult shared.mk for other libraries... sorry y'all.
     let output = Command::new("make")
@@ -47,17 +55,17 @@ fn main() {
         .unwrap();
     for t in String::from_utf8_lossy(&output.stdout).split_whitespace() {
         if t.starts_with("-L") {
-            println!("cargo:rustc-flags={}", t.replace("-L", "-L "));
+            println!("cargo::rustc-flags={}", t.replace("-L", "-L "));
         } else if t == "-lmlx5" || t == "-libverbs" || t.contains("spdk") {
-            println!("cargo:rustc-link-lib=static={}", t.replace("-l", ""));
+            println!("cargo::rustc-link-lib=static={}", t.replace("-l", ""));
         } else if t.starts_with("-l:lib") {
             println!(
-                "cargo:rustc-link-lib=static={}",
+                "cargo::rustc-link-lib=static={}",
                 t.replace("-l:lib", "").replace(".a", "")
             );
         } else if t == "-lpthread" {
         } else if t.starts_with("-l") {
-            println!("cargo:rustc-link-lib={}", t.replace("-l", ""));
+            println!("cargo::rustc-link-lib={}", t.replace("-l", ""));
         }
     }
 
@@ -82,4 +90,6 @@ fn main() {
     bindings
         .write_to_file(out_path.join("bindings.rs"))
         .expect("Couldn't write bindings!");
+
+    Ok(())
 }
