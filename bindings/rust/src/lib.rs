@@ -1,6 +1,3 @@
-#![allow(non_upper_case_globals)]
-#![allow(non_camel_case_types)]
-#![allow(non_snake_case)]
 #![feature(new_uninit)]
 #![feature(get_mut_unchecked)]
 
@@ -15,11 +12,8 @@ use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-pub mod ffi {
-    include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
-}
-
 mod asm;
+pub mod ffi;
 pub mod storage;
 pub mod tcp;
 pub mod thread;
