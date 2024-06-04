@@ -141,6 +141,30 @@ static void rx_one_pkt(struct rte_mbuf *buf)
 		arphdr = rte_pktmbuf_mtod_offset(buf, struct rte_arp_hdr *,
 			sizeof(*ptr_mac_hdr));
 		dst_ip = rte_be_to_cpu_32(arphdr->arp_data.arp_tip);
+
+		// Azure's faked ARP replies always go to the default NIC
+		// address, so broadcast them to all runtimes.
+		if (cfg.azure_arp_mode &&
+		    arphdr->arp_opcode == rte_cpu_to_be_16(RTE_ARP_OP_REPLY)) {
+			bool success;
+			int n_sent = 0;
+			net_hdr = rx_prepend_rx_preamble(buf);
+			for (int i = 0; i < dp.nr_clients; i++) {
+				success = rx_send_pkt_to_runtime(dp.clients[i], net_hdr);
+				if (success) {
+					n_sent++;
+				} else {
+					STAT_INC(RX_BROADCAST_FAIL, 1);
+					log_debug_ratelimited("rx: failed to enqueue broadcast "
+					                      "packet to runtime");
+				}
+			}
+			if (n_sent == 0)
+				rte_pktmbuf_free(buf);
+			else
+				rte_mbuf_refcnt_update(buf, n_sent - 1);
+			return;
+		}
 	} else {
 		log_debug("unrecognized ether type");
 		goto fail_free;
