@@ -1,7 +1,7 @@
-From 38c349f2851fbaea991370a1e755e581a8b9e045 Mon Sep 17 00:00:00 2001
+From b8686ff93db9873375cf746834eab9f7b339ebe1 Mon Sep 17 00:00:00 2001
 From: Josh Fried <joshuafried@gmail.com>
 Date: Mon, 24 Apr 2023 20:43:53 -0400
-Subject: [PATCH 3/3] enable fast flow steering in vfio mode
+Subject: [PATCH 3/5] enable fast flow steering in vfio mode
 
 implement *just enough* of required functionality in the vfio
 driver to support direct rules (in our use case).
@@ -289,7 +289,7 @@ index 9acbe010..8d88c251 100644
  	u8         reserved_at_0[0x40];
  
 diff --git a/providers/mlx5/mlx5_vfio.c b/providers/mlx5/mlx5_vfio.c
-index 7f24b270..614bd604 100644
+index 7f24b270..ecb38e05 100644
 --- a/providers/mlx5/mlx5_vfio.c
 +++ b/providers/mlx5/mlx5_vfio.c
 @@ -785,7 +785,7 @@ end:
@@ -387,7 +387,7 @@ index 7f24b270..614bd604 100644
  		goto clean_cmd;
  
 +	if (mlx5_vfio_dm_init(mctx))
-+		goto clean_cmd;
++		mlx5_vfio_dv_ctx_ops.alloc_dm = NULL;
 +
  	if (create_async_eqs(mctx))
  		goto func_teardown;
@@ -1165,5 +1165,5 @@ index c48706a4..59e6a99e 100644
  {
  	unsigned long size = BITS_TO_LONGS(nbits) * sizeof(unsigned long);
 -- 
-2.34.1
+2.43.0
 

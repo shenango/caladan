@@ -12,7 +12,7 @@
 #include "defs.h"
 #include "mlx5_ifc.h"
 
-static const bool use_legacy_steering = false;
+static bool use_legacy_steering;
 
 // Flow steering
 #define FLOW_TBL_TYPE 0x0
@@ -264,18 +264,17 @@ int directpath_setup_steering(void)
 	if (ret)
 		return ret;
 
-	if (!use_legacy_steering) {
-		/* setup direct flow steering */
-		dr_dmn = mlx5dv_dr_domain_create(vfcontext,
-			                             MLX5DV_DR_DOMAIN_TYPE_NIC_RX);
-		if (!dr_dmn)
-			return errno ? -errno : -1;
+	/* setup direct flow steering */
+	dr_dmn = mlx5dv_dr_domain_create(vfcontext,
+			                         MLX5DV_DR_DOMAIN_TYPE_NIC_RX);
 
-		/* create the main s/w-managed flow table */
+	/* create the main s/w-managed flow table */
+	if (dr_dmn)
 		main_sw_tbl = mlx5dv_dr_table_create(dr_dmn, 1);
-		if (!main_sw_tbl)
-			return errno ? -errno : -1;
 
+	use_legacy_steering = !dr_dmn || !main_sw_tbl;
+
+	if (!use_legacy_steering) {
 		/* create the matcher that runtime rules will use */
 		mask.size = DEVX_ST_SZ_BYTES(dr_match_param);
 		DEVX_SET(fte_match_param, mask.buf,
