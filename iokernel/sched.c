@@ -981,13 +981,14 @@ int sched_init(void)
 	 */
 
 	for (i = 0; i < cpu_count; i++) {
-		if (cpu_info_tbl[i].package != managed_numa_node && sched_ops != &numa_ops)
+		if (managed_numa_node != -1 &&
+		    cpu_info_tbl[i].package != managed_numa_node &&
+		    sched_ops != &numa_ops)
 			continue;
 
 		if (allowed_cores_supplied &&
 		    !bitmap_test(input_allowed_cores, i))
 			continue;
-
 		bitmap_set(sched_allowed_cores, i);
 	}
 	/* check for minimum number of cores required */
