@@ -1,0 +1,6 @@
+{
+    "files.associations": {
+        "waitq.h": "c",
+        "defs.h": "c"
+    }
+}

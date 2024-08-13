@@ -115,6 +115,9 @@ static inline int dpdk_port_init(uint8_t port, struct rte_mempool *mbuf_pool)
 		nb_txd = MLX5_TX_RING_SIZE;
 	}
 
+    // Print PCIe address
+    printf("PCIe Address of port %u: %s\n", port, dev_info.device->name);
+
 	/* Configure the Ethernet device. */
 	retval = rte_eth_dev_configure(port, rx_rings, tx_rings, &port_conf);
 	if (retval != 0)
@@ -257,7 +260,7 @@ int dpdk_init(void)
 int dpdk_late_init(void)
 {
 	/* initialize port */
-	dp.port = 0;
+	dp.port = 1;
 	if (dpdk_port_init(dp.port, dp.rx_mbuf_pool) != 0) {
 		log_err("dpdk: cannot init port %"PRIu8 "\n", dp.port);
 		return -1;

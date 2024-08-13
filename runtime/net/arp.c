@@ -124,6 +124,7 @@ static struct arp_entry *create_entry(uint32_t daddr)
 
 static void arp_send(uint16_t op, struct eth_addr dhost, uint32_t daddr)
 {
+	log_info("arp_send");
 	struct mbuf *m;
 	struct arp_hdr *arp_hdr;
 	struct arp_hdr_ethip *arp_hdr_ethip;
@@ -154,6 +155,7 @@ static void arp_age_entry(uint64_t now_us, struct arp_entry *e)
 	if (now_us - e->ts < ((e->state == ARP_STATE_VALID) ?
 			      ARP_REPROBE_TIME : ARP_RETRY_TIME))
 		return;
+	log_info("arp_age_entry");
 
 	switch (e->state) {
 	case ARP_STATE_PROBING:
@@ -319,6 +321,12 @@ int arp_lookup(uint32_t daddr, struct eth_addr *dhost_out, struct mbuf *m)
 	struct arp_entry *e, *newe = NULL;
 	int idx = hash_ip(daddr);
 
+	log_info("arp_lookup: Arp lookup for %d.%d.%d.%d",
+		 ((daddr >> 24) & 0xff),
+		 ((daddr >> 16) & 0xff),
+		 ((daddr >> 8) & 0xff),
+		 (daddr & 0xff));
+
 	/* hot-path: @daddr hits in ARP cache */
 	rcu_read_lock();
 	e = lookup_entry(idx, daddr);
@@ -331,6 +339,7 @@ int arp_lookup(uint32_t daddr, struct eth_addr *dhost_out, struct mbuf *m)
 
 	/* cold-path: solicit an ARP response */
 	if (!e) {
+		log_info("arp_lookup: soliciting ARP response");
 		arp_send(ARP_OP_REQUEST, eth_addr_broadcast, daddr);
 		newe = create_entry(daddr);
 		if (!newe)
@@ -352,6 +361,7 @@ int arp_lookup(uint32_t daddr, struct eth_addr *dhost_out, struct mbuf *m)
 	} else if (newe) {
 		/* insert new entry */
 		e = newe;
+		log_info("arp_lookup: inserting new entry %d", idx);
 		insert_entry(e, idx);
 	}
 

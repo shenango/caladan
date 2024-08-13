@@ -194,6 +194,8 @@ static int tx_drain_queue(struct thread *t, int n,
 				unpoll_thread(t);
 			break;
 		}
+		
+		log_info("tx: received packet from runtime %d", t->at_idx);
 
 		/* TODO: need to kill the process? */
 		BUG_ON(cmd != TXPKT_NET_XMIT);

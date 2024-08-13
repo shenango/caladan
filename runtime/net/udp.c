@@ -11,6 +11,7 @@
 #include <runtime/sync.h>
 #include <runtime/thread.h>
 #include <runtime/udp.h>
+#include <base/log.h>
 
 #include "defs.h"
 #include "waitq.h"
@@ -35,6 +36,8 @@ static int udp_send_raw(struct mbuf *m, size_t len,
 	udphdr->dst_port = hton16(raddr.port);
 	udphdr->len = hton16(len + sizeof(*udphdr));
 	udphdr->chksum = 0;
+
+	log_info("Sending to ip %u.%u.%u.%u and port %d", (raddr.ip >> 24) & 0xFF, (raddr.ip >> 16) & 0xFF, (raddr.ip >> 8) & 0xFF, raddr.ip & 0xFF, raddr.port);
 
 	/* send the IP packet */
 	return net_tx_ip(m, IPPROTO_UDP, raddr.ip);
@@ -71,6 +74,7 @@ struct udpconn {
 /* handles ingress packets for UDP sockets */
 static void udp_conn_recv(struct trans_entry *e, struct mbuf *m)
 {
+	log_info("In udp conn recv");
 	udpconn_t *c = container_of(e, udpconn_t, e);
 	thread_t *th;
 
@@ -86,6 +90,8 @@ static void udp_conn_recv(struct trans_entry *e, struct mbuf *m)
 		mbuf_drop(m);
 		return;
 	}
+
+	log_info("Received packet!");
 
 	/* enqueue the packet on the ingress queue */
 	mbufq_push_tail(&c->inq, m);
@@ -610,6 +616,12 @@ int udp_create_spawner(struct netaddr laddr, udpspawn_fn_t fn,
 {
 	udpspawner_t *s;
 	int ret;
+	unsigned char bytes[4];
+    bytes[0] = (laddr.ip >> 24) & 0xFF;
+    bytes[1] = (laddr.ip >> 16) & 0xFF;
+    bytes[2] = (laddr.ip >> 8) & 0xFF;
+    bytes[3] = laddr.ip & 0xFF;
+	log_info("create spawner with ip %u.%u.%u.%u and port %d", bytes[0], bytes[1], bytes[2], bytes[3], laddr.port);
 
 	/* only can support one local IP so far */
 	if (laddr.ip == 0)
@@ -664,6 +676,7 @@ void udp_destroy_spawner(udpspawner_t *s)
 ssize_t udp_send(const void *buf, size_t len,
 		 struct netaddr laddr, struct netaddr raddr)
 {
+	log_info("udp_send: Sending buffer of len %ld", len);
 	void *payload;
 	struct mbuf *m;
 	int ret;
@@ -684,6 +697,8 @@ ssize_t udp_send(const void *buf, size_t len,
 	m = net_tx_alloc_mbuf();
 	if (unlikely(!m))
 		return -ENOBUFS;
+	
+	log_info("Allocated TX buffer");
 
 	/* write datagram payload */
 	payload = mbuf_put(m, len);

@@ -63,6 +63,7 @@ bool rx_send_to_runtime(struct proc *p, uint32_t hash, uint64_t cmd,
 	if (likely(sched_threads_active(p) > 0)) {
 		/* use the flow table to route to an active thread */
 		th = &p->threads[p->flow_tbl[hash % p->thread_count]];
+		log_info("Sent to kthread %d", th->at_idx);
 		return lrpc_send(&th->rxq, cmd, payload);
 	}
 
@@ -76,6 +77,7 @@ bool rx_send_to_runtime(struct proc *p, uint32_t hash, uint64_t cmd,
 		/* use the flow table to route to an active thread */
 		th = &p->threads[p->flow_tbl[hash % p->thread_count]];
 	}
+	log_info("Sent to kthread %d", th->at_idx);
 	return lrpc_send(&th->rxq, cmd, payload);
 }
 
@@ -116,7 +118,7 @@ static void rx_one_pkt(struct rte_mbuf *buf)
 			log_debug_ratelimited("rx: received packet for unregistered MAC");
 			rte_pktmbuf_free(buf);
 			return;
-		}
+		} 
 
 		p = (struct proc *)data;
 		net_hdr = rx_prepend_rx_preamble(buf);
@@ -174,7 +176,7 @@ bool rx_burst(void)
 	nb_rx = rte_eth_rx_burst(dp.port, 0, bufs, IOKERNEL_RX_BURST_SIZE);
 	STAT_INC(RX_PULLED, nb_rx);
 	if (nb_rx > 0)
-		log_debug("rx: received %d packets on port %d", nb_rx, dp.port);
+		log_info("rx: received %d packets on port %d", nb_rx, dp.port);
 
 	for (i = 0; i < nb_rx; i++) {
 		if (i + RX_PREFETCH_STRIDE < nb_rx) {

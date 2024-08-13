@@ -61,6 +61,7 @@ impl Payload {
             index: reader.read_u64::<BigEndian>()?,
             randomness: reader.read_u64::<BigEndian>()?,
         };
+        println!("got payload");
         return Ok(p);
     }
 }

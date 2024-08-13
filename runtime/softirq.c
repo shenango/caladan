@@ -59,6 +59,7 @@ bool softirq_run_locked(struct kthread *k)
 
 	/* check for iokernel softirq work */
 	if (!k->iokernel_busy && softirq_iokernel_pending(k)) {
+		log_info("new iokernel softirq work!");
 		k->iokernel_busy = true;
 		thread_ready_head_locked(k->iokernel_softirq);
 		work_done = true;

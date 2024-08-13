@@ -148,6 +148,7 @@ fn run_linux_udp_server(
         .map(|_| {
             let worker = worker.clone();
             backend.spawn_thread(move || {
+                println!("Trying to bind to address {}", addr);
                 let socket = backend.create_udp_connection(addr, None).unwrap();
                 println!("Bound to address {}", socket.local_addr());
                 let mut buf = vec![0; 4096];
@@ -208,16 +209,18 @@ fn run_tcp_server(backend: Backend, addr: SocketAddrV4, worker: Arc<FakeWorker>)
 }
 
 fn run_spawner_server(addr: SocketAddrV4, workerspec: &str) {
+    println!("running spawner server");
     static mut SPAWNER_WORKER: Option<FakeWorker> = None;
     unsafe {
         SPAWNER_WORKER = Some(FakeWorker::create(workerspec).unwrap());
     }
     extern "C" fn echo(d: *mut shenango::ffi::udp_spawn_data) {
         unsafe {
+            println!("echoing data of len {}", (*d).len);
             let buf = slice::from_raw_parts((*d).buf as *mut u8, (*d).len as usize);
-            let payload = Payload::deserialize(&mut &buf[..]).unwrap();
+            // let payload = Payload::deserialize(&mut &buf[..]).unwrap();
             let worker = SPAWNER_WORKER.as_ref().unwrap();
-            worker.work(payload.work_iterations, payload.randomness);
+            worker.work(0, 0);
             let _ = UdpSpawner::reply(d, buf);
             UdpSpawner::release_data(d);
         }

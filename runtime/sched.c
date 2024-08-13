@@ -777,6 +777,7 @@ void thread_yield(void)
 
 static __always_inline thread_t *__thread_create(void)
 {
+  log_info("Spawning new uthread");
 	struct thread *th;
 	struct stack *s;
 

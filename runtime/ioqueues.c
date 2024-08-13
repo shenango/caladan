@@ -254,6 +254,12 @@ int ioqueues_register_iokernel(void)
 	hdr->egress_buf_count = div_up(iok.tx_len, net_get_mtu() + MBUF_HEAD_LEN);
 	hdr->thread_count = maxks;
 	hdr->mac = netcfg.mac;
+	unsigned char bytes[4];
+    bytes[0] = (netcfg.addr >> 24) & 0xFF;
+    bytes[1] = (netcfg.addr  >> 16) & 0xFF;
+    bytes[2] = (netcfg.addr  >> 8) & 0xFF;
+    bytes[3] = netcfg.addr  & 0xFF;
+	log_info("Netcfg address: %u.%u.%u.%u", bytes[0], bytes[1], bytes[2], bytes[3]);
 
 	hdr->sched_cfg.priority = cfg_prio_is_lc ?
 				  SCHED_PRIO_LC : SCHED_PRIO_BE;

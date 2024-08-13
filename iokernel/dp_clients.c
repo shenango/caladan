@@ -40,6 +40,9 @@ static void dp_clients_add_client(struct proc *p)
 	}
 
 	if (!p->has_directpath) {
+		log_info("Adding client with MAC %02x:%02x:%02x:%02x:%02x:%02x to hash table",
+				p->mac.addr[0], p->mac.addr[1], p->mac.addr[2],
+				p->mac.addr[3], p->mac.addr[4], p->mac.addr[5]);
 		ret = rte_hash_add_key_data(dp.mac_to_proc, &p->mac.addr[0], p);
 		if (ret < 0)
 			log_err("dp_clients: failed to add MAC to hash table in add_client");

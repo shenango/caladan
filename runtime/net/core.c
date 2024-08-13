@@ -150,8 +150,10 @@ static void net_rx_one(struct mbuf *m)
 	 */
 
 	llhdr = mbuf_pull_hdr_or_null(m, *llhdr);
-	if (unlikely(!llhdr))
+	if (unlikely(!llhdr)) {
+		log_info("1");
 		goto drop;
+	}
 
 	/* handle ARP requests */
 	if (ntoh16(llhdr->type) == ETHTYPE_ARP) {
@@ -163,8 +165,10 @@ static void net_rx_one(struct mbuf *m)
 	BUILD_ASSERT(sizeof(llhdr->dhost.addr) == sizeof(netcfg.mac.addr));
 	if (unlikely(ntoh16(llhdr->type) != ETHTYPE_IP ||
 		     memcmp(llhdr->dhost.addr, netcfg.mac.addr,
-			    sizeof(llhdr->dhost.addr)) != 0))
+			    sizeof(llhdr->dhost.addr)) != 0)) {
+		log_info("2");
 		goto drop;
+	}
 
 
 	/*
@@ -173,20 +177,28 @@ static void net_rx_one(struct mbuf *m)
 
 	mbuf_mark_network_offset(m);
 	iphdr = mbuf_pull_hdr_or_null(m, *iphdr);
-	if (unlikely(!iphdr))
+	if (unlikely(!iphdr)) {
+		log_info("3");
 		goto drop;
-
-	/* Did HW checksum verification pass? */
-	if (m->csum_type != CHECKSUM_TYPE_UNNECESSARY) {
-		if (chksum_internet(iphdr, sizeof(*iphdr)))
-			goto drop;
 	}
 
-	if (unlikely(!ip_hdr_supported(iphdr)))
+	/* Did HW checksum verification pass? */
+	// if (m->csum_type != CHECKSUM_TYPE_UNNECESSARY) {
+	// 	if (chksum_internet(iphdr, sizeof(*iphdr))) {
+	// 		log_info("4");
+	// 		goto drop;
+	// 	}
+	// }
+
+	if (unlikely(!ip_hdr_supported(iphdr))) {
+		log_info("5");
 		goto drop;
+	}
 	len = ntoh16(iphdr->len) - sizeof(*iphdr);
-	if (unlikely(mbuf_length(m) < len))
+	if (unlikely(mbuf_length(m) < len)) {
+		log_info("6");
 		goto drop;
+	}
 	if (len < mbuf_length(m))
 		mbuf_trim(m, mbuf_length(m) - len);
 
@@ -200,13 +212,15 @@ static void net_rx_one(struct mbuf *m)
 		net_rx_trans(m);
 		break;
 
-	default:
+	default: 
+		log_info("7");
 		goto drop;
 	}
 
 	return;
 
 drop:
+	log_info("dropping packet!");
 	mbuf_drop(m);
 }
 
@@ -239,6 +253,7 @@ static void iokernel_softirq_poll(struct kthread *k)
 
 		switch (cmd) {
 		case RX_NET_RECV:
+			log_info("Received new packet");
 			hdr = shmptr_to_ptr(&netcfg.rx_region,
 					    (shmptr_t)payload,
 					    MBUF_DEFAULT_LEN);
@@ -365,6 +380,8 @@ static void net_tx_raw(struct mbuf *m)
 	struct kthread *k;
 	unsigned int len = mbuf_length(m);
 
+	log_info("net_tx_raw");
+
 	k = getk();
 	/* drain pending overflow packets first */
 	if (unlikely(!mbufq_empty(&k->txpktq_overflow)))
@@ -377,6 +394,8 @@ static void net_tx_raw(struct mbuf *m)
 		mbufq_push_tail(&k->txpktq_overflow, m);
 		STAT(TXQ_OVERFLOW)++;
 	}
+
+	log_info("net_tx_raw: Sent tx packet of len %d", len);
 
 	putk();
 }
@@ -395,6 +414,8 @@ static void net_tx_raw(struct mbuf *m)
 void net_tx_eth(struct mbuf *m, uint16_t type, struct eth_addr dhost)
 {
 	struct eth_hdr *eth_hdr;
+
+	log_info("net_tx_eth");
 
 	eth_hdr = mbuf_push_hdr(m, *eth_hdr);
 	eth_hdr->shost = netcfg.mac;
@@ -435,6 +456,7 @@ static int net_tx_local_loopback(struct mbuf *m_in, uint8_t proto)
 	int ret;
 	struct mbuf *m;
 	void *buf;
+	log_info("net_tx_local_loopback");
 
 	/* allocate the buffer to store the payload */
 	m = smalloc(mbuf_length(m_in) + MBUF_HEAD_LEN);
@@ -494,9 +516,11 @@ int net_tx_ip(struct mbuf *m, uint8_t proto, uint32_t daddr)
 	/* prepend the IP header */
 	net_push_iphdr(m, proto, daddr);
 
-	/* route loopbacks */
-	if (daddr == netcfg.addr)
-		return net_tx_local_loopback(m, proto);
+	log_info("In net_tx_ip");
+
+	// /* route loopbacks */
+	// if (daddr == netcfg.addr)
+	// 	return net_tx_local_loopback(m, proto);
 
 	/* ask NIC to calculate IP checksum */
 	m->txflags |= OLFLAG_IP_CHKSUM | OLFLAG_IPV4;
@@ -508,14 +532,18 @@ int net_tx_ip(struct mbuf *m, uint8_t proto, uint32_t daddr)
 	ret = arp_lookup(daddr, &dhost, m);
 	if (unlikely(ret)) {
 		if (ret == -EINPROGRESS) {
+			log_info("einprogress");
 			/* ARP code now owns the mbuf */
 			return 0;
 		} else {
 			/* An unrecoverable error occurred */
 			mbuf_pull_hdr(m, struct ip_hdr);
+			log_info("unrecoverable error!");
 			return ret;
 		}
 	}
+
+	log_info("net_tx_eth");
 
 	net_tx_eth(m, ETHTYPE_IP, dhost);
 	return 0;
