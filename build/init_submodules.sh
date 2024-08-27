@@ -31,7 +31,7 @@ fi
 echo building RDMA-CORE
 cd rdma-core
 git -c user.name="x" -c user.email="x" am ../build/patches/rdma-core/*
-if ! EXTRA_CMAKE_FLAGS=-DENABLE_STATIC=1 MAKEFLAGS=-j$CORES ./build.sh; then
+if ! EXTRA_CMAKE_FLAGS="-DENABLE_STATIC=1 -DNO_PYVERBS=1" MAKEFLAGS=-j$CORES ./build.sh; then
   echo "Building rdma-core failed"
   echo "If you see \"Does not match the generator used previously\" try running \"make submodules-clean\" first"
   exit 1
