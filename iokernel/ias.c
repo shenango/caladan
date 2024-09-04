@@ -32,9 +32,9 @@ static int owners[NCPU];
 #endif
 
 /* process that are currently congested sorted by current active thread count */
-static struct list_head congested_procs[NCPU + 1];
+struct list_head congested_procs[NCPU + 1];
 /* number of congested lc procs */
-static uint64_t congested_lc_procs_nr;
+uint64_t congested_lc_procs_nr;
 
 /*
  * make sure sd is in the right congestion list, should be called any time
@@ -262,6 +262,7 @@ int ias_idle_on_core(unsigned int core)
 static bool ias_can_preempt_core(struct ias_data *sd, unsigned int core)
 {
 	struct ias_data *cur = cores[core];
+	struct thread *th;
 
 	/* any task can take idle cores */
 	if (cur == NULL)
@@ -280,6 +281,14 @@ static bool ias_can_preempt_core(struct ias_data *sd, unsigned int core)
 	if (cur->is_lc == sd->is_lc &&
 	    cur->threads_active - cur->threads_guaranteed <=
 	    sd->threads_active - sd->threads_guaranteed + 1) {
+
+		/* preempt a BE task running for greater than IAS_QUANTA_US */
+		if (!cur->is_lc && sd->threads_active == 0) {
+			th = sched_get_thread_on_core(core);
+			if (th && th->metrics.kthread_elapsed_us >= IAS_QUANTA_US)
+				return true;
+		}
+
 		return false;
 	}
 
@@ -603,7 +612,7 @@ static void ias_print_debug_info(void)
 
 static void ias_sched_poll(uint64_t now, int idle_cnt, bitmap_ptr_t idle)
 {
-	static uint64_t last_us;
+	static uint64_t last_us, last_core_ts_us;
 #ifdef IAS_DEBUG
 	static uint64_t debug_ts = 0;
 #endif
@@ -633,6 +642,11 @@ static void ias_sched_poll(uint64_t now, int idle_cnt, bitmap_ptr_t idle)
 		if (!cfg.noht)
 			ias_ht_poll();
 		ias_ts_poll();
+	}
+
+	if (now - last_core_ts_us >= IAS_QUANTA_US) {
+		last_core_ts_us = now;
+		ias_core_ts_poll();
 	}
 
 #ifdef IAS_DEBUG

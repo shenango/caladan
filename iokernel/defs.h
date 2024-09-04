@@ -83,6 +83,7 @@ struct thread_metrics {
 	uint32_t		uthread_elapsed_us;
 	uint32_t		rcu_gen;
 	bool			work_pending;
+	uint32_t		kthread_elapsed_us;
 };
 
 struct thread {

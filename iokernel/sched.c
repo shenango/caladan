@@ -477,6 +477,7 @@ sched_update_kthread_metrics(struct thread *th, bool work_pending)
 	th->metrics.uthread_elapsed_us = uthread_elapsed_tsc / cycles_per_us;
 	th->metrics.rcu_gen = rcu_gen;
 	th->metrics.work_pending = work_pending;
+	th->metrics.kthread_elapsed_us = (cur_tsc - th->change_tsc) / cycles_per_us;
 }
 
 static void

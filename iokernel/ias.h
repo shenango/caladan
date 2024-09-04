@@ -18,6 +18,7 @@
 #define IAS_LOC_EVICTED_US		100
 /* the debug info printing interval */
 #define IAS_DEBUG_PRINT_US		1000000
+#define IAS_QUANTA_US			2000
 
 
 /*
@@ -64,6 +65,8 @@ extern struct list_head all_procs;
 extern struct ias_data *cores[NCPU];
 extern uint64_t ias_gen[NCPU];
 extern uint64_t now_us;
+extern struct list_head congested_procs[NCPU + 1];
+extern uint64_t congested_lc_procs_nr;
 
 /**
  * ias_for_each_proc - iterates through all processes
@@ -115,6 +118,7 @@ extern float ias_bw_estimate_multiplier;
  */
 
 extern void ias_ts_poll(void);
+extern void ias_core_ts_poll(void);
 
 
 /*

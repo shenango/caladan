@@ -39,3 +39,24 @@ void ias_ts_poll(void)
 		sched_yield_on_core(core);
 	}
 }
+
+void ias_core_ts_poll(void)
+{
+	struct ias_data *sd, *sd_next;
+	int ret;
+
+	/* if there are congested LCs, there are no BEs running. */
+	if (congested_lc_procs_nr > 0)
+		return;
+
+	/* Check BEs with 0 cores running */
+	list_for_each_safe(&congested_procs[1], sd, sd_next, congested_link) {
+		if (sd->threads_active > 0 || sd->threads_limit == 0)
+			continue;
+
+		ret = ias_add_kthread(sd);
+		if (ret)
+			break;
+	}
+
+}
