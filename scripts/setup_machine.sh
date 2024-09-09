@@ -31,6 +31,8 @@ for n in /sys/devices/system/node/node*; do
 echo 5192 > ${n}/hugepages/hugepages-2048kB/nr_hugepages
 done
 
+echo madvise > /sys/kernel/mm/transparent_hugepage/enabled
+
 # load msr module
 modprobe msr
 

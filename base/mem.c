@@ -27,6 +27,8 @@
 #warning "Your system does not support specifying SHM_HUGETLB page sizes"
 #endif
 
+bool cfg_transparent_hugepages_enabled = false;
+
 /* libc conflicts with linux/shm.h, so define these ourselves */
 void* shmat(int shm_id, const void *addr, int flags);
 int shmctl(int shm_id, int cmd, struct shmid_ds* buf);
@@ -75,22 +77,25 @@ __mem_map_anom(void *base, size_t len, size_t pgsize,
 
 	switch (pgsize) {
 	case PGSIZE_4KB:
-		break;
+	    break;
 	case PGSIZE_2MB:
-		flags |= MAP_HUGETLB;
+	    if (!cfg_transparent_hugepages_enabled) {
+	        flags |= MAP_HUGETLB;
 #ifdef MAP_HUGE_2MB
-		flags |= MAP_HUGE_2MB;
+	        flags |= MAP_HUGE_2MB;
 #endif
-		break;
+	    }
+	    break;
 	case PGSIZE_1GB:
 #ifdef MAP_HUGE_1GB
-		flags |= MAP_HUGETLB | MAP_HUGE_1GB;
+	    if (!cfg_transparent_hugepages_enabled)
+	        flags |= MAP_HUGETLB | MAP_HUGE_1GB;
 #else
-		return MAP_FAILED;
+	    return MAP_FAILED;
 #endif
-		break;
+	    break;
 	default: /* fail on other sizes */
-		return MAP_FAILED;
+	  return MAP_FAILED;
 	}
 
 	addr = mmap(base, len, PROT_READ | PROT_WRITE, flags, -1, 0);
@@ -101,6 +106,11 @@ __mem_map_anom(void *base, size_t len, size_t pgsize,
 	if (mbind(addr, len, numa_policy, mask ? mask : NULL,
 		  mask ? NNUMA + 1 : 0, MPOL_MF_STRICT | MPOL_MF_MOVE))
 		goto fail;
+
+	if (cfg_transparent_hugepages_enabled && (pgsize > PGSIZE_4KB)) {
+	  if (madvise(addr, len, MADV_HUGEPAGE))
+	    goto fail;
+	}
 
 	touch_mapping(addr, len, pgsize);
 	return addr;
