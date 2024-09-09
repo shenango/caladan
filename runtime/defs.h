@@ -617,6 +617,8 @@ enum {
 	DIRECTPATH_MODE_EXTERNAL,
 };
 
+extern bool cfg_transparent_hugepages_enabled;
+
 static inline bool is_directpath_strided(void)
 {
 	return cfg_directpath_strided;

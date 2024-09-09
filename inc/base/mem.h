@@ -18,6 +18,8 @@ enum {
 	PGSIZE_1GB = (1 << PGSHIFT_1GB), /* 1073741824 bytes */
 };
 
+extern bool cfg_transparent_hugepages_enabled;
+
 #define PGMASK_4KB	(PGSIZE_4KB - 1)
 #define PGMASK_2MB	(PGSIZE_2MB - 1)
 #define PGMASK_1GB	(PGSIZE_1GB - 1)
