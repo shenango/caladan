@@ -860,8 +860,9 @@ static void dealloc_uar(ssize_t uarn)
 static int allocate_user_memory(struct directpath_ctx *dp)
 {
 	int ret;
+	int flags = cfg.no_hugepages ? 0 : MFD_HUGETLB;
 
-	dp->memfd = memfd_create("directpath", MFD_HUGETLB); // Maybe huge?
+	dp->memfd = memfd_create("directpath", flags); // Maybe huge?
 	if (dp->memfd < 0) {
 		log_err("failed to create memfd!");
 		return -errno;
