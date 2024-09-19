@@ -33,6 +33,7 @@ struct iokernel_cfg {
 	bool	vfio_directpath; /* enable new directpath using vfio */
 	bool	no_directpath_active_rss; /* vfio directpath: keep all qs active */
 	bool	azure_arp_mode; /* support Azure by responding to local ARP messages */
+	bool    no_hugepages; /* disable use of reserved hugepages for directpath */
 };
 
 extern struct iokernel_cfg cfg;

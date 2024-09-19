@@ -265,7 +265,9 @@ int main(int argc, char *argv[])
 			cfg.noidlefastwake = true;
 		} else if (!strcmp(argv[i], "nodpactiverss")) {
 			cfg.no_directpath_active_rss = true;
-		} else if (!strcmp(argv[i], "--")) {
+		} else if (!strcmp(argv[i], "nohugepages")) {
+			cfg.no_hugepages = true;
+	        } else if (!strcmp(argv[i], "--")) {
 			dpdk_argv = &argv[i+1];
 			dpdk_argc = argc - i - 1;
 			break;
