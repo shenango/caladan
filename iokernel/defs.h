@@ -31,7 +31,7 @@ struct iokernel_cfg {
 	float	ias_bw_limit; /* IAS bw limit, (MB/s) */
 	bool	no_hw_qdel; /* Disable use of hardware timestamps for qdelay */
 	bool	vfio_directpath; /* enable new directpath using vfio */
-	bool	no_directpath_active_rss; /* vfio directpath: keep all qs active */
+	bool	directpath_active_rss; /* vfio directpath: keep all qs active */
 	bool	azure_arp_mode; /* support Azure by responding to local ARP messages */
 	bool    no_hugepages; /* disable use of reserved hugepages for directpath */
 };
@@ -191,6 +191,7 @@ struct proc {
 	uint16_t		last_core[NCPU];
 
 	/* COLD */
+	uint16_t 	dp_clients_idx;
 
 	/* network data */
 	uint32_t		ip_addr;

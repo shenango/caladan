@@ -680,7 +680,7 @@ static int create_cq(struct directpath_ctx *dp, struct cq *cq, uint32_t log_nr_c
 		BUG_ON(cq->cqn >= MAX_CQ);
 		cqn_to_cq_map[cq->cqn].ctx = dp;
 		cqn_to_cq_map[cq->cqn].qp_idx = qp_idx;
-		if (cfg.no_directpath_active_rss || qp_idx == 0) {
+		if (!cfg.directpath_active_rss || qp_idx == 0) {
 			dp->active_rx_count++;
 			bitmap_set(dp->active_rx_queues, qp_idx);
 			cq->state = RXQ_STATE_ACTIVE;
@@ -769,7 +769,7 @@ static int create_rqt(struct directpath_ctx *dp)
 	DEVX_SET(rqtc, rqtc, rqt_actual_size, nr_entries);
 
 	for (i = 0; i < nr_entries; i++) {
-		unsigned int idx = cfg.no_directpath_active_rss ? (i % dp->nr_qs) : 0;
+		unsigned int idx = !cfg.directpath_active_rss ? (i % dp->nr_qs) : 0;
 		DEVX_SET(rqtc, rqtc, rq_num[i], dp->rqns[idx]);
 	}
 

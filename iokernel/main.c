@@ -263,8 +263,8 @@ int main(int argc, char *argv[])
 			managed_numa_node = atoi(argv[++i]);
 		} else if (!strcmp(argv[i], "noidlefastwake")) {
 			cfg.noidlefastwake = true;
-		} else if (!strcmp(argv[i], "nodpactiverss")) {
-			cfg.no_directpath_active_rss = true;
+		} else if (!strcmp(argv[i], "dpactiverss")) {
+			cfg.directpath_active_rss = true;
 		} else if (!strcmp(argv[i], "nohugepages")) {
 			cfg.no_hugepages = true;
 	        } else if (!strcmp(argv[i], "--")) {

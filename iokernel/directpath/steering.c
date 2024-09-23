@@ -273,6 +273,7 @@ int directpath_setup_steering(void)
 		main_sw_tbl = mlx5dv_dr_table_create(dr_dmn, 1);
 
 	use_legacy_steering = !dr_dmn || !main_sw_tbl;
+	log_info("directpath: using %s steering", use_legacy_steering ? "legacy" : "fast");
 
 	if (!use_legacy_steering) {
 		/* create the matcher that runtime rules will use */

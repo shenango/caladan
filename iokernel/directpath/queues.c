@@ -146,7 +146,7 @@ bool directpath_poll_proc(struct proc *p, uint64_t *delay_cycles, uint64_t cur_t
 	int i;
 
 	if (ctx->nr_armed == ctx->nr_qs &&
-	    (cfg.no_directpath_active_rss || ctx->active_rx_count == 1))
+	    (!cfg.directpath_active_rss || ctx->active_rx_count == 1))
 		return true;
 
 	for (i = 0; i < ctx->nr_qs; i++) {
@@ -156,7 +156,7 @@ bool directpath_poll_proc(struct proc *p, uint64_t *delay_cycles, uint64_t cur_t
 		if (!bitmap_test(ctx->armed_rx_queues, i))
 			delay = MAX(directpath_poll_cq_delay(ctx, th, cq), delay);
 
-		if (cfg.no_directpath_active_rss)
+		if (!cfg.directpath_active_rss)
 			continue;
 
 		directpath_queue_update_state(ctx, th, i, cur_tsc);
@@ -179,7 +179,7 @@ static void directpath_handle_completion_eqe(struct mlx5_eqe *eqe)
 	struct directpath_ctx *ctx = cqn_to_cq_map[cqn].ctx;
 	struct proc *p = ctx->p;
 
-	if (!sched_threads_active(p))
+	if (likely(!ctx->kill) && !!sched_threads_active(p))
 		sched_add_core(p);
 
 	bitmap_clear(ctx->armed_rx_queues, cqn_to_cq_map[cqn].qp_idx);

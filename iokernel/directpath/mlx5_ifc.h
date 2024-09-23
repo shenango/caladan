@@ -6566,12 +6566,20 @@ struct mlx5_eqe_cq_err {
 	u8	syndrome;
 };
 
+struct mlx5_eqe_qp_ev {
+	__be32 reserved[5];
+	u8 type;
+	u8 reserved2[3];
+	__be32 qpn_rqn_sqn;
+};
+
 union ev_data {
 	__be32 raw[7];
 	struct mlx5_eqe_cmd cmd;
 	struct mlx5_eqe_page_req req_pages;
 	struct mlx5_eqe_comp comp;
 	struct mlx5_eqe_cq_err cq_err;
+	struct mlx5_eqe_qp_ev qp;
 } __packed;
 
 struct mlx5_eqe {

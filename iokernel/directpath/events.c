@@ -165,6 +165,8 @@ bool directpath_events_poll(void)
 			case MLX5_EVENT_TYPE_CQ_ERROR:
 				directpath_handle_cq_error_eqe(eqe);
 				break;
+			case MLX5_EVENT_TYPE_SRQ_LAST_WQE:
+				log_err("got last wqe %hhu pn %u", eqe->data.qp.type, be32toh(eqe->data.qp.qpn_rqn_sqn) & 0xffffff);
 			default:
 				log_err("got an eqe! eqe->type: %hhu (%u)", eqe->type, eq->cons_idx);
 				break;

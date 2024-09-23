@@ -31,6 +31,7 @@ static void dp_clients_add_client(struct proc *p)
 
 	if (!sched_attach_proc(p)) {
 		p->kill = false;
+		p->dp_clients_idx = dp.nr_clients;
 		dp.clients[dp.nr_clients++] = p;
 	} else {
 		log_err("dp_clients: failed to attach proc.");
@@ -98,20 +99,10 @@ void proc_release(struct ref *r)
  */
 static void dp_clients_remove_client(struct proc *p)
 {
-	int i, ret;
+	int ret;
 
-	for (i = 0; i < dp.nr_clients; i++) {
-		if (dp.clients[i] == p)
-			break;
-	}
-
-	if (i == dp.nr_clients) {
-		WARN();
-		return;
-	}
-
-	dp.clients[i] = dp.clients[dp.nr_clients - 1];
-	dp.nr_clients--;
+	dp.clients[p->dp_clients_idx] = dp.clients[--dp.nr_clients];
+	dp.clients[p->dp_clients_idx]->dp_clients_idx = p->dp_clients_idx;
 
 	ret = rte_hash_del_key(dp.ip_to_proc, &p->ip_addr);
 	if (ret < 0)

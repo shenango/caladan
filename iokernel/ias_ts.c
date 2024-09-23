@@ -43,11 +43,13 @@ void ias_ts_poll(void)
 void ias_core_ts_poll(void)
 {
 	struct ias_data *sd, *sd_next;
-	int ret;
+	int ret, cnt;
 
 	/* if there are congested LCs, there are no BEs running. */
 	if (congested_lc_procs_nr > 0)
 		return;
+
+	cnt = 0;
 
 	/* Check BEs with 0 cores running */
 	list_for_each_safe(&congested_procs[1], sd, sd_next, congested_link) {
@@ -57,6 +59,9 @@ void ias_core_ts_poll(void)
 		ret = ias_add_kthread(sd);
 		if (ret)
 			break;
+
+		if (++cnt == sched_cores_nr)
+			return;
 	}
 
 }
