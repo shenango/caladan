@@ -896,13 +896,14 @@ static void thread_finish_exit(void)
 	struct thread *th = thread_self();
 
 	gc_remove_thread(th);
-	stack_free(th->stack);
-	tcache_free(perthread_ptr(thread_pt), th);
 	perthread_store(__self, NULL);
 
 	/* if the main thread dies, kill the whole program */
 	if (unlikely(th->main_thread))
 		init_shutdown(EXIT_SUCCESS);
+
+	stack_free(th->stack);
+	tcache_free(perthread_ptr(thread_pt), th);
 
 	spin_lock(&myk()->lock);
 	schedule();
