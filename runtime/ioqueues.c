@@ -210,7 +210,7 @@ int ioqueues_init(void)
 	int i;
 	struct thread_spec *ts;
 
-	iok.key = rand_crc32c(netcfg.addr);
+	iok.key = netcfg.addr;
 
 	/* map ingress memory */
 	netcfg.rx_region.base =

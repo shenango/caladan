@@ -39,6 +39,7 @@ echo "Set up switchdev"
 sudo devlink dev eswitch set pci/$IFPCI mode switchdev
 
 echo "binding VF for vfio"
+sudo modprobe vfio_pci
 sudo $DPDK_PATH/usertools/dpdk-devbind.py -b vfio-pci $(basename $(readlink /sys/class/net/$IF/device/virtfn0))
 
 echo "rebinding remaining VFs for linux"
