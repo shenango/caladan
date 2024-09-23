@@ -179,7 +179,7 @@ static void directpath_handle_completion_eqe(struct mlx5_eqe *eqe)
 	struct directpath_ctx *ctx = cqn_to_cq_map[cqn].ctx;
 	struct proc *p = ctx->p;
 
-	if (likely(!ctx->kill) && !!sched_threads_active(p))
+	if (likely(!ctx->kill) && !sched_threads_active(p))
 		sched_add_core(p);
 
 	bitmap_clear(ctx->armed_rx_queues, cqn_to_cq_map[cqn].qp_idx);
