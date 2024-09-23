@@ -733,7 +733,7 @@ static void thread_finish_cede(void)
 	/* cede this kthread to the iokernel */
 	ACCESS_ONCE(k->parked) = true; /* deliberately racy */
 	kthread_park_now();
-	perthread_get_stable(last_tsc) = tsc;
+	perthread_get_stable(last_tsc) = rdtsc();
 
 	/* increment the RCU generation number (odd - back in thread) */
 	store_release(&k->rcu_gen, k->rcu_gen + 1);
