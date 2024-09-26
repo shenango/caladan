@@ -612,15 +612,17 @@ int control_init(void)
 	int sfd, ret;
 	void *shbuf;
 
-	shbuf = mem_map_shm(INGRESS_MBUF_SHM_KEY, NULL, INGRESS_MBUF_SHM_SIZE,
-			PGSIZE_2MB, true);
-	if (shbuf == MAP_FAILED) {
-		log_err("control: failed to map rx buffer area (%s)", strerror(errno));
-		if (errno == EEXIST)
-			log_err("Shared memory region is already mapped. Please close any "
-				    "running iokernels, and be sure to run "
-				    "scripts/setup_machine.sh to set proper sysctl parameters.");
-		return -1;
+	if (!cfg.vfio_directpath) {
+		shbuf = mem_map_shm(INGRESS_MBUF_SHM_KEY, NULL, INGRESS_MBUF_SHM_SIZE,
+				cfg.no_hugepages ? PGSIZE_4KB : PGSIZE_2MB, true);
+		if (shbuf == MAP_FAILED) {
+			log_err("control: failed to map rx buffer area (%s)", strerror(errno));
+			if (errno == EEXIST)
+				log_err("Shared memory region is already mapped. Please close any "
+					    "running iokernels, and be sure to run "
+					    "scripts/setup_machine.sh to set proper sysctl parameters.");
+			return -1;
+		}
 	}
 
 	dp.ingress_mbuf_region.base = shbuf;

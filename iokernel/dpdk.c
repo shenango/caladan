@@ -243,7 +243,11 @@ int dpdk_init(void)
 	/* use our assigned core */
 	sprintf(buf, "%d", sched_dp_core);
 	ARGV(buf);
-	ARGV("--socket-mem=128");
+
+	if (cfg.no_hugepages)
+		ARGV("--no-huge");
+	else
+		ARGV("--socket-mem=128");
 
 	if (cfg.vfio_directpath) {
 		ARGV("--vdev=net_tap0");
@@ -274,7 +278,7 @@ int dpdk_init(void)
 	}
 
 	/* check that there is a port to send/receive on */
-	if (!rte_eth_dev_is_valid_port(0)) {
+	if (!cfg.vfio_directpath && !rte_eth_dev_is_valid_port(0)) {
 		log_err("dpdk: no available ports");
 		return -1;
 	}

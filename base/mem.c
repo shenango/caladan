@@ -27,7 +27,7 @@
 #warning "Your system does not support specifying SHM_HUGETLB page sizes"
 #endif
 
-bool cfg_transparent_hugepages_enabled = false;
+bool cfg_transparent_hugepages_enabled;
 
 /* libc conflicts with linux/shm.h, so define these ourselves */
 void* shmat(int shm_id, const void *addr, int flags);

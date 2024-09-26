@@ -267,7 +267,8 @@ int main(int argc, char *argv[])
 			cfg.directpath_active_rss = true;
 		} else if (!strcmp(argv[i], "nohugepages")) {
 			cfg.no_hugepages = true;
-	        } else if (!strcmp(argv[i], "--")) {
+			cfg_transparent_hugepages_enabled = true;
+		} else if (!strcmp(argv[i], "--")) {
 			dpdk_argv = &argv[i+1];
 			dpdk_argc = argc - i - 1;
 			break;
@@ -301,6 +302,7 @@ int main(int argc, char *argv[])
 	iok_info->cycles_per_us = cycles_per_us;
 	iok_info->external_directpath_enabled = cfg.vfio_directpath;
 	iok_info->external_directpath_rmp = vfio_prealloc_rmp;
+	iok_info->transparent_hugepages = cfg_transparent_hugepages_enabled;
 
 	pthread_barrier_wait(&init_barrier);
 

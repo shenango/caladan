@@ -198,6 +198,9 @@ int ioqueues_init_early(void)
 	}
 #endif
 
+	if (iok.iok_info->transparent_hugepages)
+		cfg_transparent_hugepages_enabled = true;
+
 	return 0;
 }
 
@@ -212,16 +215,18 @@ int ioqueues_init(void)
 
 	iok.key = netcfg.addr;
 
-	/* map ingress memory */
-	netcfg.rx_region.base =
-	    mem_map_shm_rdonly(INGRESS_MBUF_SHM_KEY, NULL, INGRESS_MBUF_SHM_SIZE,
-			PGSIZE_4KB);
-	if (netcfg.rx_region.base == MAP_FAILED) {
-		log_err("control_setup: failed to map ingress region");
-		log_err("Please make sure IOKernel is running");
-		return -1;
+	if (!cfg_directpath_external()) {
+		/* map ingress memory */
+		netcfg.rx_region.base =
+		    mem_map_shm_rdonly(INGRESS_MBUF_SHM_KEY, NULL, INGRESS_MBUF_SHM_SIZE,
+				PGSIZE_4KB);
+		if (netcfg.rx_region.base == MAP_FAILED) {
+			log_err("control_setup: failed to map ingress region");
+			log_err("Please make sure IOKernel is running");
+			return -1;
+		}
+		netcfg.rx_region.len = INGRESS_MBUF_SHM_SIZE;
 	}
-	netcfg.rx_region.len = INGRESS_MBUF_SHM_SIZE;
 
 	/* set up queues in shared memory */
 	iok.hdr = iok_shm_alloc(sizeof(*iok.hdr), 0, NULL);

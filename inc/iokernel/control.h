@@ -136,6 +136,7 @@ struct iokernel_info {
 	struct eth_addr		host_mac;
 	bool			external_directpath_enabled;
 	bool			external_directpath_rmp;
+	bool			transparent_hugepages;
 };
 
 BUILD_ASSERT(sizeof(struct iokernel_info) <= IOKERNEL_INFO_SIZE);
