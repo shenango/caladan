@@ -231,11 +231,11 @@ int dpdk_init(void)
 	if (!argv)
 		return -ENOMEM;
 
-#define ARGV(strval)              \
-	do {                          \
+#define ARGV(strval)               \
+	({                          \
 		BUG_ON(argc == max_args); \
 		argv[argc++] = (strval);  \
-	} while (0);
+	})
 
 	/* init args */
 	ARGV("./iokerneld");
