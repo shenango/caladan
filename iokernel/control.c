@@ -623,11 +623,10 @@ int control_init(void)
 					    "scripts/setup_machine.sh to set proper sysctl parameters.");
 			return -1;
 		}
+		dp.ingress_mbuf_region.base = shbuf;
+		dp.ingress_mbuf_region.len = INGRESS_MBUF_SHM_SIZE;
+
 	}
-
-	dp.ingress_mbuf_region.base = shbuf;
-	dp.ingress_mbuf_region.len = INGRESS_MBUF_SHM_SIZE;
-
 
 	shbuf = mem_map_shm(IOKERNEL_INFO_KEY, NULL, IOKERNEL_INFO_SIZE, PGSIZE_4KB, true);
 	if (shbuf == MAP_FAILED) {
