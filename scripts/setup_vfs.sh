@@ -25,8 +25,18 @@ sudo ip link set down $IF  || true
 echo "Creating new VFs"
 echo $MAX_VF | sudo tee /sys/class/net/$IF/device/mlx5_num_vfs > /dev/null
 
+gen_random_mac() {
+    printf '02:%02x:%02x:%02x:%02x:%02x\n' $((RANDOM % 256)) $((RANDOM % 256)) $((RANDOM % 256)) $((RANDOM % 256)) $((RANDOM % 256))
+}
+
+mac_array=()
+mac_array+=("$(cat /sys/class/net/$IF/address)")
+
+# Generate random macs for each VF
 for i in `seq 0 $MAX_VF_INDEX`; do
-	sudo ip link set $IF vf $i mac 02:02:02:02:02:$(printf "%02d\n" $(($i + 5)))
+	mac="$(gen_random_mac)"
+	mac_array+=($mac)
+	sudo ip link set $IF vf $i mac $mac
 done
 
 echo "unbinding new VFs from mlx5_core"
@@ -52,45 +62,54 @@ echo "setting up switch rules"
 sudo ethtool -K $IF hw-tc-offload on
 
 REPS=()
+REPS+=($IF)
 for f in `ls /sys/class/net/$IF/device/net | grep -v $IF`; do
 	REPS+=($f)
 done
 
-for i in `seq 0 $MAX_VF_INDEX`; do
-	sudo ethtool -K ${REPS[$i]} hw-tc-offload on
-	sudo ip link set up ${REPS[$i]}
+for rep in "${REPS[@]}"; do
+	sudo ethtool -K ${rep} hw-tc-offload on
+	sudo ip link set up ${rep}
+	sudo tc qdisc add dev ${rep} ingress
 done
 
-sudo tc qdisc add dev $IF ingress
-for i in `seq 0 $MAX_VF_INDEX`; do
-	sudo tc qdisc add dev ${REPS[$i]} ingress
-done
+sudo ip link set down $IF
 
-for vfA in `seq 0  $MAX_VF_INDEX`; do
+ARP_PRIO=$((${#REPS[@]} + 1)) # arp rule goes after unicast rules
+EGRESS_PRIO=$(($ARP_PRIO + 1)) # catch-all host egress rule goes after arp rule
 
-	# REDIRECT: unicast ingress traffic from outside this host with vfA's mac address
-	sudo tc filter add dev $IF protocol all parent ffff: prio 1 flower dst_mac 02:02:02:02:02:0$((5 + $vfA)) action mirred egress redirect dev ${REPS[$vfA]}
-	# MIRROR: broadcast ARP traffic
-	sudo tc filter add dev $IF protocol arp parent ffff: prio $((3 + $vfA)) flower dst_mac ff:ff:ff:ff:ff:ff action mirred egress mirror dev ${REPS[$vfA]}
+# Setup egress rules for each representor
+for rep in "${REPS[@]}"; do
 
-	for vfB in `seq $(($vfA + 1)) $MAX_VF_INDEX`; do
-		# REDIRECT: pairwise unicast traffic between vfA and vfB
-		sudo tc filter add dev ${REPS[$vfA]} protocol all parent ffff: prio 1 flower dst_mac 02:02:02:02:02:0$((5 + $vfB)) action mirred egress redirect dev ${REPS[$vfB]}
-		sudo tc filter add dev ${REPS[$vfB]} protocol all parent ffff: prio 1 flower dst_mac 02:02:02:02:02:0$((5 + $vfA)) action mirred egress redirect dev ${REPS[$vfA]}
+	# Construct ARP broadcast rule from this representor to all others
+	tc_command="sudo tc filter add dev ${rep} ingress protocol arp prio ${ARP_PRIO} flower"
 
-		# MIRROR: pairise broadcast traffic between vfA and vfB
-		sudo tc filter add dev ${REPS[$vfB]} protocol arp parent ffff: prio 3 flower dst_mac ff:ff:ff:ff:ff:ff action mirred egress mirror dev ${REPS[$vfA]}
-		sudo tc filter add dev ${REPS[$vfA]} protocol arp parent ffff: prio 3 flower dst_mac ff:ff:ff:ff:ff:ff action mirred egress mirror dev ${REPS[$vfB]}
+	# Configure traffic rules TO all other interfaces
+	for j in "${!REPS[@]}"; do
+		if [[ "${rep}" == "${REPS[$j]}" ]]; then
+			continue
+		fi
+
+		# One rule for each other representor matching on its mac address
+		sudo tc filter add dev $rep protocol all parent ffff: prio $(($j + 1)) flower dst_mac ${mac_array[$j]} action mirred egress redirect dev ${REPS[$j]}
+
+		# Add other interface to broadcast list for ARP traffic
+		tc_command+=" action mirred egress mirror dev ${REPS[$j]}"
 	done
 
-	# REDIRECT: remaining egress traffic out from this host
-	sudo tc filter add dev ${REPS[$vfA]} protocol all parent ffff: prio 100 flower action mirred egress redirect dev $IF
+	# Install ARP broadcast rule
+	eval $tc_command
 
+	# Setup egress from host for all other traffic
+	if [[ "$rep" != "$IF" ]]; then
+		sudo tc filter add dev $rep protocol all parent ffff: prio ${EGRESS_PRIO} flower action mirred egress redirect dev $IF
+	fi
 done
 
 LNX=$(ls /sys/class/net/$IF/device/virtfn1/net)
 
 sudo ip link set up $LNX
+sudo ip link set up $IF
 
 echo "All done!"
 echo "VFIO pci is $(basename $(readlink /sys/class/net/$IF/device/virtfn0))"
