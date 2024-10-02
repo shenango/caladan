@@ -58,12 +58,13 @@ impl UdpConnection {
     pub fn read_from(&self, buf: &mut [u8]) -> io::Result<(usize, SocketAddrV4)> {
         let mut raddr = ffi::netaddr { ip: 0, port: 0 };
         isize_to_result(unsafe {
-            ffi::udp_read_from(
+            ffi::udp_read_from2(
                 self.0,
                 buf.as_mut_ptr() as *mut c_void,
                 buf.len() as _,
                 &mut raddr as *mut _,
                 false, /* peek */
+                false, /* nonblocking */
             )
         })
         .map(|u| (u, SocketAddrV4::new(raddr.ip.into(), raddr.port)))
@@ -75,11 +76,12 @@ impl UdpConnection {
             port: remote_addr.port(),
         };
         isize_to_result(unsafe {
-            ffi::udp_write_to(
+            ffi::udp_write_to2(
                 self.0,
                 buf.as_ptr() as *const c_void as *mut c_void,
                 buf.len() as _,
                 &mut raddr as *mut _,
+                false,
             )
         })
     }

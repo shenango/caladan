@@ -98,21 +98,33 @@ impl TcpConnection {
 impl<'a> Read for &'a TcpConnection {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         isize_to_result(unsafe {
-            ffi::tcp_read(self.0, buf.as_mut_ptr() as *mut c_void, buf.len() as _) as _
+            ffi::tcp_read2(
+                self.0,
+                buf.as_mut_ptr() as *mut c_void,
+                buf.len() as _,
+                false,
+                false,
+            ) as _
         })
     }
 }
 impl Read for TcpConnection {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         isize_to_result(unsafe {
-            ffi::tcp_read(self.0, buf.as_mut_ptr() as *mut c_void, buf.len() as _) as _
+            ffi::tcp_read2(
+                self.0,
+                buf.as_mut_ptr() as *mut c_void,
+                buf.len() as _,
+                false,
+                false,
+            ) as _
         })
     }
 }
 impl<'a> Write for &'a TcpConnection {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         isize_to_result(unsafe {
-            ffi::tcp_write(self.0, buf.as_ptr() as *const c_void, buf.len() as _) as _
+            ffi::tcp_write2(self.0, buf.as_ptr() as *const c_void, buf.len() as _, false) as _
         })
     }
     fn flush(&mut self) -> io::Result<()> {
@@ -122,7 +134,7 @@ impl<'a> Write for &'a TcpConnection {
 impl Write for TcpConnection {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         isize_to_result(unsafe {
-            ffi::tcp_write(self.0, buf.as_ptr() as *const c_void, buf.len() as _)
+            ffi::tcp_write2(self.0, buf.as_ptr() as *const c_void, buf.len() as _, false)
         })
     }
     fn flush(&mut self) -> io::Result<()> {

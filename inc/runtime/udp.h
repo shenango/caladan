@@ -40,10 +40,24 @@ extern int udp_listen(struct netaddr laddr, udpconn_t **c_out);
 extern struct netaddr udp_local_addr(udpconn_t *c);
 extern struct netaddr udp_remote_addr(udpconn_t *c);
 extern int udp_set_buffers(udpconn_t *c, int read_mbufs, int write_mbufs);
-extern ssize_t udp_read_from(udpconn_t *c, void *buf, size_t len,
-			     struct netaddr *raddr, bool peek);
-extern ssize_t udp_write_to(udpconn_t *c, const void *buf, size_t len,
-			    const struct netaddr *raddr);
+
+extern ssize_t udp_read_from2(udpconn_t *c, void *buf, size_t len,
+			     struct netaddr *raddr, bool peek, bool nonblocking);
+extern ssize_t udp_write_to2(udpconn_t *c, const void *buf, size_t len,
+			    const struct netaddr *raddr, bool nonblocking);
+
+static inline ssize_t udp_read_from(udpconn_t *c, void *buf, size_t len,
+			     struct netaddr *raddr)
+{
+	return udp_read_from2(c, buf, len, raddr, false, false);
+}
+
+static inline ssize_t udp_write_to(udpconn_t *c, const void *buf, size_t len,
+			    const struct netaddr *raddr)
+{
+	return udp_write_to2(c, buf, len, raddr, false);
+}
+
 extern ssize_t udp_read(udpconn_t *c, void *buf, size_t len);
 extern ssize_t udp_write(udpconn_t *c, const void *buf, size_t len);
 extern void udp_shutdown(udpconn_t *c);

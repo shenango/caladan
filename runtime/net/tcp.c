@@ -24,6 +24,14 @@ static thread_t *tcp_worker_th;
 
 static void tcp_retransmit(void *arg);
 
+uint32_t tcp_get_input_bytes(tcpconn_t *c) {
+       spin_lock_np(&c->lock);
+       uint32_t b = c->winmax - c->pcb.rcv_wnd;
+       spin_unlock_np(&c->lock);
+       return b;
+}
+
+
 void tcp_timer_update(tcpconn_t *c)
 {
 	uint64_t next_timeout = -1L;
@@ -864,11 +872,21 @@ struct netaddr tcp_remote_addr(tcpconn_t *c)
 	return c->e.raddr;
 }
 
-static int tcp_wait_rx(tcpconn_t *c) {
+/**
+ * tcp_wait_rx - blocks until there is an actionable event.
+ * @c: the TCP connection
+ *
+ * Returns 1 if there is data ready. Returns 0 or a negative number
+ * if there is an error.
+ */
+static int tcp_wait_rx(tcpconn_t *c, bool nonblocking)
+{
 	int ret;
+	assert(spin_lock_held(&c->lock));
+
 	/* block until there is an actionable event */
 	while (!c->rx_closed && (c->rx_exclusive || list_empty(&c->rxq))) {
-		if (c->nonblocking) {
+		if (nonblocking) {
 			spin_unlock_np(&c->lock);
 			return -EAGAIN;
 		}
@@ -879,7 +897,12 @@ static int tcp_wait_rx(tcpconn_t *c) {
 		}
 	}
 
-	return 0;
+	if (c->rx_closed) {
+		spin_unlock_np(&c->lock);
+		return -c->err;
+	}
+
+	return 1;
 }
 
 /**
@@ -887,32 +910,31 @@ static int tcp_wait_rx(tcpconn_t *c) {
  * @c: the TCP connection
  * @buf: a buffer to store the read data
  * @len: the length of @buf
+ * @nonblocking: true if this call should not block
  *
  * Returns the number of bytes read, 0 if the connection is closed, or < 0
  * if an error occurred.
  */
-ssize_t tcp_read_peek(tcpconn_t *c, void *buf, size_t len) {
+static ssize_t tcp_read_peek(tcpconn_t *c, void *buf, size_t len,
+	                         bool nonblocking)
+{
 	int ret;
 	struct mbuf *m;
 	size_t tocopy, readlen = 0;
 
 	spin_lock_np(&c->lock);
 
-	if(unlikely(ret = tcp_wait_rx(c))) return ret;
-
-	/* is the socket closed? */
-	if (c->rx_closed) {
-		spin_unlock_np(&c->lock);
-		return 0;
-	}
+	ret = tcp_wait_rx(c, c->nonblocking || nonblocking);
+	if (unlikely(ret <= 0))
+		return ret;
 
 	list_for_each(&c->rxq, m, link) {
-	tocopy = MIN(mbuf_length(m), len - readlen);
-	memcpy(buf + readlen, mbuf_data(m), tocopy);
-	readlen += tocopy;
+		tocopy = MIN(mbuf_length(m), len - readlen);
+		memcpy(buf + readlen, mbuf_data(m), tocopy);
+		readlen += tocopy;
 
-	if (len == readlen)
-		break;
+		if (len == readlen)
+			break;
 	}
 
 	spin_unlock_np(&c->lock);
@@ -931,43 +953,39 @@ static size_t iov_len(const struct iovec *iov, int iovcnt)
 }
 
 /**
- * tcp_readv_peek - reads vectorized data from a TCP connection without consuming the data.
+ * tcp_readv_peek - reads vectorized data from a TCP connection without
+ * consuming the data.
  * @c: the TCP connection
  * @iov: a pointer to the IO vector
  * @iovcnt: the number of vectors in @iov
+ * @nonblocking: true if this call should not block
  *
  * Returns the number of bytes read, 0 if the connection is closed, or < 0
  * if an error occurred.
  */
-ssize_t tcp_readv_peek(tcpconn_t *c, const struct iovec *iov,
-			     int iovcnt) {
+static ssize_t tcp_readv_peek(tcpconn_t *c, const struct iovec *iov,
+			     int iovcnt, bool nonblocking)
+{
 	int ret, i = 0;
 	struct mbuf *m;
 	const struct iovec *vp;
 	size_t tocopy, readlen = 0;
 	off_t mbuf_off = 0, iov_off = 0;
-	size_t len = iov_len(iov, iovcnt);
+
+	assert(iovcnt > 0 && iov[0].iov_len > 0);
 
 	spin_lock_np(&c->lock);
 
-	if(unlikely(ret = tcp_wait_rx(c))) return ret;
-
-	/* is the socket closed? */
-	if (c->rx_closed) {
-		spin_unlock_np(&c->lock);
-		return 0;
-	}
+	ret = tcp_wait_rx(c, c->nonblocking || nonblocking);
+	if (unlikely(ret <= 0))
+		return ret;
 
 	m = list_top(&c->rxq, struct mbuf, link);
+	vp = &iov[0];
 
-	do {
-		vp = &iov[i];
-
-		tocopy = MIN(len - readlen,
-			MIN(vp->iov_len - iov_off,
-			mbuf_length(m) - mbuf_off));
-		memcpy((char *)vp->iov_base + iov_off,
-		mbuf_data(m) + mbuf_off, tocopy);
+	while (true) {
+		tocopy = MIN(vp->iov_len - iov_off, mbuf_length(m) - mbuf_off);
+		memcpy((char *)vp->iov_base + iov_off, mbuf_data(m) + mbuf_off, tocopy);
 
 		iov_off += tocopy;
 		mbuf_off += tocopy;
@@ -975,39 +993,37 @@ ssize_t tcp_readv_peek(tcpconn_t *c, const struct iovec *iov,
 
 		if (mbuf_off == mbuf_length(m)) {
 			m = list_next(&c->rxq, m, link);
+			if (m == NULL)
+				break;
 			mbuf_off = 0;
 		}
 
 		if (iov_off == vp->iov_len) {
+			if (++i == iovcnt)
+				break;
 			iov_off = 0;
-			i++;
+			vp = &iov[i];
 		}
-
-		assert(i <= iovcnt);
-	}  while ((len != readlen) && (m != NULL));
+	}
 
 	spin_unlock_np(&c->lock);
 	return readlen;
 }
 
 static ssize_t tcp_read_wait(tcpconn_t *c, size_t len,
-			     struct list_head *q, struct mbuf **mout)
+			     struct list_head *q, struct mbuf **mout, bool nonblocking)
 {
 	int ret;
 	struct mbuf *m;
-	size_t tocopy, readlen = 0;
+	size_t readlen = 0;
 	bool do_ack = false;
 
 	*mout = NULL;
 	spin_lock_np(&c->lock);
 
-	if(unlikely(ret = tcp_wait_rx(c))) return ret;
-
-	/* is the socket closed? */
-	if (c->rx_closed) {
-	  spin_unlock_np(&c->lock);
-	  return -c->err;
-	}
+	ret = tcp_wait_rx(c, nonblocking);
+	if (unlikely(ret <= 0))
+		return ret;
 
 	/* pop off the mbufs that will be read */
 	while (readlen < len) {
@@ -1065,25 +1081,30 @@ static void tcp_read_finish(tcpconn_t *c, struct mbuf *m)
 }
 
 /**
- * tcp_read - reads data from a TCP connection
+ * tcp_read2 - reads data from a TCP connection
  * @c: the TCP connection
  * @buf: a buffer to store the read data
  * @len: the length of @buf
+ * @nonblocking: true if this call should not block
  *
  * Returns the number of bytes read, 0 if the connection is closed, or < 0
  * if an error occurred.
  */
-ssize_t tcp_read(tcpconn_t *c, void *buf, size_t len)
+ssize_t tcp_read2(tcpconn_t *c, void *buf, size_t len, bool peek,
+	              bool nonblocking)
 {
 	char *pos = buf;
 	struct list_head q;
 	struct mbuf *m;
 	ssize_t ret;
 
+	if (peek)
+		return tcp_read_peek(c, buf, len, nonblocking);
+
 	list_head_init(&q);
 
 	/* wait for data to become available */
-	ret = tcp_read_wait(c, len, &q, &m);
+	ret = tcp_read_wait(c, len, &q, &m, c->nonblocking || nonblocking);
 
 	/* check if connection was closed */
 	if (ret <= 0)
@@ -1118,22 +1139,30 @@ ssize_t tcp_read(tcpconn_t *c, void *buf, size_t len)
  * @c: the TCP connection
  * @iov: a pointer to the IO vector
  * @iovcnt: the number of vectors in @iov
+ * @nonblocking: true if this call should not block
  *
  * Returns the number of bytes read, 0 if the connection is closed, or < 0
  * if an error occurred.
  */
-ssize_t tcp_readv(tcpconn_t *c, const struct iovec *iov, int iovcnt)
+ssize_t tcp_readv2(tcpconn_t *c, const struct iovec *iov, int iovcnt, bool peek,
+	               bool nonblocking)
 {
 	struct list_head q;
 	struct mbuf *m;
-	ssize_t len = iov_len(iov, iovcnt);
-	off_t offset = 0;
-	int i = 0;
+	ssize_t len;
+	off_t offset;
+	int i;
+
+	if (peek)
+		return tcp_readv_peek(c, iov, iovcnt, nonblocking);
 
 	list_head_init(&q);
+	offset = 0;
+	i = 0;
+	len = iov_len(iov, iovcnt);
 
 	/* wait for data to become available */
-	len = tcp_read_wait(c, len, &q, &m);
+	len = tcp_read_wait(c, len, &q, &m, c->nonblocking || nonblocking);
 
 	/* check if connection was closed */
 	if (len <= 0)
@@ -1190,7 +1219,7 @@ ssize_t tcp_readv(tcpconn_t *c, const struct iovec *iov, int iovcnt)
 	return len;
 }
 
-static int tcp_write_wait(tcpconn_t *c, size_t *winlen)
+static int tcp_write_wait(tcpconn_t *c, size_t *winlen, bool nonblocking)
 {
 	int ret;
 	spin_lock_np(&c->lock);
@@ -1205,7 +1234,7 @@ static int tcp_write_wait(tcpconn_t *c, size_t *winlen)
 			c->zero_wnd_ts = microtime();
 			tcp_timer_update(c);
 		}
-		if (c->nonblocking) {
+		if (nonblocking) {
 			spin_unlock_np(&c->lock);
 			return -EAGAIN;
 		}
@@ -1277,21 +1306,22 @@ static void tcp_write_finish(tcpconn_t *c)
 }
 
 /**
- * tcp_write - writes data to a TCP connection
+ * tcp_write2 - writes data to a TCP connection
  * @c: the TCP connection
  * @buf: a buffer from which to copy the data
  * @len: the length of the data
+ * @nonblocking: true if this call should not block
  *
  * Returns the number of bytes written (could be less than @len), or < 0
  * if there was a failure.
  */
-ssize_t tcp_write(tcpconn_t *c, const void *buf, size_t len)
+ssize_t tcp_write2(tcpconn_t *c, const void *buf, size_t len, bool nonblocking)
 {
 	size_t winlen;
 	ssize_t ret;
 
 	/* block until the data can be sent */
-	ret = tcp_write_wait(c, &winlen);
+	ret = tcp_write_wait(c, &winlen, c->nonblocking || nonblocking);
 	if (ret)
 		return ret;
 
@@ -1305,22 +1335,24 @@ ssize_t tcp_write(tcpconn_t *c, const void *buf, size_t len)
 }
 
 /**
- * tcp_writev - writes vectored data to a TCP connection
+ * tcp_writev2 - writes vectored data to a TCP connection
  * @c: the TCP connection
  * @iov: a pointer to the IO vector
  * @iovcnt: the number of vectors in @iov
+ * @nonblocking: true if this call should not block
  *
  * Returns the number of bytes written (could be less than requested), or < 0
  * if there was a failure.
  */
-ssize_t tcp_writev(tcpconn_t *c, const struct iovec *iov, int iovcnt)
+ssize_t tcp_writev2(tcpconn_t *c, const struct iovec *iov, int iovcnt,
+	                bool nonblocking)
 {
 	size_t winlen;
 	ssize_t sent = 0, ret;
 	int i;
 
 	/* block until the data can be sent */
-	ret = tcp_write_wait(c, &winlen);
+	ret = tcp_write_wait(c, &winlen, c->nonblocking || nonblocking);
 	if (ret)
 		return ret;
 
