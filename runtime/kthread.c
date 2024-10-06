@@ -118,9 +118,9 @@ static void flows_update(void)
 {
 	int i, pos, nrawake;
 	uint64_t start = rdtsc(), cur_gen;
-	unsigned int fg_map[maxks];
-	unsigned int awakeks[maxks];
-	DEFINE_BITMAP(kawake_local, NCPU);
+	static unsigned int fg_map[NCPU];
+	static unsigned int awakeks[NCPU];
+	static DEFINE_BITMAP(kawake_local, NCPU);
 
 again:
 

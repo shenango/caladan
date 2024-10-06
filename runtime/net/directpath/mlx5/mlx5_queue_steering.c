@@ -5,14 +5,19 @@
 static uint8_t queue_assignments[NCPU];
 BUILD_ASSERT(NCPU - 1 <= UINT8_MAX);
 
+#define LINKED_LIST_THRESH 4
+
 static inline void assign_q(unsigned int qidx, unsigned int kidx)
 {
 	if (queue_assignments[qidx] == kidx)
 		return;
 
-	rcu_hlist_del(&rxqs[qidx].link);
-	rcu_hlist_add_head(&rxqs[kidx].head, &rxqs[qidx].link);
-	queue_assignments[qidx] = kidx;
+	ACCESS_ONCE(queue_assignments[qidx]) = kidx;
+
+	if (maxks > LINKED_LIST_THRESH) {
+		rcu_hlist_del(&rxqs[qidx].link);
+		rcu_hlist_add_head(&rxqs[kidx].head, &rxqs[qidx].link);
+	}
 }
 
 static int mlx5_qs_steer(unsigned int *new_fg_assignment)
@@ -27,14 +32,24 @@ static int mlx5_qs_steer(unsigned int *new_fg_assignment)
 static bool mlx5_qs_rx_poll(unsigned int q_index)
 {
 	bool work_done;
+	size_t i;
 	struct mlx5_rxq *mrxq, *hrxq;
 	struct rcu_hlist_node *node;
 
 	/* if work stealing, just poll the single queue */
-	if (q_index != myk()->kthread_idx)
-		return mlx5_rx_poll_locked(q_index);
+	if (q_index != myk_index())
+		return mlx5_rx_poll(q_index);
 
 	work_done = false;
+
+	if (maxks <= LINKED_LIST_THRESH) {
+		for (i = 0; i < maxks; i++) {
+			if (ACCESS_ONCE(queue_assignments[i]) == q_index)
+				work_done |= mlx5_rx_poll(i);
+		}
+		return work_done;
+	}
+
 	hrxq = &rxqs[q_index];
 
 	rcu_hlist_for_each(&hrxq->head, node, true) {
@@ -49,14 +64,24 @@ static bool mlx5_qs_rx_poll(unsigned int q_index)
 static bool mlx5_qs_rx_poll_locked(unsigned int q_index)
 {
 	bool work_done;
+	size_t i;
 	struct mlx5_rxq *mrxq, *hrxq;
 	struct rcu_hlist_node *node;
 
 	/* if work stealing, just poll the single queue */
-	if (q_index != myk()->kthread_idx)
+	if (q_index != myk_index())
 		return mlx5_rx_poll_locked(q_index);
 
 	work_done = false;
+
+	if (maxks <= LINKED_LIST_THRESH) {
+		for (i = 0; i < maxks; i++) {
+			if (ACCESS_ONCE(queue_assignments[i]) == q_index)
+				work_done |= mlx5_rx_poll_locked(i);
+		}
+		return work_done;
+	}
+
 	hrxq = &rxqs[q_index];
 
 	rcu_hlist_for_each(&hrxq->head, node, true) {

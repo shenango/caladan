@@ -433,6 +433,7 @@ BUILD_ASSERT(offsetof(struct kthread, storage_q) % CACHE_LINE_SIZE == 0);
 BUILD_ASSERT(offsetof(struct kthread, stats) % CACHE_LINE_SIZE == 0);
 
 DECLARE_PERTHREAD(struct kthread *, mykthread);
+DECLARE_PERTHREAD(unsigned int, kthread_idx);
 
 /**
  * myk - returns the per-kernel-thread data
@@ -440,6 +441,11 @@ DECLARE_PERTHREAD(struct kthread *, mykthread);
 static inline struct kthread *myk(void)
 {
 	return perthread_read(mykthread);
+}
+
+static inline unsigned int myk_index(void)
+{
+	return perthread_read(kthread_idx);
 }
 
 /**

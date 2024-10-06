@@ -84,7 +84,7 @@ bool mlx5_rx_poll(unsigned int q_index)
 	if (!__sync_bool_compare_and_swap(&v->poll_th, th, NULL))
 		return false;
 
-	thread_ready(th);
+	thread_ready_head(th);
 	return true;
 }
 
@@ -99,7 +99,7 @@ bool mlx5_rx_poll_locked(unsigned int q_index)
 	if (!__sync_bool_compare_and_swap(&v->poll_th, th, NULL))
 		return false;
 
-	thread_ready_locked(th);
+	thread_ready_head_locked(th);
 	return true;
 }
 
