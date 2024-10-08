@@ -114,6 +114,6 @@ int thread_init_perthread(void)
 
 	perthread_store(thread_id, thread_id);
 
-	log_info("thread: created thread %d", thread_id);
+	log_info("thread: created thread %d [tid: %d]", thread_id, thread_gettid());
 	return 0;
 }

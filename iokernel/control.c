@@ -19,6 +19,7 @@
 #include <stdio.h>
 #include <fcntl.h>
 
+#include <base/fd_transfer.h>
 #include <base/stddef.h>
 #include <base/mem.h>
 #include <base/log.h>
@@ -86,39 +87,6 @@ static void *copy_shm_data(struct shm_region *r, shmptr_t ptr, size_t len)
 	memcpy(out, in, len);
 
 	return out;
-}
-
-static int send_fd(int controlfd, int shared_fd)
-{
-	struct msghdr msg;
-	char buf[CMSG_SPACE(sizeof(int))];
-	struct iovec iov[1];
-	char iobuf[1];
-	struct cmsghdr *cmptr;
-
-	/* init message header, iovec is necessary even though it's unused */
-	msg.msg_name = NULL;
-	msg.msg_namelen = 0;
-	msg.msg_control = buf;
-	msg.msg_controllen = sizeof(buf);
-	iov[0].iov_base = iobuf;
-	iov[0].iov_len = sizeof(iobuf);
-	msg.msg_iov = iov;
-	msg.msg_iovlen = 1;
-
-	/* init control message */
-	cmptr = CMSG_FIRSTHDR(&msg);
-	cmptr->cmsg_len = CMSG_LEN(sizeof(int));
-	cmptr->cmsg_level = SOL_SOCKET;
-	cmptr->cmsg_type = SCM_RIGHTS;
-	*(int *)CMSG_DATA(cmptr) = shared_fd;
-
-	if (sendmsg(controlfd, &msg, 0) != sizeof(iobuf)) {
-		log_err("failed to send cmsg");
-		return -1;
-	}
-
-	return 0;
 }
 
 static int control_setup_directpath(struct proc *p, int controlfd)
@@ -197,7 +165,7 @@ static int control_init_hwq(struct shm_region *r,
 	return 0;
 }
 
-static struct proc *control_create_proc(mem_key_t key, size_t len,
+static struct proc *control_create_proc(int mem_fd, size_t len,
 		 pid_t pid)
 {
 	struct control_hdr hdr;
@@ -211,7 +179,8 @@ static struct proc *control_create_proc(mem_key_t key, size_t len,
 	/* attach the shared memory region */
 	if (len < sizeof(hdr))
 		goto fail;
-	shbuf = mem_map_shm(key, NULL, len, PGSIZE_2MB, false);
+
+	shbuf = mmap(NULL, len, PROT_READ|PROT_WRITE, MAP_SHARED, mem_fd, 0);
 	if (shbuf == MAP_FAILED)
 		goto fail;
 	reg.base = shbuf;
@@ -309,14 +278,17 @@ static struct proc *control_create_proc(mem_key_t key, size_t len,
 	}
 
 	/* initialize the table of physical page addresses */
-	ret = mem_lookup_page_phys_addrs(p->region.base, p->region.len, PGSIZE_2MB,
-			p->page_paddrs);
-	if (ret)
-		goto fail;
-
-	p->max_overflows = hdr.egress_buf_count;
-	p->nr_overflows = 0;
 	if (!cfg.vfio_directpath) {
+		touch_mapping(p->region.base, p->region.len, hdr.shared_reg_page_size);
+		ret = mem_lookup_page_phys_addrs(p->region.base, p->region.len, hdr.shared_reg_page_size,
+				p->page_paddrs);
+		if (ret) {
+			log_err("control: failed to lookup phys addrs");
+			goto fail;
+		}
+
+		p->max_overflows = hdr.egress_buf_count;
+		p->nr_overflows = 0;
 		p->overflow_queue = malloc(sizeof(unsigned long) * p->max_overflows);
 		if (p->overflow_queue == NULL)
 			goto fail;
@@ -324,16 +296,18 @@ static struct proc *control_create_proc(mem_key_t key, size_t len,
 
 	/* free temporary allocations */
 	free(threads);
+	close(mem_fd);
 
 	return p;
 
 fail:
+	close(mem_fd);
 	if (p)
 		free(p->overflow_queue);
 	free(threads);
 	free(p);
 	if (reg.base)
-		mem_unmap_shm(shbuf);
+		munmap(reg.base, reg.len);
 	kill(pid, SIGINT);
 	log_err("control: couldn't attach pid %d", pid);
 	return NULL;
@@ -345,7 +319,7 @@ static void control_destroy_proc(struct proc *p)
 		release_directpath_ctx(p);
 
 	nr_clients--;
-	mem_unmap_shm(p->region.base);
+	munmap(p->region.base, p->region.len);
 	free(p->overflow_queue);
 	free(p);
 }
@@ -355,10 +329,10 @@ static void control_add_client(void)
 	struct proc *p;
 	struct ucred ucred;
 	socklen_t len;
-	mem_key_t shm_key;
 	size_t shm_len;
 	ssize_t ret;
 	int fd;
+	int mem_fd;
 
 	fd = accept(controlfd, NULL, NULL);
 	if (fd == -1) {
@@ -377,10 +351,9 @@ static void control_add_client(void)
 		goto fail;
 	}
 
-	ret = read(fd, &shm_key, sizeof(shm_key));
-	if (ret != sizeof(shm_key)) {
-		log_err("control: read() failed, len=%ld [%s]",
-			ret, strerror(errno));
+	ret = recv_fd(fd, &mem_fd);
+	if (ret) {
+		log_err("control: recv_fd() failed [%s]", strerror(errno));
 		goto fail;
 	}
 
@@ -391,7 +364,7 @@ static void control_add_client(void)
 		goto fail;
 	}
 
-	p = control_create_proc(shm_key, shm_len, ucred.pid);
+	p = control_create_proc(mem_fd, shm_len, ucred.pid);
 	if (!p) {
 		log_err("control: failed to create process '%d'", ucred.pid);
 		goto fail;

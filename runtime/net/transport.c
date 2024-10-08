@@ -263,6 +263,6 @@ int trans_init(void)
 	for (i = 0; i < TRANS_TBL_SIZE; i++)
 		rcu_hlist_init_head(&trans_tbl[i]);
 
-	trans_seed = rand_crc32c(0x48FA8BC1 ^ iok.key);
+	trans_seed = rand_crc32c(0x48FA8BC1 ^ rand_crc32c(netcfg.addr));
 	return 0;
 }

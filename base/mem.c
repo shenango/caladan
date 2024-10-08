@@ -47,7 +47,7 @@ static void sigbus_error(int sig)
 	panic("couldn't map pages");
 }
 
-static void touch_mapping(void *base, size_t len, size_t pgsize)
+void touch_mapping(void *base, size_t len, size_t pgsize)
 {
 	__sighandler_t s;
 	char *pos;
@@ -61,7 +61,7 @@ static void touch_mapping(void *base, size_t len, size_t pgsize)
 	for (pos = (char *)base; pos < (char *)base + len; pos += pgsize)
 		ACCESS_ONCE(*pos);
 	signal(SIGBUS, s);
-} 
+}
 
 static void *
 __mem_map_anom(void *base, size_t len, size_t pgsize,

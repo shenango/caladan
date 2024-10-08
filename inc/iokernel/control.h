@@ -18,7 +18,7 @@
  * struct control_hdr, please increment the version number!
  */
 
-#define CONTROL_HDR_VERSION 10
+#define CONTROL_HDR_VERSION 11
 
 /* The abstract namespace path for the control socket. */
 #define CONTROL_SOCK_PATH	"\0/control/iokernel.sock"
@@ -125,6 +125,7 @@ struct control_hdr {
 	uint32_t		ip_addr;
 	struct sched_spec	sched_cfg;
 	shmptr_t		thread_specs;
+	size_t			shared_reg_page_size;
 };
 
 /* information shared from iokernel to all runtimes */

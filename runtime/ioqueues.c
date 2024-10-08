@@ -13,6 +13,7 @@
 #include <unistd.h>
 
 #include <base/hash.h>
+#include <base/fd_transfer.h>
 #include <base/log.h>
 #include <base/lrpc.h>
 #include <base/mem.h>
@@ -139,13 +140,18 @@ void *iok_shm_alloc(size_t size, size_t alignment, shmptr_t *shm_out)
 	static size_t allocated;
 	struct shm_region *r = &netcfg.tx_region;
 	void *p;
+	int ret;
 
 	spin_lock(&shmlock);
 	if (!r->base) {
 		r->len = align_up(estimate_shm_space(), shm_page_size());
-		r->base = mem_map_shm(iok.key, NULL, r->len, shm_page_size(), true);
+		ret = ftruncate(iok.mem_fd, r->len);
+		if (ret)
+			panic("failed to grow memfd");
+		r->base = mmap(NULL, r->len, PROT_READ|PROT_WRITE, MAP_SHARED, iok.mem_fd, 0);
 		if (r->base == MAP_FAILED)
 			panic("failed to map shared memory (requested %lu bytes)", r->len);
+		touch_mapping(r->base, r->len, shm_page_size());
 		log_info("shm: using %lu bytes", r->len);
 	}
 
@@ -210,10 +216,21 @@ int ioqueues_init_early(void)
  */
 int ioqueues_init(void)
 {
-	int i;
+	int i, flags = 0;
 	struct thread_spec *ts;
 
-	iok.key = netcfg.addr;
+	if (shm_page_size() > PGSIZE_4KB)
+		flags |= MFD_HUGETLB;
+
+#ifdef MFD_EXEC
+	flags |= MFD_EXEC;
+#endif
+
+	iok.mem_fd = memfd_create("iok_signals", flags);
+	if (iok.mem_fd < 0) {
+		log_err("ioqueues: failed to create mem fd");
+		return -errno;
+	}
 
 	if (!cfg_directpath_external()) {
 		/* map ingress memory */
@@ -272,51 +289,6 @@ static void ioqueues_shm_cleanup(void)
 }
 
 #ifdef DIRECTPATH
-static int recv_fd(int fd, int *fd_out)
-{
-	struct msghdr msg;
-	char buf[CMSG_SPACE(sizeof(int))];
-	struct iovec iov[1];
-	char iobuf[1];
-	ssize_t ret;
-	struct cmsghdr *cmptr;
-
-	/* init message header and buffs for control message and iovec */
-	msg.msg_control = buf;
-	msg.msg_controllen = sizeof(buf);
-	msg.msg_name = NULL;
-	msg.msg_namelen = 0;
-
-	iov[0].iov_base = iobuf;
-	iov[0].iov_len = sizeof(iobuf);
-	msg.msg_iov = iov;
-	msg.msg_iovlen = 1;
-
-	ret = recvmsg(fd, &msg, 0);
-	if (ret < 0) {
-		log_debug("control: error with recvmsg %ld", ret);
-		return ret;
-	}
-
-	/* check validity of control message */
-	cmptr = CMSG_FIRSTHDR(&msg);
-	if (cmptr == NULL) {
-		log_debug("control: no cmsg %p", cmptr);
-		return -1;
-	} else if (cmptr->cmsg_len != CMSG_LEN(sizeof(int))) {
-		log_debug("control: cmsg is too long %ld", cmptr->cmsg_len);
-		return -1;
-	} else if (cmptr->cmsg_level != SOL_SOCKET) {
-		log_debug("control: unrecognized cmsg level %d", cmptr->cmsg_level);
-		return -1;
-	} else if (cmptr->cmsg_type != SCM_RIGHTS) {
-		log_debug("control: unrecognized cmsg type %d", cmptr->cmsg_type);
-		return -1;
-	}
-
-	*fd_out = *(int *)CMSG_DATA(cmptr);
-	return 0;
-}
 
 static int setup_external_directpath(int controlfd)
 {
@@ -378,6 +350,7 @@ int ioqueues_register_iokernel(void)
 	hdr->egress_buf_count = div_up(iok.tx_len, net_get_mtu() + MBUF_HEAD_LEN);
 	hdr->thread_count = maxks;
 	hdr->ip_addr = netcfg.addr;
+	hdr->shared_reg_page_size = shm_page_size();
 
 	hdr->request_directpath_queues = cfg_request_hardware_queues;
 
@@ -411,9 +384,9 @@ int ioqueues_register_iokernel(void)
 		goto fail_close_fd;
 	}
 
-	ret = write(iok.fd, &iok.key, sizeof(iok.key));
-	if (ret != sizeof(iok.key)) {
-		log_err("register_iokernel: write() failed [%s]", strerror(errno));
+	ret = send_fd(iok.fd, iok.mem_fd);
+	if (ret) {
+		log_err("register_iokernel: failed to send fd [%s]", strerror(errno));
 		goto fail_close_fd;
 	}
 

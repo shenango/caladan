@@ -232,7 +232,7 @@ stack_init_to_rsp_with_buf(struct stack *s, void **buf, size_t buf_len,
 
 struct iokernel_control {
 	int fd;
-	mem_key_t key;
+	int mem_fd;
 	struct control_hdr *hdr;
 	struct thread_spec *threads;
 	const struct iokernel_info *iok_info;

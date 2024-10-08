@@ -55,6 +55,7 @@ extern void *mem_map_shm_rdonly(mem_key_t key, void *base, size_t len,
 extern int mem_unmap_shm(void *base);
 extern int mem_lookup_page_phys_addrs(void *addr, size_t len, size_t pgsize,
 				      physaddr_t *maddrs);
+extern void touch_mapping(void *base, size_t len, size_t pgsize);
 
 static inline int
 mem_lookup_page_phys_addr(void *addr, size_t pgsize, physaddr_t *paddr)
