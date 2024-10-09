@@ -43,7 +43,7 @@ MLX5_LIBS = -L$(ROOT_PATH)/rdma-core/build/lib/
 MLX5_LIBS += -L$(ROOT_PATH)/rdma-core/build/lib/statics/
 MLX5_LIBS += -L$(ROOT_PATH)/rdma-core/build/util/
 MLX5_LIBS += -L$(ROOT_PATH)/rdma-core/build/ccan/
-MLX5_LIBS += -l:libmlx5.a -l:libibverbs.a -lnl-3 -lnl-route-3 -lrdmacm -lrdma_util -lccan
+MLX5_LIBS += -l:libmlx5.a -l:libibverbs.a -lnl-3 -lnl-route-3 -lrdma_util -lccan
 
 # parse configuration options
 ifeq ($(CONFIG_DEBUG),y)
