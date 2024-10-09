@@ -390,6 +390,77 @@ ssize_t udp_read_from2(udpconn_t *c, void *buf, size_t len,
 	return ret;
 }
 
+ssize_t udp_readv_from2(udpconn_t *c, const struct iovec *iov, int iovcnt,
+                      struct netaddr *raddr, bool peek, bool nonblocking)
+{
+	ssize_t ret;
+	struct mbuf *m;
+
+	spin_lock_np(&c->inq_lock);
+	nonblocking |= c->nonblocking;
+
+	/* block until there is an actionable event */
+	while (mbufq_empty(&c->inq) && !c->inq_err && !c->shutdown) {
+		if (nonblocking) {
+			spin_unlock_np(&c->inq_lock);
+			return -EAGAIN;
+		}
+		ret = waitq_wait(&c->inq_wq, &c->inq_lock);
+		if (unlikely(ret)) {
+			spin_unlock_np(&c->inq_lock);
+			return ret;
+		}
+	}
+
+	/* is the socket drained and shutdown? */
+	if (mbufq_empty(&c->inq) && c->shutdown) {
+		spin_unlock_np(&c->inq_lock);
+		return 0;
+	}
+
+	/* propagate error status code if an error was detected */
+	if (c->inq_err) {
+		spin_unlock_np(&c->inq_lock);
+		return -c->inq_err;
+	}
+
+	if (likely(!peek)) {
+		/* pop an mbuf and deliver the payload */
+		m = mbufq_pop_head(&c->inq);
+		if (--c->inq_len == 0 && !c->shutdown)
+			poll_clear(&c->poll_src, POLLIN);
+		spin_unlock_np(&c->inq_lock);
+	} else {
+		m = mbufq_peak_head(&c->inq);
+	}
+
+	ret = 0;
+	for (int i = 0; i < iovcnt; i++) {
+		size_t cpylen = MIN(iov[i].iov_len, mbuf_length(m));
+		memcpy(iov[i].iov_base, mbuf_pull(m, cpylen), cpylen);
+		ret += cpylen;
+		if (!mbuf_length(m))
+			break;
+	}
+
+	if (raddr) {
+		struct ip_hdr *iphdr = mbuf_network_hdr(m, *iphdr);
+		struct udp_hdr *udphdr = mbuf_transport_hdr(m, *udphdr);
+		raddr->ip = ntoh32(iphdr->saddr);
+		raddr->port = ntoh16(udphdr->src_port);
+		if (c->e.match == TRANS_MATCH_5TUPLE) {
+			assert(c->e.raddr.ip == raddr->ip &&
+			       c->e.raddr.port == raddr->port);
+		}
+	}
+
+	if (likely(!peek))
+		mbuf_free(m);
+	else
+		spin_unlock_np(&c->inq_lock);
+	return ret;
+}
+
 static void udp_tx_release_mbuf(struct mbuf *m)
 {
 	udpconn_t *c = (udpconn_t *)m->release_data;
@@ -411,6 +482,82 @@ static void udp_tx_release_mbuf(struct mbuf *m)
 	net_tx_release_mbuf(m);
 	if (free_conn)
 		udp_conn_put(c);
+}
+
+ssize_t udp_writev_to2(udpconn_t *c, const struct iovec *iov, int iovcnt,
+                     const struct netaddr *raddr, bool nonblocking)
+{
+	struct netaddr addr;
+	ssize_t ret;
+	struct mbuf *m;
+	size_t len = 0;
+	int i;
+
+	for (i = 0; i < iovcnt; i++)
+		len += iov[i].iov_len;
+
+	if (len > udp_get_payload_size())
+		return -EMSGSIZE;
+	if (!raddr) {
+		if (c->e.match == TRANS_MATCH_3TUPLE)
+			return -EDESTADDRREQ;
+		addr = c->e.raddr;
+	} else {
+		addr = *raddr;
+		/* rewrite loopback address */
+		if (addr.ip == MAKE_IP_ADDR(127, 0, 0, 1))
+			addr.ip = netcfg.addr;
+	}
+
+	spin_lock_np(&c->outq_lock);
+	nonblocking |= c->nonblocking;
+
+	/* block until there is an actionable event */
+	while (c->outq_len >= c->outq_cap && !c->shutdown) {
+		if (nonblocking) {
+			spin_unlock_np(&c->outq_lock);
+			return -EAGAIN;
+		}
+		ret = waitq_wait(&c->outq_wq, &c->outq_lock);
+		if (unlikely(ret)) {
+			spin_unlock_np(&c->outq_lock);
+			return ret;
+		}
+	}
+
+	/* is the socket shutdown? */
+	if (c->shutdown) {
+		spin_unlock_np(&c->outq_lock);
+		return -EPIPE;
+	}
+
+	if (++c->outq_len >= c->outq_cap) {
+		spin_lock(&c->inq_lock);
+		poll_clear(&c->poll_src, POLLOUT);
+		spin_unlock(&c->inq_lock);
+	}
+	spin_unlock_np(&c->outq_lock);
+
+	m = net_tx_alloc_mbuf_sz(udp_headroom(), len);
+	if (unlikely(!m))
+		return -ENOBUFS;
+
+	/* write datagram payload */
+	for (i = 0; i < iovcnt; i++)
+		memcpy(mbuf_put(m, iov[i].iov_len),
+		       iov[i].iov_base, iov[i].iov_len);
+
+	/* override mbuf release method */
+	m->release = udp_tx_release_mbuf;
+	m->release_data = (unsigned long)c;
+
+	ret = udp_send_raw(m, len, c->e.laddr, addr);
+	if (unlikely(ret)) {
+		net_tx_release_mbuf(m);
+		return ret;
+	}
+
+	return len;
 }
 
 /**
