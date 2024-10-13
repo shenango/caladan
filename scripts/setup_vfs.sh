@@ -78,6 +78,8 @@ sudo ip link set down $IF
 ARP_PRIO=$((${#REPS[@]} + 1)) # arp rule goes after unicast rules
 EGRESS_PRIO=$(($ARP_PRIO + 1)) # catch-all host egress rule goes after arp rule
 
+UPLINK=$IF
+
 # Setup egress rules for each representor
 for rep in "${REPS[@]}"; do
 
@@ -101,8 +103,8 @@ for rep in "${REPS[@]}"; do
 	eval $tc_command
 
 	# Setup egress from host for all other traffic
-	if [[ "$rep" != "$IF" ]]; then
-		sudo tc filter add dev $rep protocol all parent ffff: prio ${EGRESS_PRIO} flower action mirred egress redirect dev $IF
+	if [[ "$rep" != "$UPLINK" ]]; then
+		sudo tc filter add dev $rep protocol all parent ffff: prio ${EGRESS_PRIO} flower action mirred egress redirect dev $UPLINK
 	fi
 done
 

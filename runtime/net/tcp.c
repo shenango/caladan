@@ -642,7 +642,7 @@ void tcp_qclose(tcpqueue_t *q)
 	/* free all pending connections */
 	list_for_each_safe(&q->conns, c, nextc, queue_link) {
 		list_del_from(&q->conns, &c->queue_link);
-		tcp_conn_destroy(c);
+		tcp_close(c);
 	}
 
 	kref_put(&q->ref, tcp_queue_release_ref);
@@ -689,8 +689,9 @@ static int __tcp_dial(struct netaddr laddr, struct netaddr raddr,
 	spin_lock_np(&c->lock);
 	ret = tcp_tx_ctl(c, TCP_SYN, &opts);
 	if (unlikely(ret)) {
+		tcp_conn_fail(c, ret);
+		tcp_conn_put(c); /* release user socket ref */
 		spin_unlock_np(&c->lock);
-		tcp_conn_destroy(c);
 		return ret;
 	}
 	tcp_conn_get(c); /* take a ref for the state machine */
@@ -709,8 +710,9 @@ static int __tcp_dial(struct netaddr laddr, struct netaddr raddr,
 	/* check if the connection failed */
 	if (c->tx_closed) {
 		ret = -c->err;
+		tcp_conn_fail(c, c->err);
+		tcp_conn_put(c); /* release user socket ref */
 		spin_unlock_np(&c->lock);
-		tcp_conn_destroy(c);
 		return ret;
 	}
 	spin_unlock_np(&c->lock);
@@ -1220,6 +1222,7 @@ static void tcp_retransmit(void *arg)
 void tcp_conn_fail(tcpconn_t *c, int err)
 {
 	assert_spin_lock_held(&c->lock);
+	bool was_closed = c->pcb.state == TCP_STATE_CLOSED;
 
 	c->err = err;
 	tcp_conn_set_state(c, TCP_STATE_CLOSED);
@@ -1244,7 +1247,8 @@ void tcp_conn_fail(tcpconn_t *c, int err)
 	mbuf_list_free(&c->rxq_ooo);
 
 	/* state machine is disabled, drop ref */
-	tcp_conn_put(c);
+	if (!was_closed)
+		tcp_conn_put(c);
 }
 
 /**
@@ -1282,8 +1286,10 @@ static int tcp_conn_shutdown_tx(tcpconn_t *c)
 	while (c->tx_exclusive)
 		waitq_wait(&c->tx_wq, &c->lock);
 	ret = tcp_tx_ctl(c, TCP_FIN | TCP_ACK, NULL);
-	if (unlikely(ret))
-		return ret;
+	if (unlikely(ret)) {
+		tcp_conn_fail(c, ret);
+		return 0;
+	}
 	if (c->pcb.state == TCP_STATE_ESTABLISHED)
 		tcp_conn_set_state(c, TCP_STATE_FIN_WAIT1);
 	else if (c->pcb.state == TCP_STATE_CLOSE_WAIT)
