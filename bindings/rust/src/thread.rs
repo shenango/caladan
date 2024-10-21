@@ -6,7 +6,7 @@ use std::{mem, panic, ptr};
 use super::*;
 
 pub(crate) fn thread_self() -> *mut ffi::thread_t {
-    let t: * mut ffi::thread_t;
+    let t: *mut ffi::thread_t;
     unsafe {
         asm!("mov {0:r}, QWORD PTR gs:[rip + {1}]", out(reg) t, sym ffi::__perthread___self);
     }

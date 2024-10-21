@@ -21,6 +21,10 @@ fn rerun_if_changed(root_dir: &Path) -> anyhow::Result<()> {
     build_deps::rerun_if_changed_paths(&inc_glob)
         .map_err(|e| anyhow::anyhow!("failed to add rerun command: {:?}", e))?;
 
+    let shim_glob = format!("{}/shim/*.a", root_dir.to_str().unwrap());
+    build_deps::rerun_if_changed_paths(&shim_glob)
+        .map_err(|e| anyhow::anyhow!("failed to add rerun command: {:?}", e))?;
+
     let static_lib_glob = format!("{}/*.a", root_dir.to_str().unwrap());
     build_deps::rerun_if_changed_paths(&static_lib_glob)
         .map_err(|e| anyhow::anyhow!("failed to add rerun command: {:?}", e))?;
