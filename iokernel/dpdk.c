@@ -117,6 +117,11 @@ static inline int dpdk_port_init(uint8_t port, struct rte_mempool *mbuf_pool)
 		port_conf.lpbk_mode = 1;
 	}
 
+	// Enable internal loopbacking if using TAP.
+	// NOTE: other drivers likely need this enabled also.
+	if (strncmp(dev_info.driver_name, "net_tap", strlen("net_tap")) == 0)
+		cfg.allow_loopback = true;
+
 	/* Configure the Ethernet device. */
 	retval = rte_eth_dev_configure(port, rx_rings, tx_rings, &port_conf);
 	if (retval != 0)

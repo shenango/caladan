@@ -43,14 +43,14 @@ bool commands_rx(void)
 {
 	struct rte_mbuf *bufs[IOKERNEL_CMD_BURST_SIZE];
 	int i, n_bufs = 0;
-	static unsigned int pos = 0;
+	static unsigned int pos;
 
 	/*
 	 * Poll each thread in each runtime until all have been polled or we
 	 * have processed CMD_BURST_SIZE commands.
 	 */
 	for (i = 0; i < nrts; i++) {
-		unsigned int idx = (pos + i) % nrts;
+		unsigned int idx = pos++ % nrts;
 
 		if (n_bufs >= IOKERNEL_CMD_BURST_SIZE)
 			break;
@@ -59,9 +59,6 @@ bool commands_rx(void)
 	}
 
 	STAT_INC(COMMANDS_PULLED, n_bufs);
-
-	pos++;
-	for (i = 0; i < n_bufs; i++)
-		rte_pktmbuf_free(bufs[i]);
+	rte_pktmbuf_free_bulk(bufs, n_bufs);
 	return n_bufs > 0;
 }

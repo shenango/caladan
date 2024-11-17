@@ -206,6 +206,29 @@ fail_free:
 	STAT_INC(RX_UNHANDLED, 1);
 }
 
+void rx_loopback(struct rte_mbuf **src_bufs, int n_bufs)
+{
+	int i, ret;
+	struct rte_mbuf *rx_bufs[n_bufs];
+	size_t bytes;
+
+	ret = rte_pktmbuf_alloc_bulk(dp.rx_mbuf_pool, rx_bufs, n_bufs);
+	if (unlikely(ret)) {
+		log_warn_ratelimited("Couldn't allocate buffers for loopback");
+		return;
+	}
+
+	for (i = 0; i < n_bufs; i++) {
+		struct rte_mbuf *dst_buf = rx_bufs[i];
+		bytes = rte_pktmbuf_pkt_len(src_bufs[i]);
+		char *ret = rte_pktmbuf_append(dst_buf, bytes);
+		RTE_ASSERT(ret != NULL);
+		memcpy(ret, rte_pktmbuf_mtod(src_bufs[i], const char *), bytes);
+		dst_buf->ol_flags |= RTE_MBUF_F_RX_IP_CKSUM_GOOD;
+		rx_one_pkt(dst_buf);
+	}
+}
+
 /*
  * Process a batch of incoming packets.
  */

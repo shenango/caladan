@@ -33,6 +33,8 @@ static void dp_clients_add_client(struct proc *p)
 		p->kill = false;
 		p->dp_clients_idx = dp.nr_clients;
 		dp.clients[dp.nr_clients++] = p;
+		if (dp.nr_clients >= 2 && cfg.allow_loopback)
+			dp.loopback_en = true;
 	} else {
 		log_err("dp_clients: failed to attach proc.");
 		p->attach_fail = true;
@@ -103,6 +105,9 @@ static void dp_clients_remove_client(struct proc *p)
 
 	dp.clients[p->dp_clients_idx] = dp.clients[--dp.nr_clients];
 	dp.clients[p->dp_clients_idx]->dp_clients_idx = p->dp_clients_idx;
+
+	if (dp.nr_clients < 2)
+		dp.loopback_en = false;
 
 	ret = rte_hash_del_key(dp.ip_to_proc, &p->ip_addr);
 	if (ret < 0)

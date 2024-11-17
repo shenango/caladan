@@ -28,6 +28,7 @@ struct iokernel_cfg {
 	bool	nobw; /* disable bandwidth controller */
 	bool	noidlefastwake; /* disable fast wakeups for idle processes */
 	bool	ias_prefer_selfpair; /* prefer self-pairings */
+	bool	allow_loopback; /* iokernel will loopback local packets */
 	float	ias_bw_limit; /* IAS bw limit, (MB/s) */
 	bool	no_hw_qdel; /* Disable use of hardware timestamps for qdelay */
 	bool	vfio_directpath; /* enable new directpath using vfio */
@@ -340,6 +341,7 @@ enum {
  */
 struct dataplane {
 	uint8_t			port;
+	bool			loopback_en;
 	struct rte_mempool	*rx_mbuf_pool;
 	struct shm_region	ingress_mbuf_region;
 
@@ -453,6 +455,9 @@ extern bool rx_burst(void);
 extern bool tx_burst(void);
 extern bool tx_send_completion(void *obj);
 extern bool tx_drain_completions(void);
+
+struct rte_mbuf;
+extern void rx_loopback(struct rte_mbuf **bufs, int n_bufs);
 
 /*
  * other dataplane functions

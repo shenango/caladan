@@ -215,6 +215,7 @@ static int tx_drain_queue(struct thread *t, int n,
 
 		hdrs[i] = shmptr_to_ptr(&t->p->region, payload,
 					sizeof(struct tx_net_hdr));
+		prefetch(hdrs[i]);
 		/* TODO: need to kill the process? */
 		BUG_ON(!hdrs[i]);
 	}
@@ -228,11 +229,20 @@ static int tx_drain_queue(struct thread *t, int n,
  */
 bool tx_burst(void)
 {
-	const struct tx_net_hdr *hdrs[IOKERNEL_TX_BURST_SIZE];
-	static struct rte_mbuf *bufs[IOKERNEL_TX_BURST_SIZE];
-	struct thread *threads[IOKERNEL_TX_BURST_SIZE];
-	int i, j, ret, pulltotal = 0;
-	static unsigned int pos = 0, n_pkts = 0, n_bufs = 0;
+
+	/* hdrs + threads are unassociated with an mbuf as of yet. */
+	static const struct tx_net_hdr *hdrs[IOKERNEL_TX_BURST_SIZE];
+	static struct thread *threads[IOKERNEL_TX_BURST_SIZE];
+	static unsigned int n_hdrs; // number of hdr/thread entries waiting.
+
+	static struct rte_mbuf *pending_bufs[IOKERNEL_TX_BURST_SIZE];
+
+	struct rte_mbuf *new_bufs[IOKERNEL_TX_BURST_SIZE];
+	struct rte_mbuf *loopback_bufs[IOKERNEL_TX_BURST_SIZE];
+
+	int i, j, ret, loopback_nr = 0;
+	static unsigned int pos, n_bufs;
+	unsigned int pending = n_hdrs + n_bufs;
 	struct thread *t;
 
 	/*
@@ -240,62 +250,75 @@ bool tx_burst(void)
 	 * have PKT_BURST_SIZE pkts.
 	 */
 	for (i = 0; i < nrts; i++) {
-		unsigned int idx = (pos + i) % nrts;
-		t = ts[idx];
-		ret = tx_drain_queue(t, IOKERNEL_TX_BURST_SIZE - n_pkts,
-				     &hdrs[n_pkts]);
-		for (j = n_pkts; j < n_pkts + ret; j++)
-			threads[j] = t;
-		n_pkts += ret;
-		pulltotal += ret;
-		if (n_pkts >= IOKERNEL_TX_BURST_SIZE)
+		if (pending >= IOKERNEL_TX_BURST_SIZE)
 			goto full;
+		unsigned int idx = pos++ % nrts;
+		t = ts[idx];
+		ret = tx_drain_queue(t, IOKERNEL_TX_BURST_SIZE - pending,
+				     &hdrs[n_hdrs]);
+		for (j = n_hdrs; j < n_hdrs + ret; j++)
+			threads[j] = t;
+		n_hdrs += ret;
+		stats[TX_PULLED] += ret;
+		pending += ret;
 	}
 
-	if (n_pkts == 0)
+	if (pending == 0)
 		return false;
-
-	pos++;
 
 full:
 
-	stats[TX_PULLED] += pulltotal;
-
 	/* allocate mbufs */
-	if (n_pkts - n_bufs > 0) {
-		ret = rte_mempool_get_bulk(tx_mbuf_pool, (void **)&bufs[n_bufs],
-					n_pkts - n_bufs);
+	if (n_hdrs > 0) {
+		ret = rte_mempool_get_bulk(tx_mbuf_pool, (void **)&new_bufs[0],
+					n_hdrs);
 		if (unlikely(ret)) {
-			stats[TX_COMPLETION_FAIL] += n_pkts - n_bufs;
-			log_warn_ratelimited("tx: error getting %d mbufs from mempool", n_pkts - n_bufs);
+			stats[TX_COMPLETION_FAIL] += n_hdrs;
+			log_warn_ratelimited("tx: error getting %d mbufs from mempool", n_hdrs);
 			return true;
 		}
 	}
 
 	/* fill in packet metadata */
-	for (i = n_bufs; i < n_pkts; i++) {
-		if (i + TX_PREFETCH_STRIDE < n_pkts)
-			prefetch(hdrs[i + TX_PREFETCH_STRIDE]);
-		tx_prepare_tx_mbuf(bufs[i], hdrs[i], threads[i]);
+
+	for (i = 0; i < n_hdrs; i++) {
+		tx_prepare_tx_mbuf(new_bufs[i], hdrs[i], threads[i]);
+
+		if (dp.loopback_en &&
+		    hdrs[i]->olflags & (TXFLAG_LOCAL | TXFLAG_BROADCAST)) {
+			loopback_bufs[loopback_nr++] = new_bufs[i];
+			if (hdrs[i]->olflags & TXFLAG_BROADCAST) {
+				rte_mbuf_refcnt_set(new_bufs[i], 2);
+				pending_bufs[n_bufs++] = new_bufs[i];
+			}
+		} else {
+			pending_bufs[n_bufs++] = new_bufs[i];
+		}
 	}
 
-	n_bufs = n_pkts;
+	n_hdrs = 0;
+
+	if (loopback_nr) {
+		log_debug("tx: transmitted %d packets on loopback!", loopback_nr);
+		rx_loopback(loopback_bufs, loopback_nr);
+		rte_pktmbuf_free_bulk(loopback_bufs, loopback_nr);
+		if (!n_bufs)
+			return true;
+	}
 
 	/* finally, send the packets on the wire */
-	ret = rte_eth_tx_burst(dp.port, 0, bufs, n_pkts);
+	ret = rte_eth_tx_burst(dp.port, 0, pending_bufs, n_bufs);
 	log_debug("tx: transmitted %d packets on port %d", ret, dp.port);
 
 	/* apply back pressure if the NIC TX ring was full */
-	if (unlikely(ret < n_pkts)) {
-		STAT_INC(TX_BACKPRESSURE, n_pkts - ret);
-		n_pkts -= ret;
-		for (i = 0; i < n_pkts; i++)
-			bufs[i] = bufs[ret + i];
+	if (unlikely(ret < n_bufs)) {
+		STAT_INC(TX_BACKPRESSURE, n_bufs - ret);
+		n_bufs -= ret;
+		memmove(pending_bufs, pending_bufs + ret, sizeof(struct rte_mbuf *) * n_bufs);
 	} else {
-		n_pkts = 0;
+		n_bufs = 0;
 	}
 
-	n_bufs = n_pkts;
 	return true;
 }
 
