@@ -41,11 +41,11 @@ extern void net_rx_batch(struct mbuf **ms, unsigned int nr);
 #define MBUF_HEAD_LEN (align_up(sizeof(struct mbuf), CACHE_LINE_SIZE))
 
 extern int arp_lookup(uint32_t daddr, struct eth_addr *dhost_out,
-		      struct mbuf *m) __must_use_return;
+		      struct mbuf *m, bool *is_local) __must_use_return;
 extern struct mbuf *net_tx_alloc_mbuf(void);
 extern void net_tx_release_mbuf(struct mbuf *m);
 extern void net_tx_eth(struct mbuf *m, uint16_t proto,
-		       struct eth_addr dhost);
+		       const struct eth_addr *dhost, bool is_local);
 extern int net_tx_ip(struct mbuf *m, uint8_t proto,
 		     uint32_t daddr) __must_use_return;
 extern int net_tx_ip_burst(struct mbuf **ms, int n, uint8_t proto,

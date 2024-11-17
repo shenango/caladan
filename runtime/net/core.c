@@ -438,20 +438,22 @@ static void net_tx_raw(struct mbuf *m)
  * @m: the mbuf to transmit
  * @type: the ethernet type (in native byte order)
  * @dhost: the destination MAC address
+ * @is_local: this packet is destinated for an application on this machine
  *
  * The payload must start with the network (L3) header. The ethernet (L2)
  * header will be prepended by this function.
  *
  * @m must have been allocated with net_tx_alloc_mbuf().
  */
-void net_tx_eth(struct mbuf *m, uint16_t type, struct eth_addr dhost)
+void net_tx_eth(struct mbuf *m, uint16_t type, const struct eth_addr *dhost, bool is_local)
 {
 	struct eth_hdr *eth_hdr;
 
 	eth_hdr = mbuf_push_hdr(m, *eth_hdr);
 	eth_hdr->shost = netcfg.mac;
-	eth_hdr->dhost = dhost;
+	eth_hdr->dhost = *dhost;
 	eth_hdr->type = hton16(type);
+	m->txflags |= is_local ? TXFLAG_LOCAL : 0;
 	net_tx_raw(m);
 }
 
@@ -542,6 +544,7 @@ int net_tx_ip(struct mbuf *m, uint8_t proto, uint32_t daddr)
 {
 	struct eth_addr dhost;
 	int ret;
+	bool local;
 
 	/* prepend the IP header */
 	net_push_iphdr(m, proto, daddr);
@@ -558,7 +561,7 @@ int net_tx_ip(struct mbuf *m, uint8_t proto, uint32_t daddr)
 	daddr = net_get_ip_route(daddr);
 
 	/* need to use ARP to resolve dhost */
-	ret = arp_lookup(daddr, &dhost, m);
+	ret = arp_lookup(daddr, &dhost, m, &local);
 	if (unlikely(ret)) {
 		if (ret == -EINPROGRESS) {
 			/* ARP code now owns the mbuf */
@@ -570,7 +573,7 @@ int net_tx_ip(struct mbuf *m, uint8_t proto, uint32_t daddr)
 		}
 	}
 
-	net_tx_eth(m, ETHTYPE_IP, dhost);
+	net_tx_eth(m, ETHTYPE_IP, &dhost, local);
 	return 0;
 }
 
@@ -595,6 +598,7 @@ int net_tx_ip_burst(struct mbuf **ms, int n, uint8_t proto, uint32_t daddr)
 {
 	struct eth_addr dhost;
 	int ret, i;
+	bool local;
 
 	assert(n > 0);
 
@@ -611,7 +615,7 @@ int net_tx_ip_burst(struct mbuf **ms, int n, uint8_t proto, uint32_t daddr)
 	daddr = net_get_ip_route(daddr);
 
 	/* use ARP to resolve dhost */
-	ret = arp_lookup(daddr, &dhost, ms[0]);
+	ret = arp_lookup(daddr, &dhost, ms[0], &local);
 	if (unlikely(ret)) {
 		if (ret == -EINPROGRESS) {
 			/* ARP code now owns the first mbuf */
@@ -626,7 +630,7 @@ int net_tx_ip_burst(struct mbuf **ms, int n, uint8_t proto, uint32_t daddr)
 
 	/* finally, transmit the packets */
 	for (i = 0; i < n; i++)
-		net_tx_eth(ms[i], ETHTYPE_IP, dhost);
+		net_tx_eth(ms[i], ETHTYPE_IP, &dhost, local);
 
 	return 0;
 }

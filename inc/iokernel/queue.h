@@ -37,7 +37,7 @@ enum {
 	 */
 	CHECKSUM_TYPE_UNNECESSARY,
 
-	/* 
+	/*
 	 * Hardware provided a 16 bit one's complement sum from after the LL
 	 * header to the end of the packet. VLAN tags (if present) are included
 	 * in the sum. This is the most robust checksum type because it's useful
@@ -51,6 +51,8 @@ enum {
 #define OLFLAG_TCP_CHKSUM	BIT(1)	/* enable TCP checksum generation */
 #define OLFLAG_IPV4		BIT(2)  /* indicates the packet is IPv4 */
 #define OLFLAG_IPV6		BIT(3)  /* indicates the packet is IPv6 */
+#define TXFLAG_LOCAL		BIT(4)  /* indicates the packet is local */
+#define TXFLAG_BROADCAST	BIT(5)  /* indicates a broadcast packet */
 
 /*
  * RX queues: IOKERNEL -> RUNTIMES

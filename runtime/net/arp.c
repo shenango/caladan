@@ -38,6 +38,7 @@ struct arp_entry {
 	uint32_t		state;
 	uint32_t		ip;
 	struct eth_addr		eth;
+	bool			local;
 	struct rcu_hlist_node	link;
 
 	/* accessed only with @arp_lock */
@@ -56,6 +57,11 @@ static struct rcu_hlist_head arp_tbl[ARP_TABLE_CAPACITY];
 static inline int hash_ip(uint32_t ip)
 {
 	return hash_crc32c_one(ARP_SEED, ip) % ARP_TABLE_CAPACITY;
+}
+
+static inline bool is_local(const struct eth_addr *addr)
+{
+	return memcmp(addr, &netcfg.mac, sizeof(*addr)) == 0;
 }
 
 static struct arp_entry *lookup_entry(int idx, uint32_t daddr)
@@ -118,11 +124,12 @@ static struct arp_entry *create_entry(uint32_t daddr)
 	e->state = ARP_STATE_PROBING;
 	e->ts = microtime();
 	e->tries_left = ARP_RETRIES;
+	e->local = false;
 	mbufq_init(&e->q);
 	return e;
 }
 
-static void arp_send(uint16_t op, struct eth_addr dhost, uint32_t daddr)
+static void arp_send(uint16_t op, const struct eth_addr *dhost, uint32_t daddr)
 {
 	struct mbuf *m;
 	struct arp_hdr *arp_hdr;
@@ -142,10 +149,13 @@ static void arp_send(uint16_t op, struct eth_addr dhost, uint32_t daddr)
 	arp_hdr_ethip = mbuf_put_hdr(m, *arp_hdr_ethip);
 	arp_hdr_ethip->sender_mac = netcfg.mac;
 	arp_hdr_ethip->sender_ip = hton32(netcfg.addr);
-	arp_hdr_ethip->target_mac = dhost;
+	arp_hdr_ethip->target_mac = *dhost;
 	arp_hdr_ethip->target_ip = hton32(daddr);
 
-	net_tx_eth(m, ETHTYPE_ARP, dhost);
+	if (dhost == &eth_addr_broadcast)
+		m->txflags |= TXFLAG_BROADCAST;
+
+	net_tx_eth(m, ETHTYPE_ARP, dhost, is_local(dhost));
 }
 
 static void arp_age_entry(uint64_t now_us, struct arp_entry *e)
@@ -177,7 +187,7 @@ static void arp_age_entry(uint64_t now_us, struct arp_entry *e)
 		panic("arp: invalid entry state %d", e->state);
 	}
 
-	arp_send(ARP_OP_REQUEST, eth_addr_broadcast, e->ip);
+	arp_send(ARP_OP_REQUEST, &eth_addr_broadcast, e->ip);
 	e->ts = microtime();
 }
 
@@ -216,11 +226,12 @@ static void arp_worker(void *arg)
 	}
 }
 
-static void arp_update(uint32_t daddr, struct eth_addr dhost)
+static void arp_update(uint32_t daddr, const struct eth_addr *dhost)
 {
 	struct mbufq q;
 	int idx = hash_ip(daddr);
 	struct arp_entry *e;
+	bool local;
 
 	mbufq_init(&q);
 
@@ -238,16 +249,18 @@ static void arp_update(uint32_t daddr, struct eth_addr dhost)
 		spin_unlock_np(&arp_lock);
 		return;
 	}
-	e->eth = dhost;
+	e->eth = *dhost;
+	e->local = local = is_local(dhost);
 	e->ts = microtime();
 	store_release(&e->state, ARP_STATE_VALID);
 	mbufq_merge_to_tail(&q, &e->q);
 	spin_unlock_np(&arp_lock);
 
+
 	/* drain mbufs waiting for ARP response */
 	while (!mbufq_empty(&q)) {
 		struct mbuf *m = mbufq_pop_head(&q);
-		net_tx_eth(m, ETHTYPE_IP, dhost);
+		net_tx_eth(m, ETHTYPE_IP, dhost, local);
 	}
 }
 
@@ -262,7 +275,7 @@ void net_rx_arp(struct mbuf *m)
 	struct arp_hdr *arp_hdr;
 	struct arp_hdr_ethip *arp_hdr_ethip;
 	uint32_t sender_ip, target_ip;
-	struct eth_addr sender_mac;
+	struct eth_addr *sender_mac;
 
 	arp_hdr = mbuf_pull_hdr_or_null(m, *arp_hdr);
 	arp_hdr_ethip = mbuf_pull_hdr_or_null(m, *arp_hdr_ethip);
@@ -279,10 +292,10 @@ void net_rx_arp(struct mbuf *m)
 	op = ntoh16(arp_hdr->op);
 	sender_ip = ntoh32(arp_hdr_ethip->sender_ip);
 	target_ip = ntoh32(arp_hdr_ethip->target_ip);
-	sender_mac = arp_hdr_ethip->sender_mac;
+	sender_mac = &arp_hdr_ethip->sender_mac;
 
 	/* refuse ARP packets with multicast source MAC's */
-	if (eth_addr_is_multicast(&sender_mac))
+	if (eth_addr_is_multicast(sender_mac))
 		goto out;
 
 	am_target = (netcfg.addr == target_ip);
@@ -309,12 +322,13 @@ out:
  * @dhost_out: A buffer to store the MAC address
  * @m: the mbuf requiring the lookup (can be NULL, otherwise must start with
  * a network header (L3))
+ * @is_local: this packet is destinated for an application on this machine
  *
  * Returns 0 and writes to @dhost_out if successful. Otherwise returns:
  * -ENOMEM: If out of memory
  * -EINPROGRESS: If the ARP request is still resolving. Takes ownership of @m.
  */
-int arp_lookup(uint32_t daddr, struct eth_addr *dhost_out, struct mbuf *m)
+int arp_lookup(uint32_t daddr, struct eth_addr *dhost_out, struct mbuf *m, bool *is_local)
 {
 	struct arp_entry *e, *newe = NULL;
 	int idx = hash_ip(daddr);
@@ -324,6 +338,7 @@ int arp_lookup(uint32_t daddr, struct eth_addr *dhost_out, struct mbuf *m)
 	e = lookup_entry(idx, daddr);
 	if (likely(e && load_acquire(&e->state) != ARP_STATE_PROBING)) {
 		*dhost_out = e->eth;
+		*is_local = e->local;
 		rcu_read_unlock();
 		return 0;
 	}
@@ -331,7 +346,7 @@ int arp_lookup(uint32_t daddr, struct eth_addr *dhost_out, struct mbuf *m)
 
 	/* cold-path: solicit an ARP response */
 	if (!e) {
-		arp_send(ARP_OP_REQUEST, eth_addr_broadcast, daddr);
+		arp_send(ARP_OP_REQUEST, &eth_addr_broadcast, daddr);
 		newe = create_entry(daddr);
 		if (!newe)
 			return -ENOMEM;
@@ -401,6 +416,7 @@ int arp_init_late(void)
 			return -ENOMEM;
 		idx = hash_ip(static_entries[i].ip);
 		e->eth = static_entries[i].addr;
+		e->local = is_local(&e->eth);
 		e->state = ARP_STATE_STATIC;
 		insert_entry(e, idx);
 	}
