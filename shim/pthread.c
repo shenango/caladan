@@ -110,12 +110,15 @@ int pthread_join(pthread_t thread, void **retval)
 	return thread_join((struct join_handle *)thread, retval);
 }
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 int pthread_yield(void)
 {
 	NOTSELF(pthread_yield);
 	thread_yield();
 	return 0;
 }
+#pragma GCC diagnostic pop
 
 #if 0
 int sched_yield(void)

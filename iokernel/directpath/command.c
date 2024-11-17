@@ -179,8 +179,7 @@ void directpath_handle_cmd_eqe(struct mlx5_eqe *eqe)
 	int pos;
 	ssize_t ret;
 	struct cmd_slot *s;
-	struct mlx5_eqe_cmd *cmd_eqe = &eqe->data.cmd;
-	unsigned long vector = be32toh(cmd_eqe->vector);
+	unsigned long vector = be32toh(eqe->data.cmd.vector);
 
 	/* notify vfio driver if any of its commands completed */
 	if (unlikely(vector & VFIO_RESERVED_SLOTS)) {
