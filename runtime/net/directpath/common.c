@@ -10,7 +10,6 @@
 
 /* configuration options */
 struct pci_addr nic_pci_addr;
-int cfg_directpath_mode = DIRECTPATH_MODE_DISABLED;
 
 struct mempool directpath_buf_mp;
 struct tcache *directpath_buf_tcache;
@@ -19,13 +18,13 @@ DEFINE_PERTHREAD(struct tcache_perthread, directpath_buf_pt);
 int directpath_parse_arg(const char *name, const char *val)
 {
 	if (strncmp(val, "fs", strlen("fs")) == 0)
-		cfg_directpath_mode = DIRECTPATH_MODE_FLOW_STEERING;
+		netcfg.directpath_mode = DIRECTPATH_MODE_FLOW_STEERING;
 	else if (strncmp(val, "qs", strlen("qs")) == 0)
-		cfg_directpath_mode = DIRECTPATH_MODE_QUEUE_STEERING;
+		netcfg.directpath_mode = DIRECTPATH_MODE_QUEUE_STEERING;
 	else if (strncmp(val, "ext", strlen("ext")) == 0)
-		cfg_directpath_mode = DIRECTPATH_MODE_EXTERNAL;
+		netcfg.directpath_mode = DIRECTPATH_MODE_EXTERNAL;
 	else
-		cfg_directpath_mode = DIRECTPATH_MODE_ALLOW_ANY;
+		netcfg.directpath_mode = DIRECTPATH_MODE_ALLOW_ANY;
 
 	return 0;
 }
@@ -63,7 +62,7 @@ static int rx_memory_init(void)
 	int ret;
 
 	/* for external mode, memory is provided after init */
-	if (cfg_directpath_mode == DIRECTPATH_MODE_EXTERNAL)
+	if (netcfg.directpath_mode == DIRECTPATH_MODE_EXTERNAL)
 		return 0;
 
 	ret = mempool_create(&directpath_buf_mp, iok.rx_buf, iok.rx_len, PGSIZE_2MB,
@@ -113,7 +112,7 @@ int directpath_init_thread(void)
 	if (!cfg_directpath_enabled())
 		return 0;
 
-	if (cfg_directpath_mode != DIRECTPATH_MODE_EXTERNAL) {
+	if (netcfg.directpath_mode != DIRECTPATH_MODE_EXTERNAL) {
 		tcache_init_perthread(directpath_buf_tcache,
 		                      perthread_ptr(directpath_buf_pt));
 	}
@@ -160,7 +159,7 @@ void register_flow(struct flow_registration *f)
 	if (!cfg_directpath_enabled())
 		return;
 
-	if (cfg_directpath_mode != DIRECTPATH_MODE_FLOW_STEERING)
+	if (netcfg.directpath_mode != DIRECTPATH_MODE_FLOW_STEERING)
 		return;
 
 	/* take a reference for the hardware flow table */
@@ -181,7 +180,7 @@ void deregister_flow(struct flow_registration *f)
 	if (!cfg_directpath_enabled())
 		return;
 
-	if (cfg_directpath_mode != DIRECTPATH_MODE_FLOW_STEERING)
+	if (netcfg.directpath_mode != DIRECTPATH_MODE_FLOW_STEERING)
 		return;
 
 	spin_lock_np(&flow_worker_lock);
@@ -198,7 +197,7 @@ int directpath_init_late(void)
 	if (!cfg_directpath_enabled())
 		return 0;
 
-	if (cfg_directpath_mode != DIRECTPATH_MODE_FLOW_STEERING)
+	if (netcfg.directpath_mode != DIRECTPATH_MODE_FLOW_STEERING)
 		return 0;
 
 	return thread_spawn(flow_registration_worker, NULL);

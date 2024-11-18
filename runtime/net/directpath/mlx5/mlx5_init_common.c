@@ -133,7 +133,7 @@ int mlx5_init_thread(void)
 	if (ret)
 		return ret;
 
-	if (cfg_directpath_mode == DIRECTPATH_MODE_EXTERNAL)
+	if (netcfg.directpath_mode == DIRECTPATH_MODE_EXTERNAL)
 		return 0;
 
 	hs = &iok.threads[k->kthread_idx].direct_rxq;
@@ -143,7 +143,7 @@ int mlx5_init_thread(void)
 		v->cq.cqes, (1 << hs->descriptor_log_size) * hs->nr_descriptors);
 	hs->parity_byte_offset = offsetof(struct mlx5_cqe64, op_own);
 	hs->parity_bit_mask = MLX5_CQE_OWNER_MASK;
-	hs->hwq_type = cfg_directpath_mode == DIRECTPATH_MODE_QUEUE_STEERING ?
+	hs->hwq_type = netcfg.directpath_mode == DIRECTPATH_MODE_QUEUE_STEERING ?
 		HWQ_MLX5_QSTEER : HWQ_MLX5;
 	hs->consumer_idx = ptr_to_shmptr(&netcfg.tx_region, v->shadow_tail,
 	                                 sizeof(uint32_t));
@@ -162,7 +162,7 @@ int mlx5_init(void)
 	if (ret)
 		return ret;
 
-	if (cfg_directpath_mode == DIRECTPATH_MODE_EXTERNAL) {
+	if (netcfg.directpath_mode == DIRECTPATH_MODE_EXTERNAL) {
 		// hardware queue information will be provided later by the iokernel
 		if (cfg_directpath_strided)
 			cfg_request_hardware_queues = DIRECTPATH_REQUEST_STRIDED_RMP;
@@ -172,13 +172,13 @@ int mlx5_init(void)
 		return 0;
 	}
 
-	if (cfg_directpath_mode == DIRECTPATH_MODE_FLOW_STEERING ||
-	    cfg_directpath_mode == DIRECTPATH_MODE_ALLOW_ANY) {
+	if (netcfg.directpath_mode == DIRECTPATH_MODE_FLOW_STEERING ||
+	    netcfg.directpath_mode == DIRECTPATH_MODE_ALLOW_ANY) {
 
 		/* try to initialize in DevX mode */
 		ret = mlx5_verbs_init_context(false);
 		if (ret == 0) {
-			cfg_directpath_mode = DIRECTPATH_MODE_FLOW_STEERING;
+			netcfg.directpath_mode = DIRECTPATH_MODE_FLOW_STEERING;
 			log_err("directpath_init: selected flow steering mode");
 
 			ret = mlx5_verbs_init(false);
@@ -189,10 +189,10 @@ int mlx5_init(void)
 		}
 	}
 
-	assert(cfg_directpath_mode == DIRECTPATH_MODE_QUEUE_STEERING ||
-	       cfg_directpath_mode == DIRECTPATH_MODE_ALLOW_ANY);
+	assert(netcfg.directpath_mode == DIRECTPATH_MODE_QUEUE_STEERING ||
+	       netcfg.directpath_mode == DIRECTPATH_MODE_ALLOW_ANY);
 
-	cfg_directpath_mode = DIRECTPATH_MODE_QUEUE_STEERING;
+	netcfg.directpath_mode = DIRECTPATH_MODE_QUEUE_STEERING;
 	log_err("directpath_init: selected queue steering mode");
 
 	ret = mlx5_verbs_init_context(true);

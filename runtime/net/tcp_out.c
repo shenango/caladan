@@ -19,12 +19,15 @@ static void tcp_tx_release_mbuf(struct mbuf *m)
 }
 
 static uint16_t tcp_hdr_chksum(uint32_t local_ip, uint32_t remote_ip,
-			       uint16_t len)
+			       uint16_t len, struct tcp_hdr *hdr)
 {
 	if (cfg_directpath_enabled())
 		return 0;
 
-	return ipv4_phdr_cksum(IPPROTO_TCP, local_ip, remote_ip, len);
+	if (!netcfg.no_tx_offloads)
+		return ipv4_phdr_cksum(IPPROTO_TCP, local_ip, remote_ip, len);
+
+	return ipv4_udptcp_cksum(IPPROTO_TCP, local_ip, remote_ip, len, hdr);
 }
 
 static __always_inline struct tcp_hdr *
@@ -47,7 +50,7 @@ tcp_push_tcphdr(struct mbuf *m, tcpconn_t *c, uint8_t flags,
 	tcphdr->win = hton16(win >> c->pcb.rcv_wscale);
 	tcphdr->seq = hton32(m->seg_seq);
 	tcphdr->sum = tcp_hdr_chksum(c->e.laddr.ip, c->e.raddr.ip,
-				     off * sizeof(uint32_t) + l4len);
+				     off * sizeof(uint32_t) + l4len, tcphdr);
 	return tcphdr;
 }
 
@@ -80,7 +83,7 @@ int tcp_tx_raw_rst(struct netaddr laddr, struct netaddr raddr, tcp_seq seq)
 	tcphdr->off = 5;
 	tcphdr->flags = TCP_RST;
 	tcphdr->win = hton16(0);
-	tcphdr->sum = tcp_hdr_chksum(laddr.ip, raddr.ip, 0);
+	tcphdr->sum = tcp_hdr_chksum(laddr.ip, raddr.ip, 5 * sizeof(uint32_t), tcphdr);
 
 	/* transmit packet */
 	ret = net_tx_ip(m, IPPROTO_TCP, raddr.ip);
@@ -120,7 +123,7 @@ int tcp_tx_raw_rst_ack(struct netaddr laddr, struct netaddr raddr,
 	tcphdr->off = 5;
 	tcphdr->flags = TCP_RST | TCP_ACK;
 	tcphdr->win = hton16(0);
-	tcphdr->sum = tcp_hdr_chksum(laddr.ip, raddr.ip, 0);
+	tcphdr->sum = tcp_hdr_chksum(laddr.ip, raddr.ip, 5 * sizeof(uint32_t), tcphdr);
 
 	/* transmit packet */
 	ret = net_tx_ip(m, IPPROTO_TCP, raddr.ip);

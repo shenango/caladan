@@ -10,6 +10,7 @@
 #include <base/hash.h>
 #include <base/thread.h>
 #include <asm/chksum.h>
+#include <net/chksum.h>
 #include <runtime/net.h>
 #include <runtime/smalloc.h>
 
@@ -474,6 +475,9 @@ static void net_push_iphdr(struct mbuf *m, uint8_t proto, uint32_t daddr)
 	iphdr->chksum = 0;
 	iphdr->saddr = hton32(netcfg.addr);
 	iphdr->daddr = hton32(daddr);
+
+	if (netcfg.no_tx_offloads)
+		iphdr->chksum = ipv4_cksum(iphdr);
 }
 
 static uint32_t net_get_ip_route(uint32_t daddr)
@@ -728,8 +732,10 @@ int net_init(void)
 	log_info("net: started network stack");
 	net_dump_config();
 
-	if (!cfg_directpath_enabled())
+	if (!cfg_directpath_enabled()) {
 		net_ops = iokernel_ops;
+		netcfg.no_tx_offloads = iok.iok_info->no_tx_offloads;
+	}
 
 	if (cfg_directpath_external())
 		return 0;

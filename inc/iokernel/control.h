@@ -138,6 +138,7 @@ struct iokernel_info {
 	bool			external_directpath_enabled;
 	bool			external_directpath_rmp;
 	bool			transparent_hugepages;
+	bool			no_tx_offloads;
 };
 
 BUILD_ASSERT(sizeof(struct iokernel_info) <= IOKERNEL_INFO_SIZE);

@@ -576,7 +576,10 @@ struct net_cfg {
 	uint32_t		netmask;
 	uint32_t		gateway;
 	struct eth_addr		mac;
-	uint8_t			pad[14];
+	bool			no_tx_offloads;
+	bool 			pad1[1];
+	int			directpath_mode;
+	uint8_t			pad2[8];
 };
 
 BUILD_ASSERT(sizeof(struct net_cfg) == CACHE_LINE_SIZE);
@@ -612,7 +615,6 @@ extern struct net_driver_ops net_ops;
 #ifdef DIRECTPATH
 
 extern int directpath_parse_arg(const char *name, const char *val);
-extern int cfg_directpath_mode;
 extern bool cfg_directpath_strided;
 
 enum {
@@ -632,12 +634,12 @@ static inline bool is_directpath_strided(void)
 
 static inline bool cfg_directpath_enabled(void)
 {
-	return cfg_directpath_mode != DIRECTPATH_MODE_DISABLED;
+	return netcfg.directpath_mode != DIRECTPATH_MODE_DISABLED;
 }
 
 static inline bool cfg_directpath_external(void)
 {
-	return cfg_directpath_mode == DIRECTPATH_MODE_EXTERNAL;
+	return netcfg.directpath_mode == DIRECTPATH_MODE_EXTERNAL;
 }
 
 static inline bool rx_poll(struct kthread *k)

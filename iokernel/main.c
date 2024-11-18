@@ -11,6 +11,7 @@
 
 #include <sys/utsname.h>
 
+#include <pthread.h>
 #include <unistd.h>
 
 #include "defs.h"

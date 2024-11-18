@@ -29,12 +29,13 @@ struct iokernel_cfg {
 	bool	noidlefastwake; /* disable fast wakeups for idle processes */
 	bool	ias_prefer_selfpair; /* prefer self-pairings */
 	bool	allow_loopback; /* iokernel will loopback local packets */
+	bool	tx_offloads_disabled; /* TX offloads are not supported */
 	float	ias_bw_limit; /* IAS bw limit, (MB/s) */
 	bool	no_hw_qdel; /* Disable use of hardware timestamps for qdelay */
 	bool	vfio_directpath; /* enable new directpath using vfio */
 	bool	directpath_active_rss; /* vfio directpath: keep all qs active */
 	bool	azure_arp_mode; /* support Azure by responding to local ARP messages */
-	bool    no_hugepages; /* disable use of reserved hugepages for directpath */
+	bool	no_hugepages; /* disable use of reserved hugepages for directpath */
 };
 
 extern struct iokernel_cfg cfg;

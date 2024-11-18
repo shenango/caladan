@@ -1,10 +1,10 @@
 diff --git a/config/rte_config.h b/config/rte_config.h
-index 8eb29c1525..1d053bfb9e 100644
+index da265d7dd2..88ad16cc37 100644
 --- a/config/rte_config.h
 +++ b/config/rte_config.h
-@@ -29,7 +29,7 @@
- 
+@@ -30,7 +30,7 @@
  /* EAL defines */
+ #define RTE_CACHE_GUARD_LINES 1
  #define RTE_MAX_HEAPS 32
 -#define RTE_MAX_MEMSEG_LISTS 128
 +#define RTE_MAX_MEMSEG_LISTS 1024

@@ -105,7 +105,7 @@ static bool azure_arp_response(struct rte_mbuf *buf)
                         sizeof(*ptr_mac_hdr));
 	arphdr->arp_opcode = rte_cpu_to_be_16(RTE_ARP_OP_REPLY);
 	rte_ether_addr_copy(&azure_eth_addr, &arphdr->arp_data.arp_sha);
-        rte_ether_addr_copy(&ptr_mac_hdr->dst_addr, &arphdr->arp_data.arp_tha);
+	rte_ether_addr_copy(&ptr_mac_hdr->dst_addr, &arphdr->arp_data.arp_tha);
 	swapvars(arphdr->arp_data.arp_sip, arphdr->arp_data.arp_tip);
 
 	return rte_eth_tx_burst(dp.port, 0, &buf, 1) == 1;

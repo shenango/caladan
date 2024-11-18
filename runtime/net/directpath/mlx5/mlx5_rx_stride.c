@@ -37,7 +37,7 @@ static DEFINE_PERTHREAD(struct tcache_perthread, mbuf_pt);
 
 static inline bool shared_rmp_enabled(void)
 {
-	return cfg_directpath_mode == DIRECTPATH_MODE_EXTERNAL;
+	return netcfg.directpath_mode == DIRECTPATH_MODE_EXTERNAL;
 }
 
 static struct mlx5_wq *get_rx_wq(struct mlx5_rxq *v)

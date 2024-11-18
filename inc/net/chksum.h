@@ -140,3 +140,10 @@ ipv4_udptcp_cksum(uint8_t proto, uint32_t saddr, uint32_t daddr,
 
 	return (uint16_t)cksum;
 }
+
+static inline uint16_t ipv4_cksum(const struct ip_hdr *iphdr)
+{
+	uint16_t cksum;
+	cksum = raw_cksum(iphdr, sizeof(*iphdr));
+	return (uint16_t)~cksum;
+}

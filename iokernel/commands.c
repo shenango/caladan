@@ -44,6 +44,7 @@ bool commands_rx(void)
 	struct rte_mbuf *bufs[IOKERNEL_CMD_BURST_SIZE];
 	int i, n_bufs = 0;
 	static unsigned int pos;
+	struct thread *t;
 
 	/*
 	 * Poll each thread in each runtime until all have been polled or we
@@ -54,8 +55,17 @@ bool commands_rx(void)
 
 		if (n_bufs >= IOKERNEL_CMD_BURST_SIZE)
 			break;
-		n_bufs += commands_drain_queue(ts[idx], &bufs[n_bufs],
+
+		t = ts[idx];
+		n_bufs += commands_drain_queue(t, &bufs[n_bufs],
 				IOKERNEL_CMD_BURST_SIZE - n_bufs);
+
+		if (unlikely(!t->active)) {
+			if (!lrpc_empty(&t->txcmdq))
+				continue;
+			if (lrpc_empty(&t->txpktq) || t->p->kill)
+				unpoll_thread(t);
+		}
 	}
 
 	STAT_INC(COMMANDS_PULLED, n_bufs);

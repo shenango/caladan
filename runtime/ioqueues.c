@@ -200,7 +200,7 @@ int ioqueues_init_early(void)
 #ifdef DIRECTPATH
 	if (iok.iok_info->external_directpath_enabled) {
 		cfg_directpath_strided = iok.iok_info->external_directpath_rmp;
-		cfg_directpath_mode = DIRECTPATH_MODE_EXTERNAL;
+		netcfg.directpath_mode = DIRECTPATH_MODE_EXTERNAL;
 	}
 #endif
 

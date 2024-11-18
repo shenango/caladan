@@ -4,6 +4,7 @@
 
 #include <unistd.h>
 
+#include <rte_dev.h>
 #include <rte_ether.h>
 #include <rte_hash.h>
 #include <rte_jhash.h>

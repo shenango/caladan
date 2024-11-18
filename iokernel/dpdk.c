@@ -36,7 +36,7 @@
  */
 
 #include <inttypes.h>
-#include <rte_bus_pci.h>
+#include <rte_bus.h>
 #include <rte_eal.h>
 #include <rte_ethdev.h>
 #include <rte_ether.h>
@@ -85,6 +85,7 @@ static const struct rte_eth_conf port_conf_default = {
 static inline int dpdk_port_init(uint8_t port, struct rte_mempool *mbuf_pool)
 {
 	struct rte_eth_conf port_conf = port_conf_default;
+	char eth_name[RTE_ETH_NAME_MAX_LEN];
 	const uint16_t rx_rings = 1, tx_rings = 1;
 	uint16_t nb_rxd = RX_RING_SIZE;
 	uint16_t nb_txd = TX_RING_SIZE;
@@ -119,8 +120,14 @@ static inline int dpdk_port_init(uint8_t port, struct rte_mempool *mbuf_pool)
 
 	// Enable internal loopbacking if using TAP.
 	// NOTE: other drivers likely need this enabled also.
-	if (strncmp(dev_info.driver_name, "net_tap", strlen("net_tap")) == 0)
+	if (strncmp(dev_info.driver_name, "net_tap", strlen("net_tap")) == 0) {
 		cfg.allow_loopback = true;
+		// the TAP driver copies the buffer before sending to emulate TX
+		// offloads. This is broken on recent versions that try to
+		// allocate a new buffer from the same mempool, since our TX
+		// mempool only attaches to external buffers.
+		cfg.tx_offloads_disabled = true;
+	}
 
 	/* Configure the Ethernet device. */
 	retval = rte_eth_dev_configure(port, rx_rings, tx_rings, &port_conf);
@@ -170,12 +177,9 @@ static inline int dpdk_port_init(uint8_t port, struct rte_mempool *mbuf_pool)
 
 	/* record the PCI address */
 	if (!nic_pci_addr_str && dev_info.device &&
-	    rte_bus_find_by_device(dev_info.device)) {
-		struct rte_pci_device *pci_dev = RTE_DEV_TO_PCI(dev_info.device);
-		nic_pci_addr.domain = pci_dev->addr.domain;
-		nic_pci_addr.bus = pci_dev->addr.bus;
-		nic_pci_addr.slot = pci_dev->addr.devid;
-		nic_pci_addr.func = pci_dev->addr.function;
+	    rte_bus_find_by_device(dev_info.device) &&
+	    rte_eth_dev_get_name_by_port(port, eth_name) == 0 &&
+	    pci_str_to_addr(eth_name, &nic_pci_addr) == 0) {
 		nic_pci_addr_str = "";
 		memcpy(&iok_info->directpath_pci, &nic_pci_addr, sizeof(nic_pci_addr));
 	}

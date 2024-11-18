@@ -64,7 +64,7 @@ static void tx_prepare_tx_mbuf(struct rte_mbuf *buf,
 	buf->data_len = net_hdr->len;
 
 	buf->ol_flags = 0;
-	if (net_hdr->olflags != 0) {
+	if (net_hdr->olflags != 0 && !cfg.tx_offloads_disabled) {
 		if (net_hdr->olflags & OLFLAG_IP_CHKSUM)
 			buf->ol_flags |= RTE_MBUF_F_TX_IP_CKSUM;
 		if (net_hdr->olflags & OLFLAG_TCP_CHKSUM)
@@ -204,11 +204,8 @@ static int tx_drain_queue(struct thread *t, int n,
 		uint64_t cmd;
 		unsigned long payload;
 
-		if (!lrpc_recv(&t->txpktq, &cmd, &payload)) {
-			if (unlikely(!t->active))
-				unpoll_thread(t);
+		if (!lrpc_recv(&t->txpktq, &cmd, &payload))
 			break;
-		}
 
 		/* TODO: need to kill the process? */
 		BUG_ON(cmd != TXPKT_NET_XMIT);
@@ -313,11 +310,11 @@ full:
 	/* apply back pressure if the NIC TX ring was full */
 	if (unlikely(ret < n_bufs)) {
 		STAT_INC(TX_BACKPRESSURE, n_bufs - ret);
-		n_bufs -= ret;
-		memmove(pending_bufs, pending_bufs + ret, sizeof(struct rte_mbuf *) * n_bufs);
-	} else {
-		n_bufs = 0;
+		for (i = 0; i < n_bufs; i++)
+			pending_bufs[i] = pending_bufs[ret + i];
 	}
+
+	n_bufs -= ret;
 
 	return true;
 }

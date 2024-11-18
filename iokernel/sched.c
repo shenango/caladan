@@ -180,7 +180,7 @@ static void sched_disable_kthread(struct thread *th, unsigned int last_core)
 	if (!p->has_vfio_directpath) {
 		p->active_threads[th->at_idx] = p->active_threads[--p->active_thread_count];
 		p->active_threads[th->at_idx]->at_idx = th->at_idx;
-		if (lrpc_empty(&th->txpktq))
+		if (lrpc_empty(&th->txpktq) && lrpc_empty(&th->txcmdq))
 			unpoll_thread(th);
 	} else {
 		p->active_thread_count--;
