@@ -118,15 +118,18 @@ static inline int dpdk_port_init(uint8_t port, struct rte_mempool *mbuf_pool)
 		port_conf.lpbk_mode = 1;
 	}
 
+	bool is_tap =
+	       !strncmp(dev_info.driver_name, "net_tap", strlen("net_tap"));
+
 	// Enable internal loopbacking if using TAP.
 	// NOTE: other drivers likely need this enabled also.
-	if (strncmp(dev_info.driver_name, "net_tap", strlen("net_tap")) == 0) {
+	if (is_tap) {
 		cfg.allow_loopback = true;
 		// the TAP driver copies the buffer before sending to emulate TX
 		// offloads. This is broken on recent versions that try to
 		// allocate a new buffer from the same mempool, since our TX
 		// mempool only attaches to external buffers.
-		cfg.tx_offloads_disabled = true;
+		cfg.tx_offloads_disabled = iok_info->no_tx_offloads = true;
 	}
 
 	/* Configure the Ethernet device. */
@@ -167,6 +170,13 @@ static inline int dpdk_port_init(uint8_t port, struct rte_mempool *mbuf_pool)
 	/* Display the port MAC address. */
 	struct rte_ether_addr addr;
 	rte_eth_macaddr_get(port, &addr);
+	if (is_tap) {
+		// When joining the TAP device to a Linux bridge interface,
+		// traffic from some sources are not properly delivered to the
+		// TAP device unless the MAC address is different from the
+		// assigned one.
+		addr.addr_bytes[5] += 1;
+	}
 	memcpy(&iok_info->host_mac, &addr, sizeof(iok_info->host_mac));
 	log_info("dpdk: driver: %s port %u MAC: %02" PRIx8 " %02" PRIx8 " %02" PRIx8
 			" %02" PRIx8 " %02" PRIx8 " %02" PRIx8 "",
