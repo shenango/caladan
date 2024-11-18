@@ -17,7 +17,7 @@ uint64_t num_blocks;
 
 // Hack to prevent SPDK from pulling in extra headers here
 #define SPDK_STDINC_H
-struct iovec;
+#include <sys/uio.h>
 #include <spdk/nvme.h>
 #include <spdk/env.h>
 

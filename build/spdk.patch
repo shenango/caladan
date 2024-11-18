@@ -1,8 +1,8 @@
 diff --git a/include/spdk/nvme.h b/include/spdk/nvme.h
-index 4157292da..d6a374ef1 100644
+index a0b3bd243..94caabc73 100644
 --- a/include/spdk/nvme.h
 +++ b/include/spdk/nvme.h
-@@ -1398,6 +1398,20 @@ void spdk_nvme_ctrlr_register_aer_callback(struct spdk_nvme_ctrlr *ctrlr,
+@@ -1454,6 +1454,20 @@ void spdk_nvme_ctrlr_disable_read_changed_ns_list_log_page(struct spdk_nvme_ctrl
   */
  struct spdk_nvme_qpair;
  
@@ -24,10 +24,10 @@ index 4157292da..d6a374ef1 100644
   * Signature for the callback function invoked when a timeout is detected on a
   * request.
 diff --git a/lib/env_dpdk/env.mk b/lib/env_dpdk/env.mk
-index d3d46af73..f73446e02 100644
+index 4f45c29e8..dfefabf6a 100644
 --- a/lib/env_dpdk/env.mk
 +++ b/lib/env_dpdk/env.mk
-@@ -45,7 +45,7 @@ export DPDK_ABS_DIR = $(abspath $(DPDK_DIR))
+@@ -17,7 +17,7 @@ export DPDK_ABS_DIR = $(abspath $(DPDK_DIR))
  ifneq ($(CONFIG_DPDK_LIB_DIR),)
  DPDK_LIB_DIR = $(CONFIG_DPDK_LIB_DIR)
  else
@@ -37,10 +37,10 @@ index d3d46af73..f73446e02 100644
  
  ifneq ($(CONFIG_DPDK_INC_DIR),)
 diff --git a/lib/nvme/nvme_pcie.c b/lib/nvme/nvme_pcie.c
-index 14f563532..f2487b84c 100644
+index a8d47c356..b4015f9cc 100644
 --- a/lib/nvme/nvme_pcie.c
 +++ b/lib/nvme/nvme_pcie.c
-@@ -1122,6 +1122,15 @@ static struct spdk_pci_id nvme_pci_driver_id[] = {
+@@ -1074,6 +1074,15 @@ static struct spdk_pci_id nvme_pci_driver_id[] = {
  SPDK_PCI_DRIVER_REGISTER(nvme, nvme_pci_driver_id,
  			 SPDK_PCI_DRIVER_NEED_MAPPING | SPDK_PCI_DRIVER_WC_ACTIVATE);
  
@@ -57,10 +57,10 @@ index 14f563532..f2487b84c 100644
  	.name = "PCIE",
  	.type = SPDK_NVME_TRANSPORT_PCIE,
 diff --git a/lib/nvme/nvme_pcie_common.c b/lib/nvme/nvme_pcie_common.c
-index a63f1df65..863c147fe 100644
+index 35c3d512c..9dc52cfbe 100644
 --- a/lib/nvme/nvme_pcie_common.c
 +++ b/lib/nvme/nvme_pcie_common.c
-@@ -71,6 +71,8 @@ nvme_pcie_qpair_reset(struct spdk_nvme_qpair *qpair)
+@@ -43,6 +43,8 @@ nvme_pcie_qpair_reset(struct spdk_nvme_qpair *qpair)
  
  	/* all head/tail vals are set to 0 */
  	pqpair->last_sq_tail = pqpair->sq_tail = pqpair->sq_head = pqpair->cq_head = 0;
@@ -69,7 +69,7 @@ index a63f1df65..863c147fe 100644
  
  	/*
  	 * First time through the completion queue, HW will set phase
-@@ -251,6 +253,10 @@ nvme_pcie_qpair_construct(struct spdk_nvme_qpair *qpair,
+@@ -223,6 +225,10 @@ nvme_pcie_qpair_construct(struct spdk_nvme_qpair *qpair,
  		TAILQ_INSERT_HEAD(&pqpair->free_tr, tr, tq_list);
  	}
  
@@ -80,7 +80,7 @@ index a63f1df65..863c147fe 100644
  	nvme_pcie_qpair_reset(qpair);
  
  	return 0;
-@@ -968,6 +974,10 @@ nvme_pcie_qpair_process_completions(struct spdk_nvme_qpair *qpair, uint32_t max_
+@@ -934,6 +940,10 @@ nvme_pcie_qpair_process_completions(struct spdk_nvme_qpair *qpair, uint32_t max_
  		}
  	}
  
@@ -92,10 +92,10 @@ index a63f1df65..863c147fe 100644
  		pqpair->stat->completions += num_completions;
  		nvme_pcie_qpair_ring_cq_doorbell(qpair);
 diff --git a/lib/nvme/nvme_pcie_internal.h b/lib/nvme/nvme_pcie_internal.h
-index 0849aaae9..440d590aa 100644
+index 4e08861e9..ba3c60eb2 100644
 --- a/lib/nvme/nvme_pcie_internal.h
 +++ b/lib/nvme/nvme_pcie_internal.h
-@@ -213,6 +213,9 @@ struct nvme_pcie_qpair {
+@@ -185,6 +185,9 @@ struct nvme_pcie_qpair {
  		volatile uint32_t *cq_eventidx;
  	} shadow_doorbell;
  
@@ -106,12 +106,12 @@ index 0849aaae9..440d590aa 100644
  	 * Fields below this point should not be touched on the normal I/O path.
  	 */
 diff --git a/scripts/setup.sh b/scripts/setup.sh
-index 26414087a..4f8354cf6 100755
+index 325184acb..e68778913 100755
 --- a/scripts/setup.sh
 +++ b/scripts/setup.sh
-@@ -849,7 +849,7 @@ if [[ $os == Linux ]]; then
- 	: ${NRHUGE=$(((HUGEMEM + HUGEPGSZ_MB - 1) / HUGEPGSZ_MB))}
+@@ -936,7 +936,7 @@ fi
  
+ if [[ $os == Linux ]]; then
  	if [ "$mode" == "config" ]; then
 -		configure_linux
 +		configure_linux_pci

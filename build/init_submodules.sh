@@ -70,8 +70,7 @@ export PKG_CONFIG_PATH=
 echo building SPDK
 cd spdk
 git apply ../build/spdk.patch
-git apply ../build/spdk2.patch
-./configure --with-dpdk=$PWD/../dpdk/build/
+./configure --with-dpdk=$PWD/../dpdk/build/ --without-fuse --without-nvme-cuse
 make -j $CORES
 cd ..
 
