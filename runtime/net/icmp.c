@@ -21,7 +21,7 @@ static void net_rx_icmp_echo(struct mbuf *m_in,
 
 	log_debug("icmp: responding to icmp echo request");
 
-	m = net_tx_alloc_mbuf();
+	m = net_tx_alloc_mbuf(ip_headroom());
 	if (unlikely(!m)) {
 		mbuf_drop(m_in);
 		return;

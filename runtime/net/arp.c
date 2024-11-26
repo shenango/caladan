@@ -135,7 +135,7 @@ static void arp_send(uint16_t op, const struct eth_addr *dhost, uint32_t daddr)
 	struct arp_hdr *arp_hdr;
 	struct arp_hdr_ethip *arp_hdr_ethip;
 
-	m = net_tx_alloc_mbuf();
+	m = net_tx_alloc_mbuf(eth_headroom());
 	if (unlikely(!m))
 		return;
 

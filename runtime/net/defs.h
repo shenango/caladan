@@ -42,7 +42,7 @@ extern void net_rx_batch(struct mbuf **ms, unsigned int nr);
 
 extern int arp_lookup(uint32_t daddr, struct eth_addr *dhost_out,
 		      struct mbuf *m, bool *is_local) __must_use_return;
-extern struct mbuf *net_tx_alloc_mbuf(void);
+extern struct mbuf *net_tx_alloc_mbuf(size_t header_len);
 extern void net_tx_release_mbuf(struct mbuf *m);
 extern void net_tx_eth(struct mbuf *m, uint16_t proto,
 		       const struct eth_addr *dhost, bool is_local);
@@ -52,6 +52,16 @@ extern int net_tx_ip_burst(struct mbuf **ms, int n, uint8_t proto,
 		     uint32_t daddr) __must_use_return;
 extern int net_tx_icmp(struct mbuf *m, uint8_t type, uint8_t code,
 		uint32_t daddr, uint16_t id, uint16_t seq) __must_use_return;
+
+static inline size_t eth_headroom(void)
+{
+	return sizeof(struct eth_hdr);
+}
+
+static inline size_t ip_headroom(void)
+{
+	return eth_headroom() + sizeof(struct ip_hdr);
+}
 
 /**
  * net_tx_ip - transmits an IP packet, or frees it on failure

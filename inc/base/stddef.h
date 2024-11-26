@@ -38,6 +38,11 @@
 	  + check_types_match(*(member_ptr), ((containing_type *)0)->member))
 #endif
 
+#define container_of_nocheck(member_ptr, containing_type, member)       \
+	((containing_type *)                                            \
+	 ((char *)(member_ptr)                                          \
+	  - offsetof(containing_type, member)))
+
 /**
  * container_of_var - get pointer to enclosing structure using a variable
  * @member_ptr: pointer to the structure member

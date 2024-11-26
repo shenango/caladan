@@ -27,12 +27,16 @@ static LIST_HEAD(overflow_procs);
  * Private data stored in egress mbufs, used to send completions to runtimes.
  */
 struct tx_pktmbuf_priv {
-#ifdef MLX
-	uint32_t lkey;
-#endif /* MLX */
 	struct proc	*p;
 	struct thread	*th;
 	unsigned long	completion_data;
+};
+
+struct pkt {
+	union txpkt_xmit_cmd cmd;
+	unsigned long	compl;
+	char		*buffer;
+	struct thread	*th;
 };
 
 static inline struct tx_pktmbuf_priv *tx_pktmbuf_get_priv(struct rte_mbuf *buf)
@@ -44,34 +48,32 @@ static inline struct tx_pktmbuf_priv *tx_pktmbuf_get_priv(struct rte_mbuf *buf)
 /*
  * Prepare rte_mbuf struct for transmission.
  */
-static void tx_prepare_tx_mbuf(struct rte_mbuf *buf,
-			       const struct tx_net_hdr *net_hdr,
-			       struct thread *th)
+static void tx_prepare_tx_mbuf(struct rte_mbuf *buf, struct pkt *pkt)
 {
-	struct proc *p = th->p;
+	struct proc *p = pkt->th->p;
 	uint32_t page_number;
 	struct tx_pktmbuf_priv *priv_data;
 
 	/* initialize mbuf to point to net_hdr->payload */
-	buf->buf_addr = (char *)net_hdr->payload;
+	buf->buf_addr = pkt->buffer;
 	page_number = PGN_2MB((uintptr_t)buf->buf_addr - (uintptr_t)p->region.base);
 	buf->buf_iova = p->page_paddrs[page_number] + PGOFF_2MB(buf->buf_addr);
 	buf->data_off = 0;
 	rte_mbuf_refcnt_set(buf, 1);
 
-	buf->buf_len = net_hdr->len;
-	buf->pkt_len = net_hdr->len;
-	buf->data_len = net_hdr->len;
+	buf->buf_len = pkt->cmd.len;
+	buf->pkt_len = pkt->cmd.len;
+	buf->data_len = pkt->cmd.len;
 
 	buf->ol_flags = 0;
-	if (net_hdr->olflags != 0 && !cfg.tx_offloads_disabled) {
-		if (net_hdr->olflags & OLFLAG_IP_CHKSUM)
+	if (pkt->cmd.olflags != 0 && !cfg.tx_offloads_disabled) {
+		if (pkt->cmd.olflags & OLFLAG_IP_CHKSUM)
 			buf->ol_flags |= RTE_MBUF_F_TX_IP_CKSUM;
-		if (net_hdr->olflags & OLFLAG_TCP_CHKSUM)
+		if (pkt->cmd.olflags & OLFLAG_TCP_CHKSUM)
 			buf->ol_flags |= RTE_MBUF_F_TX_TCP_CKSUM;
-		if (net_hdr->olflags & OLFLAG_IPV4)
+		if (pkt->cmd.olflags & OLFLAG_IPV4)
 			buf->ol_flags |= RTE_MBUF_F_TX_IPV4;
-		if (net_hdr->olflags & OLFLAG_IPV6)
+		if (pkt->cmd.olflags & OLFLAG_IPV6)
 			buf->ol_flags |= RTE_MBUF_F_TX_IPV6;
 
 		buf->l4_len = sizeof(struct rte_tcp_hdr);
@@ -82,8 +84,8 @@ static void tx_prepare_tx_mbuf(struct rte_mbuf *buf,
 	/* initialize the private data, used to send completion events */
 	priv_data = tx_pktmbuf_get_priv(buf);
 	priv_data->p = p;
-	priv_data->th = th;
-	priv_data->completion_data = net_hdr->completion_data;
+	priv_data->th = pkt->th;
+	priv_data->completion_data = pkt->compl;
 
 #ifdef MLX
 	/* initialize private data used by Mellanox driver to register memory */
@@ -195,26 +197,22 @@ bool tx_drain_completions(void)
 
 }
 
-static int tx_drain_queue(struct thread *t, int n,
-			  const struct tx_net_hdr **hdrs)
+static int tx_drain_queue(struct thread *t, int n, struct pkt *pkts)
 {
 	int i;
+	struct pkt *pkt;
 
 	for (i = 0; i < n; i++) {
-		uint64_t cmd;
-		unsigned long payload;
+		pkt = &pkts[i];
 
-		if (!lrpc_recv(&t->txpktq, &cmd, &payload))
+		if (!lrpc_recv(&t->txpktq, &pkt->cmd.lrpc_cmd, &pkt->compl))
 			break;
 
-		/* TODO: need to kill the process? */
-		BUG_ON(cmd != TXPKT_NET_XMIT);
+		assert(pkt->cmd.txcmd == TXPKT_NET_XMIT);
 
-		hdrs[i] = shmptr_to_ptr(&t->p->region, payload,
-					sizeof(struct tx_net_hdr));
-		prefetch(hdrs[i]);
-		/* TODO: need to kill the process? */
-		BUG_ON(!hdrs[i]);
+		pkt->buffer = shmptr_to_ptr(&t->p->region, pkt->compl,
+				             pkt->cmd.len);
+		pkt->th = t;
 	}
 
 	return i;
@@ -226,20 +224,18 @@ static int tx_drain_queue(struct thread *t, int n,
  */
 bool tx_burst(void)
 {
-
-	/* hdrs + threads are unassociated with an mbuf as of yet. */
-	static const struct tx_net_hdr *hdrs[IOKERNEL_TX_BURST_SIZE];
-	static struct thread *threads[IOKERNEL_TX_BURST_SIZE];
-	static unsigned int n_hdrs; // number of hdr/thread entries waiting.
+	/* packets are unassociated with an mbuf as of yet. */
+	static struct pkt pkts[IOKERNEL_TX_BURST_SIZE];
+	static unsigned int n_pkts;
 
 	static struct rte_mbuf *pending_bufs[IOKERNEL_TX_BURST_SIZE];
 
 	struct rte_mbuf *new_bufs[IOKERNEL_TX_BURST_SIZE];
 	struct rte_mbuf *loopback_bufs[IOKERNEL_TX_BURST_SIZE];
 
-	int i, j, ret, loopback_nr = 0;
+	int i, ret, loopback_nr = 0;
 	static unsigned int pos, n_bufs;
-	unsigned int pending = n_hdrs + n_bufs;
+	unsigned int pending = n_pkts + n_bufs;
 	struct thread *t;
 
 	/*
@@ -252,10 +248,8 @@ bool tx_burst(void)
 		unsigned int idx = pos++ % nrts;
 		t = ts[idx];
 		ret = tx_drain_queue(t, IOKERNEL_TX_BURST_SIZE - pending,
-				     &hdrs[n_hdrs]);
-		for (j = n_hdrs; j < n_hdrs + ret; j++)
-			threads[j] = t;
-		n_hdrs += ret;
+				     &pkts[n_pkts]);
+		n_pkts += ret;
 		stats[TX_PULLED] += ret;
 		pending += ret;
 	}
@@ -266,25 +260,25 @@ bool tx_burst(void)
 full:
 
 	/* allocate mbufs */
-	if (n_hdrs > 0) {
+	if (n_pkts > 0) {
 		ret = rte_mempool_get_bulk(tx_mbuf_pool, (void **)&new_bufs[0],
-					n_hdrs);
+					n_pkts);
 		if (unlikely(ret)) {
-			stats[TX_COMPLETION_FAIL] += n_hdrs;
-			log_warn_ratelimited("tx: error getting %d mbufs from mempool", n_hdrs);
+			stats[TX_COMPLETION_FAIL] += n_pkts;
+			log_warn_ratelimited("tx: error getting %d mbufs from mempool", n_pkts);
 			return true;
 		}
 	}
 
 	/* fill in packet metadata */
 
-	for (i = 0; i < n_hdrs; i++) {
-		tx_prepare_tx_mbuf(new_bufs[i], hdrs[i], threads[i]);
+	for (i = 0; i < n_pkts; i++) {
+		tx_prepare_tx_mbuf(new_bufs[i], &pkts[i]);
 
 		if (dp.loopback_en &&
-		    hdrs[i]->olflags & (TXFLAG_LOCAL | TXFLAG_BROADCAST)) {
+		    pkts[i].cmd.olflags & (TXFLAG_LOCAL | TXFLAG_BROADCAST)) {
 			loopback_bufs[loopback_nr++] = new_bufs[i];
-			if (hdrs[i]->olflags & TXFLAG_BROADCAST) {
+			if (pkts[i].cmd.olflags & TXFLAG_BROADCAST) {
 				rte_mbuf_refcnt_set(new_bufs[i], 2);
 				pending_bufs[n_bufs++] = new_bufs[i];
 			}
@@ -293,7 +287,7 @@ full:
 		}
 	}
 
-	n_hdrs = 0;
+	n_pkts = 0;
 
 	if (loopback_nr) {
 		log_debug("tx: transmitted %d packets on loopback!", loopback_nr);

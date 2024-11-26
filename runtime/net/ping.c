@@ -27,7 +27,7 @@ void net_send_ping(uint16_t seq_num, uint32_t daddr)
 	log_debug("ping: sending ping with id %u, seq_num %u to %u", ping_id,
 			seq_num, daddr);
 
-	m = net_tx_alloc_mbuf();
+	m = net_tx_alloc_mbuf(ip_headroom() + sizeof(struct icmp_hdr));
 	if (unlikely(!m))
 		return;
 

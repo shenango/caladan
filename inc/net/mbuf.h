@@ -30,7 +30,6 @@ struct mbuf {
 
 	union {
 		unsigned int	txflags;  /* TX offload flags */
-		unsigned int	rss_hash; /* RSS 5-tuple hash from HW */
 	};
 
 	unsigned short	network_off;	/* the offset of the network header */

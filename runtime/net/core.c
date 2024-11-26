@@ -125,7 +125,6 @@ static struct mbuf *net_rx_alloc_mbuf(struct rx_net_hdr *hdr)
 	m->len = hdr->len;
 	m->csum_type = hdr->csum_type;
 	m->csum = hdr->csum;
-	m->rss_hash = hdr->rss_hash;
 
 	m->release = (void (*)(struct mbuf *))sfree;
 
@@ -261,6 +260,21 @@ void net_rx_batch(struct mbuf **ms, unsigned int nr)
 	}
 }
 
+struct tx_completion_data {
+	struct mbuf	*m;
+	char		payload[];	/* packet data */
+} __attribute__((__packed__));
+
+static void handle_tx_completion(unsigned long payload)
+{
+	struct tx_completion_data *compl;
+	char *buf;
+
+	buf = shmptr_to_ptr(&netcfg.tx_region, payload, 0);
+	compl = container_of_nocheck(buf, struct tx_completion_data, payload);
+	mbuf_free(compl->m);
+}
+
 static void iokernel_softirq_poll(struct kthread *k)
 {
 	struct rx_net_hdr *hdr;
@@ -286,7 +300,7 @@ static void iokernel_softirq_poll(struct kthread *k)
 			break;
 
 		case RX_NET_COMPLETE:
-			mbuf_free((struct mbuf *)payload);
+			handle_tx_completion(payload);
 			break;
 
 		case RX_REFILL_BUFS:
@@ -336,7 +350,7 @@ void net_tx_release_mbuf(struct mbuf *m)
  *
  * Returns an mbuf, or NULL if out of memory.
  */
-struct mbuf *net_tx_alloc_mbuf(void)
+struct mbuf *net_tx_alloc_mbuf(size_t header_len)
 {
 	struct mbuf *m;
 	unsigned char *buf;
@@ -351,7 +365,9 @@ struct mbuf *net_tx_alloc_mbuf(void)
 	preempt_enable();
 
 	buf = (unsigned char *)m + MBUF_HEAD_LEN;
-	mbuf_init(m, buf, net_get_mtu(), MBUF_DEFAULT_HEADROOM);
+	// Set headroom so completion header is likely not on the same cache
+	// line as the payload.
+	mbuf_init(m, buf, net_get_mtu(), CACHE_LINE_SIZE + header_len);
 	m->csum_type = CHECKSUM_TYPE_NEEDED;
 	m->txflags = 0;
 	m->release_data = 0;
@@ -385,20 +401,23 @@ int __noinline net_tx_drain_overflow(void)
 
 static int net_tx_iokernel(struct mbuf *m)
 {
-	struct kthread *k = myk();
-	unsigned int len = mbuf_length(m);
-	struct tx_net_hdr *hdr;
+	struct tx_completion_data *compl;
+	union txpkt_xmit_cmd cmd;
+	shmptr_t shm;
+
+	cmd.txcmd = TXPKT_NET_XMIT;
+	cmd.len = mbuf_length(m);
+	shm = ptr_to_shmptr(&netcfg.tx_region, mbuf_data(m), cmd.len);
+	cmd.olflags = m->txflags;
 
 	assert_preempt_disabled();
 
-	hdr = mbuf_push_hdr(m, *hdr);
-	hdr->completion_data = (unsigned long)m;
-	hdr->len = len;
-	hdr->olflags = m->txflags;
-	shmptr_t shm = ptr_to_shmptr(&netcfg.tx_region, hdr, len + sizeof(*hdr));
+	/* Record completion information just prior to the payload */
+	compl = mbuf_push_hdr(m, *compl);
+	compl->m = m;
 
-	if (unlikely(!lrpc_send(&k->txpktq, TXPKT_NET_XMIT, shm))) {
-		mbuf_pull_hdr(m, *hdr);
+	if (unlikely(!lrpc_send(&myk()->txpktq, cmd.lrpc_cmd, shm))) {
+		mbuf_pull_hdr(m, *compl);
 		return -1;
 	}
 
@@ -449,7 +468,6 @@ static void net_tx_raw(struct mbuf *m)
 void net_tx_eth(struct mbuf *m, uint16_t type, const struct eth_addr *dhost, bool is_local)
 {
 	struct eth_hdr *eth_hdr;
-
 	eth_hdr = mbuf_push_hdr(m, *eth_hdr);
 	eth_hdr->shost = netcfg.mac;
 	eth_hdr->dhost = *dhost;

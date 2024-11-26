@@ -314,7 +314,6 @@ static struct mbuf *mbuf_fill_cqe(void *dbuf, struct mlx5_cqe64 *cqe,
 	m->len = len;
 	m->csum_type = mlx5_csum_ok(cqe);
 	m->csum = 0;
-	m->rss_hash = mlx5_get_rss_result(cqe);
 	m->release = directpath_strided_rx_completion;
 	m->release_data = num_strides;
 

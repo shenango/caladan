@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <stdint.h>
 #include <base/stddef.h>
 
 /* preamble to ingress network packets */
@@ -15,15 +16,6 @@ struct rx_net_hdr {
 	unsigned int csum;	/* 16-bit one's complement */
 	char	     payload[];	/* packet data */
 };
-
-/* preamble to egress network packets */
-struct tx_net_hdr {
-	unsigned long completion_data; /* a tag to help complete the request */
-	unsigned int len;	/* the length of the payload */
-	unsigned int olflags;	/* offload flags */
-	unsigned short pad;	/* because of 14 byte ethernet header */
-	char	     payload[];	/* packet data */
-} __attribute__((__packed__));
 
 /* possible values for @csum_type above */
 enum {
@@ -71,10 +63,24 @@ enum {
  * These queues are only for network packets and can experience HOL blocking.
  */
 enum {
-	TXPKT_NET_XMIT = 0,	/* points to a struct tx_net_hdr */
-	TXPKT_NR,		/* number of commands */
+	TXPKT_NET_XMIT = 0,     /* points to a struct tx_net_hdr */
+	TXPKT_NR,               /* number of commands */
 };
 
+BUILD_ASSERT(TXPKT_NR <= UINT16_MAX);
+
+union txpkt_xmit_cmd {
+	struct {
+		uint16_t	txcmd;
+		uint16_t	len;
+		uint16_t	olflags;
+		char		pad;
+		char		reserved; // Must not be used (lrpc parity bit).
+	};
+	uint64_t		lrpc_cmd;
+};
+
+BUILD_ASSERT(sizeof(union txpkt_xmit_cmd) == sizeof(uint64_t));
 
 /*
  * TX command queues: RUNTIMES -> IOKERNEL

@@ -4,6 +4,7 @@
 
 #include <string.h>
 
+#include <base/log.h>
 #include <base/stddef.h>
 #include <net/ip.h>
 #include <net/tcp.h>
@@ -16,6 +17,11 @@ static void tcp_tx_release_mbuf(struct mbuf *m)
 {
 	if (atomic_dec_and_test(&m->ref))
 		net_tx_release_mbuf(m);
+}
+
+static inline size_t tcp_headroom(void)
+{
+	return ip_headroom() + sizeof(struct tcp_hdr);
 }
 
 static void __tcp_hdr_chksum(struct tcp_hdr *hdr, uint32_t local_ip,
@@ -82,7 +88,7 @@ int tcp_tx_raw_rst(struct netaddr laddr, struct netaddr raddr, tcp_seq seq)
 	struct mbuf *m;
 	int ret;
 
-	m = net_tx_alloc_mbuf();
+	m = net_tx_alloc_mbuf(tcp_headroom());
 	if (unlikely((!m)))
 		return -ENOMEM;
 
@@ -122,7 +128,7 @@ int tcp_tx_raw_rst_ack(struct netaddr laddr, struct netaddr raddr,
 	struct mbuf *m;
 	int ret;
 
-	m = net_tx_alloc_mbuf();
+	m = net_tx_alloc_mbuf(tcp_headroom());
 	if (unlikely((!m)))
 		return -ENOMEM;
 
@@ -157,7 +163,7 @@ int tcp_tx_ack(tcpconn_t *c)
 	struct mbuf *m;
 	int ret;
 
-	m = net_tx_alloc_mbuf();
+	m = net_tx_alloc_mbuf(tcp_headroom());
 	if (unlikely(!m))
 		return -ENOMEM;
 
@@ -188,7 +194,7 @@ int tcp_tx_probe_window(tcpconn_t *c)
 	struct mbuf *m;
 	int ret;
 
-	m = net_tx_alloc_mbuf();
+	m = net_tx_alloc_mbuf(tcp_headroom());
 	if (unlikely(!m))
 		return -ENOMEM;
 
@@ -204,7 +210,7 @@ int tcp_tx_probe_window(tcpconn_t *c)
 	return ret;
 }
 
-static int tcp_push_options(struct mbuf *m, const struct tcp_options *opts)
+static int tcp_put_options(struct mbuf *m, const struct tcp_options *opts)
 {
 	uint32_t *ptr;
 	int len = 0;
@@ -212,13 +218,13 @@ static int tcp_push_options(struct mbuf *m, const struct tcp_options *opts)
 	/* WARNING: the order matters, as some devices are broken */
 
 	if (opts->opt_en & TCP_OPTION_WSCALE) {
-		ptr = (uint32_t *)mbuf_push(m, sizeof(uint32_t));
+		ptr = (uint32_t *)mbuf_put(m, sizeof(uint32_t));
 		*ptr = hton32((TCP_OPT_NOP << 24) | (TCP_OPT_WSCALE << 16) |
 			      (TCP_OLEN_WSCALE << 8) | opts->wscale);
 		len++;
 	}
 	if (opts->opt_en & TCP_OPTION_MSS) {
-		ptr = (uint32_t *)mbuf_push(m, sizeof(uint32_t));
+		ptr = (uint32_t *)mbuf_put(m, sizeof(uint32_t));
 		*ptr = hton32((TCP_OPT_MSS << 24) | (TCP_OLEN_MSS << 16) |
 			      opts->mss);
 		len++;
@@ -245,7 +251,7 @@ int tcp_tx_ctl(tcpconn_t *c, uint8_t flags, const struct tcp_options *opts)
 
 	BUG_ON(!c->tx_exclusive && !spin_lock_held(&c->lock));
 
-	m = net_tx_alloc_mbuf();
+	m = net_tx_alloc_mbuf(tcp_headroom());
 	if (unlikely(!m))
 		return -ENOMEM;
 
@@ -255,7 +261,7 @@ int tcp_tx_ctl(tcpconn_t *c, uint8_t flags, const struct tcp_options *opts)
 	m->flags = flags;
 
 	if (opts)
-		ret = tcp_push_options(m, opts);
+		ret = tcp_put_options(m, opts);
 	tcp_push_tcphdr(m, c, flags, 5 + ret, 0);
 	store_release(&c->pcb.snd_nxt, c->pcb.snd_nxt + 1);
 	list_add_tail(&c->txq, &m->link);
@@ -311,7 +317,7 @@ ssize_t tcp_tx_send(tcpconn_t *c, const void *buf, size_t len, bool push)
 			seglen = MIN(end - pos, mss - mbuf_length(m));
 			m->seg_end += seglen;
 		} else {
-			m = net_tx_alloc_mbuf();
+			m = net_tx_alloc_mbuf(tcp_headroom());
 			if (unlikely(!m)) {
 				ret = -ENOBUFS;
 				break;
@@ -377,7 +383,7 @@ static int tcp_tx_retransmit_one(tcpconn_t *c, struct mbuf *m)
 	 * in such corner cases.
 	 */
 	if (unlikely(atomic_read(&m->ref) != 1)) {
-		struct mbuf *newm = net_tx_alloc_mbuf();
+		struct mbuf *newm = net_tx_alloc_mbuf(tcp_headroom());
 		if (unlikely(!newm))
 			return -ENOMEM;
 		memcpy(mbuf_put(newm, sizeof(uint32_t) * opts_len + l4len),
