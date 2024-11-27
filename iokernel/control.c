@@ -44,6 +44,8 @@ int data_to_control_efd;
 static struct lrpc_chan_out lrpc_control_to_data;
 static struct lrpc_chan_in lrpc_data_to_control;
 
+static DEFINE_BITMAP(uniq_ids, IOKERNEL_MAX_PROC);
+
 struct iokernel_info *iok_info;
 
 static int epoll_ctl_add(int fd, void *arg)
@@ -318,6 +320,7 @@ static void control_destroy_proc(struct proc *p)
 	if (p->has_vfio_directpath)
 		release_directpath_ctx(p);
 
+	bitmap_clear(uniq_ids, p->uniqid);
 	nr_clients--;
 	munmap(p->region.base, p->region.len);
 	free(p->overflow_queue);
@@ -391,6 +394,9 @@ static void control_add_client(void)
 		goto fail_efd;
 	}
 
+	p->uniqid = bitmap_find_next_cleared(uniq_ids, IOKERNEL_MAX_PROC, 0);
+	BUG_ON(p->uniqid == IOKERNEL_MAX_PROC);
+	bitmap_set(uniq_ids, p->uniqid);
 	nr_clients++;
 	p->control_fd = fd;
 	return;

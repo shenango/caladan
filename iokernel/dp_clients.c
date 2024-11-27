@@ -6,6 +6,7 @@
 
 #include <rte_dev.h>
 #include <rte_ether.h>
+#include <rte_flow.h>
 #include <rte_hash.h>
 #include <rte_jhash.h>
 #include <rte_lcore.h>
@@ -23,6 +24,78 @@ static struct lrpc_chan_in lrpc_control_to_data;
 
 static void dp_clients_remove_client(struct proc *p);
 
+extern struct rte_eth_rss_conf rss_conf;
+extern bool rss_conf_present;
+
+static int dp_clients_setup_flow_tags(struct proc *p)
+{
+	int ret;
+
+	struct rte_flow_action actions[3];
+	struct rte_flow_action_mark mark_action;
+	struct rte_flow_action_rss rss;
+	struct rte_flow_attr attr;
+	struct rte_flow_item pattern[2];
+	struct rte_flow_item_ipv4 ip;
+	struct rte_flow_item_ipv4 ip_mask;
+	uint16_t queue = 0;
+
+	if (!rss_conf_present)
+		return 0;
+
+	memset(&attr, 0, sizeof(attr));
+	attr.ingress = 1;
+
+	memset(&ip, 0, sizeof(ip));
+	ip.hdr.dst_addr = htobe32(p->ip_addr);
+
+	memset(&ip_mask, 0, sizeof(ip_mask));
+	ip_mask.hdr.dst_addr = UINT32_MAX;
+
+	memset(&rss, 0, sizeof(rss));
+	rss.types = rss_conf.rss_hf;
+	rss.key_len = rss_conf.rss_key_len;
+	rss.key = rss_conf.rss_key;
+	rss.queue_num = 1;
+	rss.queue = &queue;
+
+	memset(&mark_action, 0, sizeof(mark_action));
+	mark_action.id = p->uniqid;
+
+	memset(pattern, 0, sizeof(pattern));
+	pattern[0].type = RTE_FLOW_ITEM_TYPE_IPV4;
+	pattern[0].spec = &ip;
+	pattern[0].mask = &ip_mask;
+	pattern[1].type = RTE_FLOW_ITEM_TYPE_END;
+
+	memset(actions, 0, sizeof(actions));
+	actions[0].type = RTE_FLOW_ACTION_TYPE_RSS;
+	actions[0].conf = &rss;
+	actions[1].type = RTE_FLOW_ACTION_TYPE_MARK;
+	actions[1].conf = &mark_action;
+	actions[2].type = RTE_FLOW_ACTION_TYPE_END;
+
+	ret = rte_flow_validate(dp.port, &attr, pattern, actions, NULL);
+	if (unlikely(ret))
+		return ret;
+	p->flow = rte_flow_create(dp.port, &attr, pattern, actions, NULL);
+	if (unlikely(!p->flow))
+		return -1;
+	return 0;
+}
+
+static void dp_clients_destroy_flow_tags(struct proc *p)
+{
+	int ret;
+
+	if (unlikely(!p->flow))
+		return;
+
+	ret = rte_flow_destroy(dp.port, p->flow, NULL);
+	if (unlikely(ret))
+		log_err("dp_clients: failed to remove HW flow rule");
+}
+
 /*
  * Add a new client.
  */
@@ -34,6 +107,7 @@ static void dp_clients_add_client(struct proc *p)
 		p->kill = false;
 		p->dp_clients_idx = dp.nr_clients;
 		dp.clients[dp.nr_clients++] = p;
+		dp.clients_by_id[p->uniqid] = p;
 		if (dp.nr_clients >= 2 && cfg.allow_loopback)
 			dp.loopback_en = true;
 	} else {
@@ -70,6 +144,11 @@ static void dp_clients_add_client(struct proc *p)
 			goto fail_extmem;
 		}
 #pragma GCC diagnostic pop
+
+
+		ret = dp_clients_setup_flow_tags(p);
+		if (ret < 0)
+			log_warn("dp_clients: failed to setup flow tag");
 	}
 
 	if (p->has_vfio_directpath)
@@ -107,6 +186,8 @@ static void dp_clients_remove_client(struct proc *p)
 	dp.clients[p->dp_clients_idx] = dp.clients[--dp.nr_clients];
 	dp.clients[p->dp_clients_idx]->dp_clients_idx = p->dp_clients_idx;
 
+	dp.clients_by_id[p->uniqid] = NULL;
+
 	if (dp.nr_clients < 2)
 		dp.loopback_en = false;
 
@@ -126,6 +207,8 @@ static void dp_clients_remove_client(struct proc *p)
 			ret = rte_extmem_unregister(p->region.base, p->region.len);
 			if (ret < 0)
 				log_err("dp_clients: failed to unregister extmem for client");
+
+			dp_clients_destroy_flow_tags(p);
 		}
 
 	}

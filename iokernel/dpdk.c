@@ -61,6 +61,9 @@ struct pci_addr nic_pci_addr;
 char **dpdk_argv;
 int dpdk_argc;
 
+struct rte_eth_rss_conf rss_conf;
+bool rss_conf_present;
+
 static const struct rte_eth_conf port_conf_default = {
 	.rxmode = {
 		.mtu = IOKERNEL_MTU,
@@ -92,9 +95,6 @@ static inline int dpdk_port_init(uint8_t port, struct rte_mempool *mbuf_pool)
 	int retval;
 	uint16_t q;
 	struct rte_eth_dev_info dev_info;
-#if 0
-	struct rte_eth_rss_conf rss_conf;
-#endif
 	struct rte_eth_txconf *txconf;
 	struct rte_eth_rxconf *rxconf;
 
@@ -196,21 +196,18 @@ static inline int dpdk_port_init(uint8_t port, struct rte_mempool *mbuf_pool)
 
 	/* Enable RX in promiscuous mode for the Ethernet device. */
 	rte_eth_promiscuous_enable(port);
-#if 0
+
 	/* record the RSS hash key */
 	rss_conf.rss_key = iok_info->rss_key;
 	rss_conf.rss_key_len = ARRAY_SIZE(iok_info->rss_key);
-	if (strncmp(dev_info.driver_name, "net_mlx4", 8)) {
-		retval = rte_eth_dev_rss_hash_conf_get(port, &rss_conf);
-		if (retval < 0)
-			return retval;
-
-		if (rss_conf.rss_key_len != ARRAY_SIZE(iok_info->rss_key)) {
-			log_warn("WARNING: unexpected key length %d, advanced flow steering may not work");
-		}
+	retval = rte_eth_dev_rss_hash_conf_get(port, &rss_conf);
+	if (retval == 0) {
+		rss_conf_present = true;
+		if (rss_conf.rss_key_len != ARRAY_SIZE(iok_info->rss_key))
+			log_warn("WARNING: unexpected RSS key size");
+	} else if (!is_tap) {
+		log_warn("Couldn't query RSS parameters");
 	}
-#endif
-
 	return 0;
 }
 

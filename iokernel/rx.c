@@ -117,7 +117,7 @@ static bool azure_arp_response(struct rte_mbuf *buf)
 
 static void rx_one_pkt(struct rte_mbuf *buf)
 {
-	int ret;
+	int ret, mark_id;
 	struct proc *p;
 	struct rte_arp_hdr *arphdr;
 	struct rte_ether_hdr *ptr_mac_hdr;
@@ -125,6 +125,20 @@ static void rx_one_pkt(struct rte_mbuf *buf)
 	struct rte_ipv4_hdr *iphdr;
 	uint16_t ether_type;
 	uint32_t dst_ip;
+
+	/* use hardware assisted flow tagging to match packets to procs */
+	if (buf->ol_flags & RTE_MBUF_F_RX_FDIR_ID) {
+		mark_id = buf->hash.fdir.hi;
+		assert(mark_id >= 0 && mark_id < IOKERNEL_MAX_PROC);
+		p = dp.clients_by_id[mark_id];
+		if (likely(p)) {
+			if (!rx_send_pkt_to_runtime(p, buf)) {
+				STAT_INC(RX_UNICAST_FAIL, 1);
+				goto fail_free;
+			}
+			return;
+		}
+	}
 
 	ptr_mac_hdr = rte_pktmbuf_mtod(buf, struct rte_ether_hdr *);
 	ptr_dst_addr = &ptr_mac_hdr->dst_addr;

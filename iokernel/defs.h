@@ -187,18 +187,20 @@ struct proc {
 	float			load;
 	struct runtime_info	*runtime_info;
 
+	struct shm_region	region;
+
 	/* runtime threads */
 	struct list_head	idle_threads;
 	struct thread		threads[NCPU];
 	uint16_t		last_core[NCPU];
 
 	/* COLD */
-	uint16_t 	dp_clients_idx;
+	uint16_t	dp_clients_idx;
+	uint16_t	uniqid;
 
 	/* network data */
 	uint32_t		ip_addr;
-
-	struct shm_region	region;
+	struct rte_flow 		*flow;
 
 	/* Overfloq queue for completion data */
 	size_t max_overflows;
@@ -347,14 +349,14 @@ struct dataplane {
 	struct shm_region	ingress_mbuf_region;
 
 	uint16_t			nr_clients;
-	struct proc		*clients[IOKERNEL_MAX_PROC];
 	struct rte_hash		*ip_to_proc;
+	struct proc		*clients_by_id[IOKERNEL_MAX_PROC];
+	struct proc		*clients[IOKERNEL_MAX_PROC];
 	struct rte_device	*device;
 };
 
 extern struct dataplane dp;
 extern struct iokernel_info *iok_info;
-
 
 /*
  * Logical cores assigned to linux and the control and dataplane threads
