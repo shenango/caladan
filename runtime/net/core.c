@@ -94,42 +94,51 @@ static uint32_t compute_flow_affinity(uint8_t ipproto, uint16_t local_port, stru
 	return ret % (uint32_t)maxks;
 }
 
-static void net_rx_send_completion(unsigned long completion_data)
+static void net_rx_send_completion(shmptr_t data, uint16_t data_offset)
 {
+
 	struct kthread *k;
 
+	union txcmdq_cmd cmd;
+	cmd.reserved = 0;
+	cmd.data_offset = data_offset;
+	cmd.txcmd = TXCMD_NET_COMPLETE;
+
 	k = getk();
-	if (unlikely(!lrpc_send(&k->txcmdq, TXCMD_NET_COMPLETE,
-				completion_data))) {
+	if (unlikely(!lrpc_send(&k->txcmdq, cmd.lrpc_cmd, data))) {
 		WARN();
 	}
 	putk();
 }
 
-static struct mbuf *net_rx_alloc_mbuf(struct rx_net_hdr *hdr)
+
+
+static struct mbuf *net_rx_alloc_mbuf(shmptr_t data, union rxq_cmd cmd)
 {
 	struct mbuf *m;
 	void *buf;
+	const void *src_buf;
+
+	src_buf = shmptr_to_ptr(&netcfg.rx_region, data, cmd.len);
 
 	/* allocate the buffer to store the payload */
-	m = smalloc(hdr->len + MBUF_HEAD_LEN);
+	m = smalloc(cmd.len + MBUF_HEAD_LEN);
 	if (unlikely(!m))
 		goto out;
 
 	buf = (unsigned char *)m + MBUF_HEAD_LEN;
 
 	/* copy the payload and release the buffer back to the iokernel */
-	memcpy(buf, hdr->payload, hdr->len);
+	memcpy(buf, src_buf, cmd.len);
 
-	mbuf_init(m, buf, hdr->len, 0);
-	m->len = hdr->len;
-	m->csum_type = hdr->csum_type;
-	m->csum = hdr->csum;
+	mbuf_init(m, buf, cmd.len, 0);
+	m->len = cmd.len;
+	m->csum_type = cmd.csum_type;
 
 	m->release = (void (*)(struct mbuf *))sfree;
 
 out:
-	net_rx_send_completion(hdr->completion_data);
+	net_rx_send_completion(data, cmd.data_offset);
 	return m;
 }
 
@@ -277,21 +286,17 @@ static void handle_tx_completion(unsigned long payload)
 
 static void iokernel_softirq_poll(struct kthread *k)
 {
-	struct rx_net_hdr *hdr;
 	struct mbuf *m;
-	uint64_t cmd;
+	union rxq_cmd cmd;
 	unsigned long payload;
 
 	while (true) {
-		if (!lrpc_recv(&k->rxq, &cmd, &payload))
+		if (!lrpc_recv(&k->rxq, &cmd.lrpc_cmd, &payload))
 			break;
 
-		switch (cmd) {
+		switch (cmd.rxcmd) {
 		case RX_NET_RECV:
-			hdr = shmptr_to_ptr(&netcfg.rx_region,
-					    (shmptr_t)payload,
-					    MBUF_DEFAULT_LEN);
-			m = net_rx_alloc_mbuf(hdr);
+			m = net_rx_alloc_mbuf(payload, cmd);
 			if (unlikely(!m)) {
 				STAT(DROPS)++;
 				continue;
@@ -309,7 +314,7 @@ static void iokernel_softirq_poll(struct kthread *k)
 			break;
 
 		default:
-			panic("net: invalid RXQ cmd '%ld'", cmd);
+			panic("net: invalid RXQ cmd '%hu'", cmd.rxcmd);
 		}
 	}
 }

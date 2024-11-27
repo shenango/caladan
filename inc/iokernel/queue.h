@@ -36,6 +36,8 @@ enum {
 	 * even if the NIC can't parse the headers.
 	 */
 	CHECKSUM_TYPE_COMPLETE,
+
+	CHECKSUM_TYPE_NR,
 };
 
 /* possible values for @olflags above */
@@ -56,6 +58,21 @@ enum {
 	RX_REFILL_BUFS,		/* runtime should replenish RX work queues */
 	RX_CALL_NR,		/* number of commands */
 };
+
+BUILD_ASSERT(RX_CALL_NR <= UINT16_MAX);
+
+union rxq_cmd {
+	struct {
+		uint16_t	rxcmd;
+		uint16_t	len;
+		uint16_t	data_offset;
+		uint16_t	csum_type; // top bit must be 0.
+	};
+	uint64_t		lrpc_cmd;
+};
+
+BUILD_ASSERT(CHECKSUM_TYPE_NR < INT16_MAX);
+BUILD_ASSERT(sizeof(union rxq_cmd) == sizeof(uint64_t));
 
 
 /*
@@ -91,3 +108,16 @@ enum {
 	TXCMD_NET_COMPLETE = 0,	/* contains rx_net_hdr.completion_data */
 	TXCMD_NR,		/* number of commands */
 };
+
+BUILD_ASSERT(TXCMD_NR <= UINT16_MAX);
+
+union txcmdq_cmd {
+	struct {
+		uint16_t	txcmd;
+		uint16_t	data_offset;
+		uint32_t	reserved; // Upper bit must be zero.
+	};
+	uint64_t		lrpc_cmd;
+};
+
+BUILD_ASSERT(sizeof(union txcmdq_cmd) == sizeof(uint64_t));

@@ -651,7 +651,9 @@ static void sched_measure_delay(struct proc *p)
 
 		if (posted_strides && posted_strides >= consumed_strides &&
 		    posted_strides - consumed_strides < DIRECTPATH_STRIDE_REFILL_THRESH_HI) {
-			rx_send_to_runtime(p, 0, RX_REFILL_BUFS, 0);
+			union rxq_cmd cmd = {0};
+			cmd.rxcmd = RX_REFILL_BUFS;
+			rx_send_to_runtime(p, 0, cmd.lrpc_cmd, 0);
 			STAT_INC(RX_REFILL, 1);
 			dl.has_work = true;
 			dl.parked_thread_busy |= sched_threads_active(p) == 0;

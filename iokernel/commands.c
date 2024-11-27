@@ -15,15 +15,16 @@ static int commands_drain_queue(struct thread *t, struct rte_mbuf **bufs, int n)
 	int i, n_bufs = 0;
 
 	for (i = 0; i < n; i++) {
-		uint64_t cmd;
+		union txcmdq_cmd cmd;
 		unsigned long payload;
 
-		if (!lrpc_recv(&t->txcmdq, &cmd, &payload))
+		if (!lrpc_recv(&t->txcmdq, &cmd.lrpc_cmd, &payload))
 			break;
 
-		switch (cmd) {
+		switch (cmd.txcmd) {
 		case TXCMD_NET_COMPLETE:
-			bufs[n_bufs++] = (struct rte_mbuf *)payload;
+			void *data = shmptr_to_ptr(&dp.ingress_mbuf_region, payload, 0);
+			bufs[n_bufs++] = (struct rte_mbuf *)(data - cmd.data_offset);
 			/* TODO: validate pointer @buf */
 			break;
 

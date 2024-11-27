@@ -23,26 +23,28 @@
 /*
  * Prepend rx_net_hdr preamble to ingress packets.
  */
-static struct rx_net_hdr *rx_prepend_rx_preamble(struct rte_mbuf *buf)
+
+static union rxq_cmd rx_make_cmd(struct rte_mbuf *buf)
 {
-	struct rx_net_hdr *net_hdr;
+	union rxq_cmd cmd;
 	uint64_t masked_ol_flags;
+	uint64_t data_offset;
 
-	net_hdr = (struct rx_net_hdr *) rte_pktmbuf_prepend(buf,
-			(uint16_t) sizeof(*net_hdr));
-	RTE_ASSERT(net_hdr != NULL);
+	data_offset = rte_pktmbuf_mtod(buf, uintptr_t);
+	BUG_ON(data_offset <= (uintptr_t)buf);
+	data_offset -= (uintptr_t)buf;
+	BUG_ON(data_offset >= UINT16_MAX);
 
-	net_hdr->completion_data = (unsigned long)buf;
-	net_hdr->len = rte_pktmbuf_pkt_len(buf) - sizeof(*net_hdr);
-	net_hdr->rss_hash = buf->hash.rss;
+	cmd.len = rte_pktmbuf_pkt_len(buf);
+	cmd.rxcmd = RX_NET_RECV;
 	masked_ol_flags = buf->ol_flags & RTE_MBUF_F_RX_IP_CKSUM_MASK;
 	if (masked_ol_flags == RTE_MBUF_F_RX_IP_CKSUM_GOOD)
-		net_hdr->csum_type = CHECKSUM_TYPE_UNNECESSARY;
+		cmd.csum_type = CHECKSUM_TYPE_UNNECESSARY;
 	else
-		net_hdr->csum_type = CHECKSUM_TYPE_NEEDED;
-	net_hdr->csum = 0; /* unused for now */
+		cmd.csum_type = CHECKSUM_TYPE_NEEDED;
+	cmd.data_offset = data_offset;
 
-	return net_hdr;
+	return cmd;
 }
 
 /**
@@ -81,12 +83,14 @@ bool rx_send_to_runtime(struct proc *p, uint32_t hash, uint64_t cmd,
 }
 
 
-static bool rx_send_pkt_to_runtime(struct proc *p, struct rx_net_hdr *hdr)
+static bool rx_send_pkt_to_runtime(struct proc *p, struct rte_mbuf *buf)
 {
 	shmptr_t shmptr;
+	union rxq_cmd cmd = rx_make_cmd(buf);
+	void *data = rte_pktmbuf_mtod(buf, void *);
 
-	shmptr = ptr_to_shmptr(&dp.ingress_mbuf_region, hdr, sizeof(*hdr));
-	return rx_send_to_runtime(p, hdr->rss_hash, RX_NET_RECV, shmptr);
+	shmptr = ptr_to_shmptr(&dp.ingress_mbuf_region, data, cmd.len);
+	return rx_send_to_runtime(p, buf->hash.rss, cmd.lrpc_cmd, shmptr);
 }
 
 static bool azure_arp_response(struct rte_mbuf *buf)
@@ -119,7 +123,6 @@ static void rx_one_pkt(struct rte_mbuf *buf)
 	struct rte_ether_hdr *ptr_mac_hdr;
 	struct rte_ether_addr *ptr_dst_addr;
 	struct rte_ipv4_hdr *iphdr;
-	struct rx_net_hdr *net_hdr;
 	uint16_t ether_type;
 	uint32_t dst_ip;
 
@@ -148,9 +151,8 @@ static void rx_one_pkt(struct rte_mbuf *buf)
 		    arphdr->arp_opcode == rte_cpu_to_be_16(RTE_ARP_OP_REPLY)) {
 			bool success;
 			int n_sent = 0;
-			net_hdr = rx_prepend_rx_preamble(buf);
 			for (int i = 0; i < dp.nr_clients; i++) {
-				success = rx_send_pkt_to_runtime(dp.clients[i], net_hdr);
+				success = rx_send_pkt_to_runtime(dp.clients[i], buf);
 				if (success) {
 					n_sent++;
 				} else {
@@ -183,8 +185,7 @@ static void rx_one_pkt(struct rte_mbuf *buf)
 		goto fail_free;
 	}
 
-	net_hdr = rx_prepend_rx_preamble(buf);
-	if (!rx_send_pkt_to_runtime(p, net_hdr)) {
+	if (!rx_send_pkt_to_runtime(p, buf)) {
 		STAT_INC(RX_UNICAST_FAIL, 1);
 		goto fail_free;
 	}
