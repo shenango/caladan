@@ -410,6 +410,7 @@ static int net_tx_iokernel(struct mbuf *m)
 	union txpkt_xmit_cmd cmd;
 	shmptr_t shm;
 
+	cmd.reserved = 0;
 	cmd.txcmd = TXPKT_NET_XMIT;
 	cmd.len = mbuf_length(m);
 	shm = ptr_to_shmptr(&netcfg.tx_region, mbuf_data(m), cmd.len);
