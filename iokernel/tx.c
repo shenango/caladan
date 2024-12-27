@@ -56,8 +56,19 @@ static void tx_prepare_tx_mbuf(struct rte_mbuf *buf, struct pkt *pkt)
 
 	/* initialize mbuf to point to net_hdr->payload */
 	buf->buf_addr = pkt->buffer;
-	page_number = PGN_2MB((uintptr_t)buf->buf_addr - (uintptr_t)p->region.base);
-	buf->buf_iova = p->page_paddrs[page_number] + PGOFF_2MB(buf->buf_addr);
+
+	if (!dp.iova_mode_pa)
+		buf->buf_iova = (rte_iova_t)pkt->buffer;
+	else if (p->uses_hugepages) {
+		page_number = PGN_2MB(buf->buf_addr - p->region.base);
+		buf->buf_iova = p->page_paddrs[page_number];
+		buf->buf_iova += PGOFF_2MB(buf->buf_addr);
+	} else {
+		page_number = PGN_4KB(buf->buf_addr - p->region.base);
+		buf->buf_iova = p->page_paddrs[page_number];
+		buf->buf_iova += PGOFF_4KB(buf->buf_addr);
+	}
+
 	buf->data_off = 0;
 	rte_mbuf_refcnt_set(buf, 1);
 

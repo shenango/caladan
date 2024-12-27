@@ -174,6 +174,7 @@ struct proc {
 	unsigned int		removed:1;
 	unsigned int		started:1;
 	unsigned int		has_storage:1;
+	unsigned int		uses_hugepages:1;
 	unsigned long		policy_data;
 	unsigned long		directpath_data;
 	uint64_t		next_poll_tsc;
@@ -226,6 +227,11 @@ struct proc {
 extern void proc_timer_add(struct proc *p, uint64_t next_poll_tsc);
 extern void proc_timer_run(uint64_t now);
 extern uint64_t timer_pos;
+
+static inline size_t proc_pgsize(struct proc *p)
+{
+	return p->uses_hugepages ? PGSIZE_2MB : PGSIZE_4KB;
+}
 
 extern struct list_head poll_list;
 
@@ -345,6 +351,7 @@ enum {
 struct dataplane {
 	uint8_t			port;
 	bool			loopback_en;
+	bool			iova_mode_pa;
 	struct rte_mempool	*rx_mbuf_pool;
 	struct shm_region	ingress_mbuf_region;
 
@@ -468,6 +475,10 @@ extern void rx_loopback(struct rte_mbuf **bufs, int n_bufs);
 extern void dp_clients_rx_control_lrpcs(void);
 extern bool commands_rx(void);
 extern void dpdk_print_eth_stats(void);
+extern int do_dpdk_dma_map(void *buf, size_t len, size_t pgsize,
+	uintptr_t *physaddrs);
+extern void do_dpdk_dma_unmap(void *buf, size_t len, size_t pgsize,
+	uintptr_t *physaddrs);
 
 /*
  * vfio directpath functions

@@ -16,6 +16,8 @@
 #include "defs.h"
 #include "sched.h"
 
+#include <sys/mman.h>
+
 #define MBUF_CACHE_SIZE 250
 #define RX_PREFETCH_STRIDE 2
 
@@ -289,9 +291,9 @@ static struct rte_mempool *rx_pktmbuf_pool_create_in_shm(const char *name,
 	unsigned elt_size;
 	struct rte_pktmbuf_pool_private mbp_priv = {0};
 	struct rte_mempool *mp;
-	int ret, heap_id;
+	int ret;
 	size_t pg_size, pg_shift, min_chunk_size, align, len;
-	void *shbuf, *heap_area;
+	void *shbuf;
 
 	/* create rte_mempool */
 	if (RTE_ALIGN(priv_size, RTE_MBUF_PRIV_ALIGN) != priv_size) {
@@ -316,7 +318,7 @@ static struct rte_mempool *rx_pktmbuf_pool_create_in_shm(const char *name,
 	rte_pktmbuf_pool_init(mp, &mbp_priv);
 
 	/* check necessary size and map shared memory */
-	pg_size = PGSIZE_2MB;
+	pg_size = cfg.no_hugepages ? PGSIZE_4KB : PGSIZE_2MB;
 	pg_shift = rte_bsf32(pg_size);
 	len = rte_mempool_ops_calc_mem_size(mp, n, pg_shift, &min_chunk_size, &align);
 	if (len > INGRESS_MBUF_SHM_SIZE) {
@@ -325,42 +327,34 @@ static struct rte_mempool *rx_pktmbuf_pool_create_in_shm(const char *name,
 	}
 
 	shbuf = dp.ingress_mbuf_region.base;
+	len = align_up(len, pg_size);
 
-	/* hack to make sure that this memory area is registered in DPDK */
-	/* use rte_extmem_* and rte_dev_dma_map in the future */
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-	ret = rte_malloc_heap_create("rx_buf_heap");
-	if (ret < 0)
-		goto fail_unmap_memory;
+	if (cfg.no_hugepages) {
+		ret = mlock(shbuf, len);
+		if (unlikely(ret)) {
+			log_err("failed to mlock rx area: %s", strerror(errno));
+			goto fail_free_mempool;
+		}
+	}
 
-	ret = rte_malloc_heap_memory_add("rx_buf_heap", shbuf, INGRESS_MBUF_SHM_SIZE, NULL, 0, PGSIZE_2MB);
-	if (ret < 0)
-		goto fail_unmap_memory;
-
-	heap_id = rte_malloc_heap_get_socket("rx_buf_heap");
-	if (heap_id < 0)
-		goto fail_unmap_memory;
-#pragma GCC diagnostic pop
-
-	heap_area = rte_malloc_socket(NULL, len, PGSIZE_2MB, heap_id);
-	if (!heap_area)
-		goto fail_unmap_memory;
+	ret = do_dpdk_dma_map(shbuf, len, pg_size, NULL);
+	if (ret)
+		goto fail_free_mempool;
 
 	/* populate mempool using shared memory */
-	ret = rte_mempool_populate_virt(mp, heap_area, len, pg_size,
-			rx_mempool_memchunk_free, heap_area);
+	ret = rte_mempool_populate_virt(mp, shbuf, len, pg_size,
+			rx_mempool_memchunk_free, shbuf);
 	if (ret < 0) {
 		log_err("rx: error populating mempool %d", ret);
-		goto fail_unmap_memory;
+		goto fail_unmap_dma;
 	}
 
 	rte_mempool_obj_iter(mp, rte_pktmbuf_init, NULL);
 
 	return mp;
 
-fail_unmap_memory:
-	mem_unmap_shm(shbuf);
+fail_unmap_dma:
+	do_dpdk_dma_unmap(shbuf, len, pg_size, NULL);
 fail_free_mempool:
 	rte_mempool_free(mp);
 fail:

@@ -64,6 +64,8 @@ int dpdk_argc;
 struct rte_eth_rss_conf rss_conf;
 bool rss_conf_present;
 
+#define DPDK_PORT 0
+
 static const struct rte_eth_conf port_conf_default = {
 	.rxmode = {
 		.mtu = IOKERNEL_MTU,
@@ -98,12 +100,8 @@ static inline int dpdk_port_init(uint8_t port, struct rte_mempool *mbuf_pool)
 	struct rte_eth_txconf *txconf;
 	struct rte_eth_rxconf *rxconf;
 
-	if (!rte_eth_dev_is_valid_port(port))
-		return -1;
-
 	/* Get default device configuration */
 	rte_eth_dev_info_get(port, &dev_info);
-	dp.device = dev_info.device;
 	rxconf = &dev_info.default_rxconf;
 	rxconf->rx_free_thresh = 64;
 
@@ -241,6 +239,7 @@ int dpdk_init(void)
 	unsigned int max_args;
 	char buf[10], **argv;
 	int i, ret, argc = 0;
+	struct rte_eth_dev_info dev_info;
 
 	max_args = 7 + dpdk_argc;
 	argv = malloc(max_args * sizeof(char *));
@@ -294,7 +293,7 @@ int dpdk_init(void)
 	}
 
 	/* check that there is a port to send/receive on */
-	if (!cfg.vfio_directpath && !rte_eth_dev_is_valid_port(0)) {
+	if (!cfg.vfio_directpath && !rte_eth_dev_is_valid_port(DPDK_PORT)) {
 		log_err("dpdk: no available ports");
 		return -1;
 	}
@@ -302,7 +301,102 @@ int dpdk_init(void)
 	if (rte_lcore_count() > 1)
 		log_warn("dpdk: too many lcores enabled, only 1 used");
 
+	if (!cfg.vfio_directpath) {
+		dp.port = DPDK_PORT;
+		rte_eth_dev_info_get(DPDK_PORT, &dev_info);
+		dp.device = dev_info.device;
+		dp.iova_mode_pa = rte_eal_iova_mode() == RTE_IOVA_PA;
+	}
+
+
 	return 0;
+}
+
+int do_dpdk_dma_map(void *buf, size_t len, size_t pgsize, uintptr_t *physaddrs)
+{
+	int ret;
+	rte_iova_t iova;
+	size_t i, nr_pages;
+	void *pg;
+
+	ret = rte_extmem_register(buf, len, NULL, 0, pgsize);
+	if (unlikely(ret < 0)) {
+		log_err("failed to register extmem %s", strerror(rte_errno));
+		return -rte_errno;
+	}
+
+	if (!dp.iova_mode_pa) {
+		// In IOVA VA mode, IOVAs are equal to VAs.
+		ret = rte_dev_dma_map(dp.device, buf, (rte_iova_t)buf, len);
+		if (unlikely(ret < 0)) {
+			if (rte_errno == EOPNOTSUPP)
+				return 0;
+			ret = -rte_errno;
+			goto fail_dma_map;
+		}
+		return 0;
+	}
+
+	// In PA mode, IOVAs are equal to PA and are not contiguous.
+	nr_pages = div_up(len, pgsize);
+	for (i = 0; i < nr_pages; i++) {
+		pg = buf + i * pgsize;
+		iova = physaddrs ? physaddrs[i] : rte_mem_virt2iova(pg);
+		ret = rte_dev_dma_map(dp.device, pg, iova, pgsize);
+		if (unlikely(ret < 0)) {
+			if (rte_errno == EOPNOTSUPP)
+				break;
+			ret = -rte_errno;
+			for (size_t j = 0; j < i; j++) {
+				pg = buf + j * pgsize;
+				iova = physaddrs ? physaddrs[j] : rte_mem_virt2iova(pg);
+				rte_dev_dma_unmap(dp.device, pg, iova, pgsize);
+			}
+			goto fail_dma_map;
+		}
+	}
+
+	return 0;
+
+fail_dma_map:
+	rte_extmem_unregister(buf, len);
+	log_err("failed to map DMA memory: %s", strerror(-ret));
+	assert(ret);
+	return ret;
+}
+
+void do_dpdk_dma_unmap(void *buf, size_t len, size_t pgsize, uintptr_t *physaddrs)
+{
+	int ret;
+	rte_iova_t iova;
+	size_t i, nr_pages;
+	void *pg;
+
+	if (!dp.iova_mode_pa) {
+		// In IOVA VA mode, IOVAs are equal to VAs.
+		ret = rte_dev_dma_unmap(dp.device, buf, (rte_iova_t)buf, len);
+		if (unlikely(ret < 0 && rte_errno != EOPNOTSUPP))
+			log_err("failed dma unmap %s", strerror(rte_errno));
+		goto deregister;
+	}
+
+	// In PA mode, IOVAs are equal to PA and are not contiguous.
+	nr_pages = div_up(len, pgsize);
+	for (i = 0; i < nr_pages; i++) {
+		pg = buf + i * pgsize;
+		iova = physaddrs ? physaddrs[i] : rte_mem_virt2iova(pg);
+		ret = rte_dev_dma_unmap(dp.device, pg, iova, pgsize);
+		if (ret < 0) {
+			if (rte_errno != EOPNOTSUPP)
+				log_err("failed dma unmap %s", strerror(rte_errno));
+			goto deregister;
+		}
+	}
+
+deregister:
+	ret = rte_extmem_unregister(buf, len);
+	if (unlikely(ret < 0))
+		log_err("failed to unregister extmem %s", strerror(rte_errno));
 }
 
 /*
@@ -315,7 +409,6 @@ int dpdk_late_init(void)
 		return 0;
 
 	/* initialize port */
-	dp.port = 0;
 	if (dpdk_port_init(dp.port, dp.rx_mbuf_pool) != 0) {
 		log_err("dpdk: cannot init port %"PRIu8 "\n", dp.port);
 		return -1;

@@ -13,6 +13,7 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/mman.h>
 #include <sys/un.h>
 #include <unistd.h>
 #include <sys/mman.h>
@@ -167,6 +168,38 @@ static int control_init_hwq(struct shm_region *r,
 	return 0;
 }
 
+static int control_setup_proc_dataplane(struct proc *p)
+{
+	int ret;
+	void *base = p->region.base;
+	size_t len = p->region.len;
+
+	if (proc_pgsize(p) < PGSIZE_2MB) {
+		ret = mlock(base, len);
+		if (unlikely(ret)) {
+			log_err("can't mlock proc memory: %s", strerror(errno));
+			return -errno;
+		}
+	} else {
+		touch_mapping(base, len, proc_pgsize(p));
+	}
+
+	if (dp.iova_mode_pa) {
+		/* initialize the table of physical page addresses */
+		ret = mem_lookup_page_phys_addrs(base, len,proc_pgsize(p),
+				p->page_paddrs);
+		if (ret) {
+			log_err("control: failed to lookup phys addrs");
+			return ret;
+		}
+	}
+
+	p->overflow_queue = malloc(sizeof(unsigned long) * p->max_overflows);
+	if (p->overflow_queue == NULL)
+		return -ENOMEM;
+	return 0;
+}
+
 static struct proc *control_create_proc(int mem_fd, size_t len,
 		 pid_t pid)
 {
@@ -183,6 +216,7 @@ static struct proc *control_create_proc(int mem_fd, size_t len,
 		goto fail;
 
 	shbuf = mmap(NULL, len, PROT_READ|PROT_WRITE, MAP_SHARED, mem_fd, 0);
+	close(mem_fd);
 	if (shbuf == MAP_FAILED)
 		goto fail;
 	reg.base = shbuf;
@@ -205,7 +239,9 @@ static struct proc *control_create_proc(int mem_fd, size_t len,
 		goto fail;
 
 	/* create the process */
-	nr_pages = div_up(len, PGSIZE_2MB);
+	nr_pages = 0;
+	if (!cfg.vfio_directpath && dp.iova_mode_pa)
+		nr_pages = div_up(len, hdr.shared_reg_page_size);
 	p = malloc(sizeof(*p) + nr_pages * sizeof(physaddr_t));
 	if (!p)
 		goto fail;
@@ -217,6 +253,9 @@ static struct proc *control_create_proc(int mem_fd, size_t len,
 	p->removed = false;
 	p->sched_cfg = hdr.sched_cfg;
 	p->thread_count = hdr.thread_count;
+	p->uses_hugepages = hdr.shared_reg_page_size == PGSIZE_2MB;
+	p->max_overflows = hdr.egress_buf_count;
+
 	if (!hdr.ip_addr)
 		goto fail;
 	p->ip_addr = hdr.ip_addr;
@@ -279,31 +318,16 @@ static struct proc *control_create_proc(int mem_fd, size_t len,
 		goto fail;
 	}
 
-	/* initialize the table of physical page addresses */
 	if (!cfg.vfio_directpath) {
-		touch_mapping(p->region.base, p->region.len, hdr.shared_reg_page_size);
-		ret = mem_lookup_page_phys_addrs(p->region.base, p->region.len, hdr.shared_reg_page_size,
-				p->page_paddrs);
-		if (ret) {
-			log_err("control: failed to lookup phys addrs");
-			goto fail;
-		}
-
-		p->max_overflows = hdr.egress_buf_count;
-		p->nr_overflows = 0;
-		p->overflow_queue = malloc(sizeof(unsigned long) * p->max_overflows);
-		if (p->overflow_queue == NULL)
+		ret = control_setup_proc_dataplane(p);
+		if (ret)
 			goto fail;
 	}
 
-	/* free temporary allocations */
 	free(threads);
-	close(mem_fd);
-
 	return p;
 
 fail:
-	close(mem_fd);
 	if (p)
 		free(p->overflow_queue);
 	free(threads);

@@ -130,21 +130,12 @@ static void dp_clients_add_client(struct proc *p)
 	}
 
 	if (!p->has_directpath) {
-		ret = rte_extmem_register(p->region.base, p->region.len, NULL, 0, PGSIZE_2MB);
+		ret = do_dpdk_dma_map(p->region.base, p->region.len,
+			              proc_pgsize(p), p->page_paddrs);
 		if (ret < 0) {
-			log_err("dp_clients: failed to register extmem for client");
+			log_err("dp_clients: failed to do dma map");
 			goto fail;
 		}
-
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-		ret = rte_dev_dma_map(dp.device, p->region.base, 0, p->region.len);
-		if (ret < 0) {
-			log_err("dp_clients: failed to map DMA memory for client");
-			goto fail_extmem;
-		}
-#pragma GCC diagnostic pop
-
 
 		ret = dp_clients_setup_flow_tags(p);
 		if (ret < 0)
@@ -156,8 +147,6 @@ static void dp_clients_add_client(struct proc *p)
 
 	return;
 
-fail_extmem:
-	rte_extmem_unregister(p->region.base, p->region.len);
 fail:
 	p->attach_fail = true;
 	dp_clients_remove_client(p);
@@ -198,19 +187,10 @@ static void dp_clients_remove_client(struct proc *p)
 
 	if (!p->has_directpath) {
 		if (!p->attach_fail) {
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-			ret = rte_dev_dma_unmap(dp.device, p->region.base, 0, p->region.len);
-			if (ret < 0)
-				log_err("dp_clients: failed to unmap DMA memory for client");
-#pragma GCC diagnostic pop
-			ret = rte_extmem_unregister(p->region.base, p->region.len);
-			if (ret < 0)
-				log_err("dp_clients: failed to unregister extmem for client");
-
+			do_dpdk_dma_unmap(p->region.base, p->region.len,
+				          proc_pgsize(p), p->page_paddrs);
 			dp_clients_destroy_flow_tags(p);
 		}
-
 	}
 
 	if (p->nr_overflows)
