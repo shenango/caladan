@@ -339,7 +339,7 @@ static struct rte_mempool *tx_pktmbuf_completion_pool_create(const char *name,
 		unsigned n, uint16_t priv_size, int socket_id)
 {
 	struct rte_mempool *mp;
-	struct rte_pktmbuf_pool_private mbp_priv;
+	struct rte_pktmbuf_pool_private mbp_priv = {0};
 	unsigned elt_size;
 	int ret;
 
