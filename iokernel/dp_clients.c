@@ -2,6 +2,7 @@
  * dp_clients.c - functions for registering/unregistering dataplane clients
  */
 
+#include <signal.h>
 #include <unistd.h>
 
 #include <rte_dev.h>
@@ -21,8 +22,6 @@
 
 static struct lrpc_chan_out lrpc_data_to_control;
 static struct lrpc_chan_in lrpc_control_to_data;
-
-static void dp_clients_remove_client(struct proc *p);
 
 extern struct rte_eth_rss_conf rss_conf;
 extern bool rss_conf_present;
@@ -104,7 +103,6 @@ static void dp_clients_add_client(struct proc *p)
 	int ret;
 
 	if (!sched_attach_proc(p)) {
-		p->kill = false;
 		p->dp_clients_idx = dp.nr_clients;
 		dp.clients[dp.nr_clients++] = p;
 		dp.clients_by_id[p->uniqid] = p;
@@ -113,6 +111,7 @@ static void dp_clients_add_client(struct proc *p)
 	} else {
 		log_err("dp_clients: failed to attach proc.");
 		p->attach_fail = true;
+		kill(p->pid, SIGKILL);
 		proc_put(p);
 		return;
 	}
@@ -120,6 +119,7 @@ static void dp_clients_add_client(struct proc *p)
 	ret = rte_hash_lookup(dp.ip_to_proc, &p->ip_addr);
 	if (ret != -ENOENT) {
 		log_err("Duplicate IP address detected.");
+		p->attach_fail_dup = true;
 		goto fail;
 	}
 
@@ -139,7 +139,7 @@ static void dp_clients_add_client(struct proc *p)
 
 		ret = dp_clients_setup_flow_tags(p);
 		if (ret < 0)
-			log_warn("dp_clients: failed to setup flow tag");
+			log_warn_once("dp_clients: flow tags unavailable");
 	}
 
 	if (p->has_vfio_directpath)
@@ -168,9 +168,15 @@ void proc_release(struct ref *r)
  * Remove a client. Notify control plane once removal is complete so that it
  * can delete its data structures.
  */
-static void dp_clients_remove_client(struct proc *p)
+void dp_clients_remove_client(struct proc *p)
 {
 	int ret;
+	struct rx_priv_data *pdata;
+
+	// make sure we run once (could be instructed by control to remove this
+	// process after we already started removing it)
+	if (p->kill)
+		return;
 
 	dp.clients[p->dp_clients_idx] = dp.clients[--dp.nr_clients];
 	dp.clients[p->dp_clients_idx]->dp_clients_idx = p->dp_clients_idx;
@@ -180,10 +186,12 @@ static void dp_clients_remove_client(struct proc *p)
 	if (dp.nr_clients < 2)
 		dp.loopback_en = false;
 
-	ret = rte_hash_del_key(dp.ip_to_proc, &p->ip_addr);
-	if (ret < 0)
-		log_err("dp_clients: failed to remove IP from hash table in remove "
-		        "client");
+	if (!p->attach_fail_dup) {
+		ret = rte_hash_del_key(dp.ip_to_proc, &p->ip_addr);
+		if (ret < 0)
+			log_err("dp_clients: failed to remove IP from hash "
+			        "table in remove client");
+	}
 
 	if (!p->has_directpath) {
 		if (!p->attach_fail) {
@@ -203,6 +211,26 @@ static void dp_clients_remove_client(struct proc *p)
 	if (p->has_vfio_directpath)
 		directpath_dataplane_notify_kill(p);
 	sched_detach_proc(p);
+
+	for (size_t i = 0; i < p->thread_count; i++)
+		unpoll_thread(&p->threads[i]);
+
+	while (true) {
+		pdata = list_pop(&p->owned_rx_bufs, struct rx_priv_data, link);
+		if (!pdata)
+			break;
+
+		assert(pdata->owner == p);
+		pdata->owner = NULL;
+		struct rte_mbuf *m = (void *)pdata - sizeof(*m);
+		rte_pktmbuf_free(m);
+	}
+
+	if (p->dataplane_error) {
+		log_err("proc %d experienced a dataplane error", p->pid);
+		kill(p->pid, SIGKILL);
+	}
+
 	proc_put(p);
 }
 

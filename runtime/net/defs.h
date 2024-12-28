@@ -48,8 +48,6 @@ extern void net_tx_eth(struct mbuf *m, uint16_t proto,
 		       const struct eth_addr *dhost, bool is_local);
 extern int net_tx_ip(struct mbuf *m, uint8_t proto,
 		     uint32_t daddr) __must_use_return;
-extern int net_tx_ip_burst(struct mbuf **ms, int n, uint8_t proto,
-		     uint32_t daddr) __must_use_return;
 extern int net_tx_icmp(struct mbuf *m, uint8_t type, uint8_t code,
 		uint32_t daddr, uint16_t id, uint16_t seq) __must_use_return;
 

@@ -119,10 +119,11 @@ static inline int dpdk_port_init(uint8_t port, struct rte_mempool *mbuf_pool)
 	bool is_tap =
 	       !strncmp(dev_info.driver_name, "net_tap", strlen("net_tap"));
 
+	cfg.allow_loopback = true;
+
 	// Enable internal loopbacking if using TAP.
 	// NOTE: other drivers likely need this enabled also.
 	if (is_tap) {
-		cfg.allow_loopback = true;
 		// the TAP driver copies the buffer before sending to emulate TX
 		// offloads. This is broken on recent versions that try to
 		// allocate a new buffer from the same mempool, since our TX
@@ -201,8 +202,7 @@ static inline int dpdk_port_init(uint8_t port, struct rte_mempool *mbuf_pool)
 	retval = rte_eth_dev_rss_hash_conf_get(port, &rss_conf);
 	if (retval == 0) {
 		rss_conf_present = true;
-		if (rss_conf.rss_key_len != ARRAY_SIZE(iok_info->rss_key))
-			log_warn("WARNING: unexpected RSS key size");
+		iok_info->rss_key_len = rss_conf.rss_key_len;
 	} else if (!is_tap) {
 		log_warn("Couldn't query RSS parameters");
 	}
@@ -258,11 +258,7 @@ int dpdk_init(void)
 	/* use our assigned core */
 	sprintf(buf, "%d", sched_dp_core);
 	ARGV(buf);
-
-	if (cfg.no_hugepages)
-		ARGV("--no-huge");
-	else
-		ARGV("--socket-mem=128");
+	ARGV("--socket-mem=128");
 
 	if (cfg.vfio_directpath) {
 		ARGV("--vdev=net_tap0");

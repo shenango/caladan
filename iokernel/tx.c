@@ -4,7 +4,6 @@
 
 #include <rte_ethdev.h>
 #include <rte_ether.h>
-#include <rte_hash.h>
 #include <rte_ip.h>
 #include <rte_mbuf.h>
 #include <rte_tcp.h>
@@ -23,27 +22,14 @@ static struct rte_mempool *tx_mbuf_pool;
 
 static LIST_HEAD(overflow_procs);
 
-/*
- * Private data stored in egress mbufs, used to send completions to runtimes.
- */
-struct tx_pktmbuf_priv {
-	struct proc	*p;
-	struct thread	*th;
-	unsigned long	completion_data;
-};
-
 struct pkt {
 	union txpkt_xmit_cmd cmd;
 	unsigned long	compl;
 	char		*buffer;
 	struct thread	*th;
+	uint32_t	dst_ip;
+	uint16_t	hash;
 };
-
-static inline struct tx_pktmbuf_priv *tx_pktmbuf_get_priv(struct rte_mbuf *buf)
-{
-	return (struct tx_pktmbuf_priv *)(((char *)buf)
-			+ sizeof(struct rte_mbuf));
-}
 
 /*
  * Prepare rte_mbuf struct for transmission.
@@ -93,10 +79,17 @@ static void tx_prepare_tx_mbuf(struct rte_mbuf *buf, struct pkt *pkt)
 	}
 
 	/* initialize the private data, used to send completion events */
-	priv_data = tx_pktmbuf_get_priv(buf);
+	priv_data = rte_mbuf_to_priv(buf);
 	priv_data->p = p;
 	priv_data->th = pkt->th;
 	priv_data->completion_data = pkt->compl;
+	priv_data->dst_ip = 0;
+
+	if (pkt->cmd.olflags & TXFLAG_LOCAL_HINT) {
+		buf->hash.rss = pkt->hash;
+		buf->ol_flags |= RTE_MBUF_F_RX_RSS_HASH;
+		priv_data->dst_ip = pkt->cmd.dst_ip;
+	}
 
 #ifdef MLX
 	/* initialize private data used by Mellanox driver to register memory */
@@ -118,7 +111,7 @@ bool tx_send_completion(void *obj)
 	struct proc *p;
 
 	buf = (struct rte_mbuf *)obj;
-	priv_data = tx_pktmbuf_get_priv(buf);
+	priv_data = rte_mbuf_to_priv(buf);
 	p = priv_data->p;
 
 	/* during initialization, the mbufs are enqueued for the first time */
@@ -225,10 +218,18 @@ static int tx_drain_queue(struct thread *t, int n, struct pkt *pkts)
 			break;
 
 		assert(pkt->cmd.txcmd == TXPKT_NET_XMIT);
-
+		pkt->hash = rss_from_txpkt_payload(pkt->compl);
+		pkt->compl = ptr_from_txpkt_payload(pkt->compl);
+		pkt->dst_ip = pkt->cmd.dst_ip;
+		pkt->th = t;
 		pkt->buffer = shmptr_to_ptr(&t->p->region, pkt->compl,
 				             pkt->cmd.len);
-		pkt->th = t;
+		if (unlikely(!pkt->buffer)) {
+			log_warn("bad tx packet pointer");
+			t->p->dataplane_error = true;
+			dp_clients_remove_client(t->p);
+			return i;
+		}
 	}
 
 	return i;
@@ -245,88 +246,86 @@ bool tx_burst(void)
 	static unsigned int n_pkts;
 
 	static struct rte_mbuf *pending_bufs[IOKERNEL_TX_BURST_SIZE];
+	static unsigned int n_pending;
 
-	struct rte_mbuf *new_bufs[IOKERNEL_TX_BURST_SIZE];
+	struct rte_mbuf *tmp_bufs[IOKERNEL_TX_BURST_SIZE];
+
 	struct rte_mbuf *loopback_bufs[IOKERNEL_TX_BURST_SIZE];
+	unsigned int n_loopback = 0;
 
-	int i, ret, loopback_nr = 0;
-	static unsigned int pos, n_bufs;
-	unsigned int pending = n_pkts + n_bufs;
+	int i, ret, budget;
+	static unsigned int pos;
 	struct thread *t;
+	bool work_done = false;
+
+	budget = IOKERNEL_TX_BURST_SIZE - (n_pkts + n_pending);
+	budget = MIN(dma_chan_slots_avail(), budget);
 
 	/*
 	 * Poll each kthread in each runtime until all have been polled or we
 	 * have PKT_BURST_SIZE pkts.
 	 */
-	for (i = 0; i < nrts; i++) {
-		if (pending >= IOKERNEL_TX_BURST_SIZE)
-			goto full;
-		unsigned int idx = pos++ % nrts;
-		t = ts[idx];
-		ret = tx_drain_queue(t, IOKERNEL_TX_BURST_SIZE - pending,
-				     &pkts[n_pkts]);
+	for (i = 0; i < nrts && budget > 0; i++) {
+		if (++pos >= nrts)
+			pos = 0;
+		t = ts[pos];
+		ret = tx_drain_queue(t, budget, &pkts[n_pkts]);
+		STAT_INC(TX_PULLED, ret);
 		n_pkts += ret;
-		stats[TX_PULLED] += ret;
-		pending += ret;
+		budget -= ret;
 	}
-
-	if (pending == 0)
-		return false;
-
-full:
 
 	/* allocate mbufs */
 	if (n_pkts > 0) {
-		ret = rte_mempool_get_bulk(tx_mbuf_pool, (void **)&new_bufs[0],
+		ret = rte_mempool_get_bulk(tx_mbuf_pool, (void **)&tmp_bufs[0],
 					n_pkts);
 		if (unlikely(ret)) {
 			stats[TX_COMPLETION_FAIL] += n_pkts;
 			log_warn_ratelimited("tx: error getting %d mbufs from mempool", n_pkts);
 			return true;
 		}
-	}
 
-	/* fill in packet metadata */
+		/* fill in packet metadata */
+		for (i = 0; i < n_pkts; i++) {
+			tx_prepare_tx_mbuf(tmp_bufs[i], &pkts[i]);
 
-	for (i = 0; i < n_pkts; i++) {
-		tx_prepare_tx_mbuf(new_bufs[i], &pkts[i]);
-
-		if (dp.loopback_en &&
-		    pkts[i].cmd.olflags & (TXFLAG_LOCAL | TXFLAG_BROADCAST)) {
-			loopback_bufs[loopback_nr++] = new_bufs[i];
-			if (pkts[i].cmd.olflags & TXFLAG_BROADCAST) {
-				rte_mbuf_refcnt_set(new_bufs[i], 2);
-				pending_bufs[n_bufs++] = new_bufs[i];
+			if (dp.loopback_en &&
+			    pkts[i].cmd.olflags & (TXFLAG_LOCAL | TXFLAG_BROADCAST)) {
+				loopback_bufs[n_loopback++] = tmp_bufs[i];
+				if (pkts[i].cmd.olflags & TXFLAG_BROADCAST) {
+					rte_mbuf_refcnt_set(tmp_bufs[i], 2);
+					pending_bufs[n_pending++] = tmp_bufs[i];
+				}
+			} else {
+				pending_bufs[n_pending++] = tmp_bufs[i];
 			}
-		} else {
-			pending_bufs[n_bufs++] = new_bufs[i];
 		}
+		n_pkts = 0;
+		work_done = true;
 	}
 
-	n_pkts = 0;
+	if (n_pending) {
+		/* finally, send the packets on the wire */
+		ret = rte_eth_tx_burst(dp.port, 0, pending_bufs, n_pending);
+		log_debug("tx: transmitted %d packets on port %d", ret, dp.port);
 
-	if (loopback_nr) {
-		log_debug("tx: transmitted %d packets on loopback!", loopback_nr);
-		rx_loopback(loopback_bufs, loopback_nr);
-		rte_pktmbuf_free_bulk(loopback_bufs, loopback_nr);
-		if (!n_bufs)
-			return true;
+		/* apply back pressure if the NIC TX ring was full */
+		if (unlikely(ret < n_pending)) {
+			STAT_INC(TX_BACKPRESSURE, n_pending - ret);
+			for (i = 0; i < n_pending; i++)
+				pending_bufs[i] = pending_bufs[ret + i];
+		}
+		n_pending -= ret;
+		work_done = true;
 	}
 
-	/* finally, send the packets on the wire */
-	ret = rte_eth_tx_burst(dp.port, 0, pending_bufs, n_bufs);
-	log_debug("tx: transmitted %d packets on port %d", ret, dp.port);
-
-	/* apply back pressure if the NIC TX ring was full */
-	if (unlikely(ret < n_bufs)) {
-		STAT_INC(TX_BACKPRESSURE, n_bufs - ret);
-		for (i = 0; i < n_bufs; i++)
-			pending_bufs[i] = pending_bufs[ret + i];
+	if (n_loopback) {
+		log_debug("tx: transmitted %d packets loopback!", n_loopback);
+		rx_loopback(loopback_bufs, n_loopback);
+		work_done = true;
 	}
 
-	n_bufs -= ret;
-
-	return true;
+	return work_done;
 }
 
 /*
@@ -337,7 +336,7 @@ static void tx_pktmbuf_priv_init(struct rte_mempool *mp, void *opaque,
 				 void *obj, unsigned obj_idx)
 {
 	struct rte_mbuf *buf = obj;
-	struct tx_pktmbuf_priv *data = tx_pktmbuf_get_priv(buf);
+	struct tx_pktmbuf_priv *data = rte_mbuf_to_priv(buf);
 	memset(data, 0, sizeof(*data));
 }
 

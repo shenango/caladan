@@ -131,7 +131,8 @@ struct control_hdr {
 /* information shared from iokernel to all runtimes */
 struct iokernel_info {
 	DEFINE_BITMAP(managed_cores, NCPU);
-	unsigned char		rss_key[40];
+	unsigned char		rss_key[52];
+	size_t			rss_key_len;
 	struct pci_addr		directpath_pci;
 	int			cycles_per_us;
 	struct eth_addr		host_mac;

@@ -54,6 +54,7 @@ extern bool vfio_prealloc_rmp;
 #define IOKERNEL_TX_BURST_SIZE		64
 #define IOKERNEL_CMD_BURST_SIZE		64
 #define IOKERNEL_RX_BURST_SIZE		64
+#define IOKERNEL_DMA_BURST_SIZE		64
 #define IOKERNEL_CONTROL_BURST_SIZE	4
 #define IOKERNEL_POLL_INTERVAL		10
 
@@ -175,6 +176,8 @@ struct proc {
 	unsigned int		started:1;
 	unsigned int		has_storage:1;
 	unsigned int		uses_hugepages:1;
+	unsigned int		attach_fail_dup:1;
+	unsigned int		dataplane_error:1;
 	unsigned long		policy_data;
 	unsigned long		directpath_data;
 	uint64_t		next_poll_tsc;
@@ -189,6 +192,7 @@ struct proc {
 	struct runtime_info	*runtime_info;
 
 	struct shm_region	region;
+	struct list_head	owned_rx_bufs;
 
 	/* runtime threads */
 	struct list_head	idle_threads;
@@ -366,6 +370,24 @@ extern struct dataplane dp;
 extern struct iokernel_info *iok_info;
 
 /*
+ * Private data associated with each RX buffer.
+ */
+struct rx_priv_data {
+	struct proc		*owner;
+	struct list_node	link;
+};
+
+/*
+ * Private data stored in egress mbufs, used to send completions to runtimes.
+ */
+struct tx_pktmbuf_priv {
+	struct proc	*p;
+	struct thread	*th;
+	unsigned long	completion_data;
+	uint32_t	dst_ip;
+};
+
+/*
  * Logical cores assigned to linux and the control and dataplane threads
  */
 struct core_assignments {
@@ -384,7 +406,9 @@ enum {
 	RX_UNREGISTERED_MAC = 0,
 	RX_UNICAST_FAIL,
 	RX_BROADCAST_FAIL,
+	RX_FLOW_TAG_MATCH,
 	RX_UNHANDLED,
+	RX_HASH_MISSING,
 
 	PARKED_THREAD_BUSY_WAKE,
 	PARK_FAST_REWAKE,
@@ -406,6 +430,10 @@ enum {
 	RX_REFILL,
 
 	DIRECTPATH_EVENTS,
+
+	DMA_ENQUEUE,
+	DMA_DEQUEUE,
+	DMA_SUBMIT,
 
 	NR_STATS,
 
@@ -444,6 +472,7 @@ extern int dpdk_late_init(void);
 extern int hw_timestamp_init(void);
 extern int stats_init(void);
 extern int proc_timer_init(void);
+extern int dma_init(void);
 
 extern void ksched_uintr_init(void);
 
@@ -458,6 +487,28 @@ extern pthread_barrier_t init_barrier;
 
 extern int pin_thread(pid_t tid, int core);
 
+/* Constants are validated in rx.c */
+#define RX_ELT_SIZE	2496
+#define RX_ELT_PER_PAGE	(PGSIZE_2MB / RX_ELT_SIZE)
+#define RX_OBJ_HDR_SZ	64
+
+static inline struct rte_mbuf *mbuf_from_addr(shmptr_t shmp)
+{
+	void *addr = shmptr_to_ptr(&dp.ingress_mbuf_region, shmp, 0);
+	uintptr_t pg_off = PGOFF_2MB(addr);
+	uintptr_t pg_addr = PGADDR_2MB(addr);
+	uintptr_t index_in_page = pg_off / RX_ELT_SIZE;
+
+	if (unlikely(!addr))
+		return NULL;
+
+	if (unlikely(index_in_page >= RX_ELT_PER_PAGE))
+		return NULL;
+
+	addr = (void *)(pg_addr + index_in_page * RX_ELT_SIZE + RX_OBJ_HDR_SZ);
+	return (struct rte_mbuf *)addr;
+}
+
 /*
  * dataplane RX/TX functions
  */
@@ -470,8 +521,18 @@ struct rte_mbuf;
 extern void rx_loopback(struct rte_mbuf **bufs, int n_bufs);
 
 /*
+ * DMA functions
+ */
+typedef void (*copy_cb_t)(struct rte_mbuf *);
+extern bool dma_dequeue(void);
+extern void copy_batch(struct rte_mbuf **src, struct rte_mbuf **dst, int n,
+	               copy_cb_t cb);
+extern unsigned int dma_chan_slots_avail(void);
+
+/*
  * other dataplane functions
  */
+extern void dp_clients_remove_client(struct proc *p);
 extern void dp_clients_rx_control_lrpcs(void);
 extern bool commands_rx(void);
 extern void dpdk_print_eth_stats(void);

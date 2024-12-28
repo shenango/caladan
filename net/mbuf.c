@@ -22,7 +22,6 @@ struct mbuf *mbuf_clone(struct mbuf *dst, struct mbuf *src)
 
 	/* copy packet metadata */
 	dst->csum_type = src->csum_type;
-	dst->csum = src->csum;
 	dst->txflags = src->txflags; /* NOTE: this is a union */
 
 	return dst;

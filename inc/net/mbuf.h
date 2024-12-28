@@ -25,8 +25,16 @@ struct mbuf {
 	unsigned char	*data;	   /* current position within the buffer */
 	unsigned int	head_len;  /* length of the entire buffer from @head */
 	unsigned int	len;	   /* length of the data */
-	unsigned int	csum_type; /* type of checksum */
-	unsigned int	csum;	   /* 16-bit one's complement */
+	uint8_t		csum_type; /* type of checksum */
+	uint32_t	tx_dst_ip; /* dest IP (hint for loopback) */
+
+	union {
+		struct {
+			uint16_t tx_l4_sport;	 /* used for loopback hash */
+			uint16_t tx_l4_dport;	 /* used for loopback hash */
+		};
+		uint32_t hash; 	 /* stores computed loopback hash */
+	};
 
 	union {
 		unsigned int	txflags;  /* TX offload flags */

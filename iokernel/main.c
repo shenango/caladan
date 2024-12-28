@@ -62,6 +62,7 @@ static const struct init_entry iok_init_handlers[] = {
 	IOK_INITIALIZER(dpdk_late),
 	IOK_INITIALIZER(directpath),
 	IOK_INITIALIZER(hw_timestamp),
+	IOK_INITIALIZER(dma),
 
 };
 
@@ -143,6 +144,8 @@ void dataplane_loop(void)
 
 		/* handle a burst of ingress packets */
 		work_done |= rx_burst();
+
+		work_done |= dma_dequeue();
 
 		/* adjust core assignments */
 		sched_poll();

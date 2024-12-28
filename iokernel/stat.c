@@ -14,7 +14,9 @@ static const char *stat_names[] = {
 	"RX_UNREGISTERED_MAC",
 	"RX_UNICAST_FAIL",
 	"RX_BROADCAST_FAIL",
+	"RX_FLOW_TAG_MATCH",
 	"RX_UNHANDLED",
+	"RX_HASH_MISSING",
 	"PARKED_THREAD_BUSY_WAKE",
 	"PARK_FAST_REWAKE",
 	"TX_COMPLETION_OVERFLOW",
@@ -30,6 +32,9 @@ static const char *stat_names[] = {
 	"PREEMPT",
 	"RX_REFILL",
 	"DIRECTPATH_EVENTS",
+	"DMA_ENQUEUE",
+	"DMA_DEQUEUE",
+	"DMA_SUBMIT",
 };
 
 BUILD_ASSERT(ARRAY_SIZE(stat_names) == NR_STATS);
@@ -45,6 +50,8 @@ static void print_stats(void)
 	for (i = 0; i < NR_STATS; i++)
 		cur_stats[i] = ACCESS_ONCE(stats[i]);
 	barrier();
+
+	printf("-----------------\n");
 
 	for (i = 0; i < NR_STATS; i++) {
 		printf("%lu %s %lu\n", now, stat_names[i],

@@ -21,21 +21,10 @@
 #define MBUF_CACHE_SIZE 250
 #define RX_PREFETCH_STRIDE 2
 
-
-/*
- * Prepend rx_net_hdr preamble to ingress packets.
- */
-
 static union rxq_cmd rx_make_cmd(struct rte_mbuf *buf)
 {
 	union rxq_cmd cmd;
 	uint64_t masked_ol_flags;
-	uint64_t data_offset;
-
-	data_offset = rte_pktmbuf_mtod(buf, uintptr_t);
-	BUG_ON(data_offset <= (uintptr_t)buf);
-	data_offset -= (uintptr_t)buf;
-	BUG_ON(data_offset >= UINT16_MAX);
 
 	cmd.len = rte_pktmbuf_pkt_len(buf);
 	cmd.rxcmd = RX_NET_RECV;
@@ -44,7 +33,6 @@ static union rxq_cmd rx_make_cmd(struct rte_mbuf *buf)
 		cmd.csum_type = CHECKSUM_TYPE_UNNECESSARY;
 	else
 		cmd.csum_type = CHECKSUM_TYPE_NEEDED;
-	cmd.data_offset = data_offset;
 
 	return cmd;
 }
@@ -92,7 +80,15 @@ static bool rx_send_pkt_to_runtime(struct proc *p, struct rte_mbuf *buf)
 	void *data = rte_pktmbuf_mtod(buf, void *);
 
 	shmptr = ptr_to_shmptr(&dp.ingress_mbuf_region, data, cmd.len);
-	return rx_send_to_runtime(p, buf->hash.rss, cmd.lrpc_cmd, shmptr);
+	if (!rx_send_to_runtime(p, buf->hash.rss, cmd.lrpc_cmd, shmptr))
+		return false;
+
+	struct rx_priv_data *pdata = rte_mbuf_to_priv(buf);
+	assert(!pdata->owner);
+	pdata->owner = p;
+	list_add_tail(&p->owned_rx_bufs, &pdata->link);
+	assert(pdata == (void *)buf + sizeof(buf));
+	return true;
 }
 
 static bool azure_arp_response(struct rte_mbuf *buf)
@@ -130,6 +126,7 @@ static void rx_one_pkt(struct rte_mbuf *buf)
 
 	/* use hardware assisted flow tagging to match packets to procs */
 	if (buf->ol_flags & RTE_MBUF_F_RX_FDIR_ID) {
+		STAT_INC(RX_FLOW_TAG_MATCH, 1);
 		mark_id = buf->hash.fdir.hi;
 		assert(mark_id >= 0 && mark_id < IOKERNEL_MAX_PROC);
 		p = dp.clients_by_id[mark_id];
@@ -148,7 +145,7 @@ static void rx_one_pkt(struct rte_mbuf *buf)
 		  PRIx8 " %02" PRIx8 " %02" PRIx8 " %02" PRIx8,
 		  ptr_dst_addr->addr_bytes[0], ptr_dst_addr->addr_bytes[1],
 		  ptr_dst_addr->addr_bytes[2], ptr_dst_addr->addr_bytes[3],
-	  ptr_dst_addr->addr_bytes[4], ptr_dst_addr->addr_bytes[5]);
+		  ptr_dst_addr->addr_bytes[4], ptr_dst_addr->addr_bytes[5]);
 
 	ether_type = rte_be_to_cpu_16(ptr_mac_hdr->ether_type);
 
@@ -156,6 +153,8 @@ static void rx_one_pkt(struct rte_mbuf *buf)
 		iphdr = rte_pktmbuf_mtod_offset(buf, struct rte_ipv4_hdr *,
 			sizeof(*ptr_mac_hdr));
 		dst_ip = rte_be_to_cpu_32(iphdr->dst_addr);
+		if (unlikely(!(buf->ol_flags & RTE_MBUF_F_RX_RSS_HASH)))
+			STAT_INC(RX_HASH_MISSING, 1);
 	} else if (ether_type == ETHTYPE_ARP) {
 		arphdr = rte_pktmbuf_mtod_offset(buf, struct rte_arp_hdr *,
 			sizeof(*ptr_mac_hdr));
@@ -226,24 +225,33 @@ fail_free:
 void rx_loopback(struct rte_mbuf **src_bufs, int n_bufs)
 {
 	int i, ret;
+	struct proc *p;
 	struct rte_mbuf *rx_bufs[n_bufs];
-	size_t bytes;
+	struct tx_pktmbuf_priv *priv;
 
 	ret = rte_pktmbuf_alloc_bulk(dp.rx_mbuf_pool, rx_bufs, n_bufs);
 	if (unlikely(ret)) {
 		log_warn_ratelimited("Couldn't allocate buffers for loopback");
+		rte_pktmbuf_free_bulk(src_bufs, n_bufs);
 		return;
 	}
 
+	/* Do IP lookups using runtime-provided hint */
 	for (i = 0; i < n_bufs; i++) {
-		struct rte_mbuf *dst_buf = rx_bufs[i];
-		bytes = rte_pktmbuf_pkt_len(src_bufs[i]);
-		char *ret = rte_pktmbuf_append(dst_buf, bytes);
-		RTE_ASSERT(ret != NULL);
-		memcpy(ret, rte_pktmbuf_mtod(src_bufs[i], const char *), bytes);
-		dst_buf->ol_flags |= RTE_MBUF_F_RX_IP_CKSUM_GOOD;
-		rx_one_pkt(dst_buf);
+		priv = rte_mbuf_to_priv(src_bufs[i]);
+		if (!priv->dst_ip)
+			continue;
+
+		ret = rte_hash_lookup_data(dp.ip_to_proc, &priv->dst_ip,
+			                   (void **)&p);
+		priv->dst_ip = 0;
+		if (likely(ret >= 0)) {
+			src_bufs[i]->ol_flags |= RTE_MBUF_F_RX_FDIR_ID;
+			src_bufs[i]->hash.fdir.hi = p->uniqid;
+		}
 	}
+
+	copy_batch(src_bufs, rx_bufs, n_bufs, rx_one_pkt);
 }
 
 /*
@@ -281,6 +289,18 @@ static void rx_mempool_memchunk_free(struct rte_mempool_memhdr *memhdr,
 }
 
 /*
+ * Zero out private data for a packet
+ */
+
+static void rx_pktmbuf_priv_init(struct rte_mempool *mp, void *opaque,
+				 void *obj, unsigned obj_idx)
+{
+	struct rte_mbuf *buf = obj;
+	struct rx_priv_data *data = rte_mbuf_to_priv(buf);
+	memset(data, 0, sizeof(*data));
+}
+
+/*
  * Create and initialize a packet mbuf pool in shared memory, based on
  * rte_pktmbuf_pool_create.
  */
@@ -288,6 +308,7 @@ static struct rte_mempool *rx_pktmbuf_pool_create_in_shm(const char *name,
 		unsigned n, unsigned cache_size, uint16_t priv_size,
 		uint16_t data_room_size, int socket_id)
 {
+	struct rte_mempool_objsz objsz;
 	unsigned elt_size;
 	struct rte_pktmbuf_pool_private mbp_priv = {0};
 	struct rte_mempool *mp;
@@ -318,7 +339,7 @@ static struct rte_mempool *rx_pktmbuf_pool_create_in_shm(const char *name,
 	rte_pktmbuf_pool_init(mp, &mbp_priv);
 
 	/* check necessary size and map shared memory */
-	pg_size = cfg.no_hugepages ? PGSIZE_4KB : PGSIZE_2MB;
+	pg_size = PGSIZE_2MB;
 	pg_shift = rte_bsf32(pg_size);
 	len = rte_mempool_ops_calc_mem_size(mp, n, pg_shift, &min_chunk_size, &align);
 	if (len > INGRESS_MBUF_SHM_SIZE) {
@@ -329,13 +350,8 @@ static struct rte_mempool *rx_pktmbuf_pool_create_in_shm(const char *name,
 	shbuf = dp.ingress_mbuf_region.base;
 	len = align_up(len, pg_size);
 
-	if (cfg.no_hugepages) {
-		ret = mlock(shbuf, len);
-		if (unlikely(ret)) {
-			log_err("failed to mlock rx area: %s", strerror(errno));
-			goto fail_free_mempool;
-		}
-	}
+	/* truncate the recorded region len */
+	dp.ingress_mbuf_region.len = len;
 
 	ret = do_dpdk_dma_map(shbuf, len, pg_size, NULL);
 	if (ret)
@@ -350,6 +366,10 @@ static struct rte_mempool *rx_pktmbuf_pool_create_in_shm(const char *name,
 	}
 
 	rte_mempool_obj_iter(mp, rte_pktmbuf_init, NULL);
+	rte_mempool_obj_iter(mp, rx_pktmbuf_priv_init, NULL);
+
+	BUG_ON(rte_mempool_calc_obj_size(elt_size, 0, &objsz) != RX_ELT_SIZE);
+	BUG_ON(objsz.header_size != RX_OBJ_HDR_SZ);
 
 	return mp;
 
@@ -365,14 +385,15 @@ fail:
 /*
  * Initialize rx state.
  */
-int rx_init()
+int rx_init(void)
 {
 	if (cfg.vfio_directpath)
 		return 0;
 
 	/* create a mempool in shared memory to hold the rx mbufs */
 	dp.rx_mbuf_pool = rx_pktmbuf_pool_create_in_shm("RX_MBUF_POOL",
-			IOKERNEL_NUM_MBUFS, MBUF_CACHE_SIZE, 0, RTE_MBUF_DEFAULT_BUF_SIZE,
+			IOKERNEL_NUM_MBUFS, MBUF_CACHE_SIZE,
+			sizeof(struct rx_priv_data), RTE_MBUF_DEFAULT_BUF_SIZE,
 			rte_socket_id());
 
 	if (dp.rx_mbuf_pool == NULL) {

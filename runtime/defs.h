@@ -593,7 +593,6 @@ struct cfg_arp_static_entry {
 extern size_t arp_static_count;
 extern struct cfg_arp_static_entry *static_entries;
 
-extern void net_rx_softirq(struct rx_net_hdr **hdrs, unsigned int nr);
 extern void net_rx_softirq_direct(struct mbuf **ms, unsigned int nr);
 
 extern int __noinline net_tx_drain_overflow(void);

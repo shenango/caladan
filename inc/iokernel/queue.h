@@ -7,17 +7,7 @@
 #include <stdint.h>
 #include <base/stddef.h>
 
-/* preamble to ingress network packets */
-struct rx_net_hdr {
-	unsigned long completion_data; /* a tag to help complete the request */
-	unsigned int len;	/* the length of the payload */
-	unsigned int rss_hash;	/* the HW RSS 5-tuple hash */
-	unsigned int csum_type; /* the type of checksum */
-	unsigned int csum;	/* 16-bit one's complement */
-	char	     payload[];	/* packet data */
-};
-
-/* possible values for @csum_type above */
+/* possible values for csum_type */
 enum {
 	/*
 	 * Hardware did not provide checksum information.
@@ -40,6 +30,8 @@ enum {
 	CHECKSUM_TYPE_NR,
 };
 
+BUILD_ASSERT(CHECKSUM_TYPE_NR <= UINT8_MAX);
+
 /* possible values for @olflags above */
 #define OLFLAG_IP_CHKSUM	BIT(0)	/* enable IP checksum generation */
 #define OLFLAG_TCP_CHKSUM	BIT(1)	/* enable TCP checksum generation */
@@ -47,6 +39,7 @@ enum {
 #define OLFLAG_IPV6		BIT(3)  /* indicates the packet is IPv6 */
 #define TXFLAG_LOCAL		BIT(4)  /* indicates the packet is local */
 #define TXFLAG_BROADCAST	BIT(5)  /* indicates a broadcast packet */
+#define TXFLAG_LOCAL_HINT	BIT(6)  /* contains rss hash/IP for loopback hint */
 
 /*
  * RX queues: IOKERNEL -> RUNTIMES
@@ -65,8 +58,8 @@ union rxq_cmd {
 	struct {
 		uint16_t	rxcmd;
 		uint16_t	len;
-		uint16_t	data_offset;
-		uint16_t	csum_type; // top bit must be 0.
+		uint16_t	pad;
+		uint16_t	csum_type; // Top bit must be 0.
 	};
 	uint64_t		lrpc_cmd;
 };
@@ -84,15 +77,17 @@ enum {
 	TXPKT_NR,               /* number of commands */
 };
 
-BUILD_ASSERT(TXPKT_NR <= UINT16_MAX);
+BUILD_ASSERT(TXPKT_NR <= UINT8_MAX);
 
 union txpkt_xmit_cmd {
 	struct {
-		uint16_t	txcmd;
-		uint16_t	len;
-		uint16_t	olflags;
-		char		pad;
-		char		reserved; // Must not be used (lrpc parity bit).
+		uint32_t	dst_ip;
+		union {
+			uint16_t	len;
+			uint16_t	data_offset;
+		};
+		uint8_t		olflags;
+		uint8_t		txcmd; // Top bit must be 0.
 	};
 	uint64_t		lrpc_cmd;
 };
@@ -105,8 +100,8 @@ BUILD_ASSERT(sizeof(union txpkt_xmit_cmd) == sizeof(uint64_t));
  * much faster by the IOKERNEL than packets, so no HOL blocking.
  */
 enum {
-	TXCMD_NET_COMPLETE = 0,	/* contains rx_net_hdr.completion_data */
-	TXCMD_NR,		/* number of commands */
+       TXCMD_NET_COMPLETE = 0, /* contains rx_net_hdr.completion_data */
+       TXCMD_NR,               /* number of commands */
 };
 
 BUILD_ASSERT(TXCMD_NR <= UINT16_MAX);
@@ -114,10 +109,26 @@ BUILD_ASSERT(TXCMD_NR <= UINT16_MAX);
 union txcmdq_cmd {
 	struct {
 		uint16_t	txcmd;
-		uint16_t	data_offset;
+		uint16_t	pad;
 		uint32_t	reserved; // Upper bit must be zero.
 	};
 	uint64_t		lrpc_cmd;
 };
 
 BUILD_ASSERT(sizeof(union txcmdq_cmd) == sizeof(uint64_t));
+
+static inline uint64_t txpkt_to_payload(uint64_t ptr, uint16_t rss)
+{
+	assert(!(ptr >> 48));
+	return ptr | ((uint64_t)rss << 48);
+}
+
+static inline uint64_t ptr_from_txpkt_payload(uint64_t payload)
+{
+	return payload & ((1UL << 48) - 1);
+}
+
+static inline uint64_t rss_from_txpkt_payload(uint64_t payload)
+{
+	return payload >> 48;
+}

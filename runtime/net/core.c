@@ -63,23 +63,13 @@ int net_init_mempool(void)
  * RX Networking Functions
  */
 
-/**
- * compute_flow_affinity - compute rss hash for incoming packets
- * @local_port: the local port number
- * @remote: the remote network address
- *
- * Returns the 32 bit hash mod maxks
- *
- * copied from dpdk/lib/librte_hash/rte_thash.h
- */
-static uint32_t compute_flow_affinity(uint8_t ipproto, uint16_t local_port, struct netaddr remote)
+static uint32_t do_toeplitz(uint32_t saddr, uint32_t daddr, uint16_t sport,
+	                    uint16_t dport)
 {
-	log_warn_ratelimited("flow affinity not enabled for iokernel datapath");
-	return 0;
 	const uint8_t *rss_key = iok.iok_info->rss_key;
 
 	uint32_t i, j, map, ret = 0, input_tuple[] = {
-		remote.ip, netcfg.addr, local_port | remote.port << 16
+		saddr, daddr, dport | sport << 16
 	};
 
 	for (j = 0; j < ARRAY_SIZE(input_tuple); j++) {
@@ -91,17 +81,32 @@ static uint32_t compute_flow_affinity(uint8_t ipproto, uint16_t local_port, stru
 		}
 	}
 
+	return ret;
+}
+
+/**
+ * compute_flow_affinity - compute rss hash for incoming packets
+ * @local_port: the local port number
+ * @remote: the remote network address
+ *
+ * Returns the 32 bit hash mod maxks
+ *
+ * copied from dpdk/lib/librte_hash/rte_thash.h
+ */
+static uint32_t compute_flow_affinity(uint8_t ipproto, uint16_t local_port,
+	                              struct netaddr remote)
+{
+	uint32_t ret = do_toeplitz(remote.ip, netcfg.addr, remote.port,
+		                   local_port);
 	return ret % (uint32_t)maxks;
 }
 
-static void net_rx_send_completion(shmptr_t data, uint16_t data_offset)
+static void net_rx_send_completion(shmptr_t data)
 {
-
 	struct kthread *k;
 
 	union txcmdq_cmd cmd;
 	cmd.reserved = 0;
-	cmd.data_offset = data_offset;
 	cmd.txcmd = TXCMD_NET_COMPLETE;
 
 	k = getk();
@@ -138,7 +143,7 @@ static struct mbuf *net_rx_alloc_mbuf(shmptr_t data, union rxq_cmd cmd)
 	m->release = (void (*)(struct mbuf *))sfree;
 
 out:
-	net_rx_send_completion(data, cmd.data_offset);
+	net_rx_send_completion(data);
 	return m;
 }
 
@@ -409,12 +414,14 @@ static int net_tx_iokernel(struct mbuf *m)
 	struct tx_completion_data *compl;
 	union txpkt_xmit_cmd cmd;
 	shmptr_t shm;
+	uint64_t payload;
 
-	cmd.reserved = 0;
+	cmd.dst_ip = m->tx_dst_ip;
 	cmd.txcmd = TXPKT_NET_XMIT;
 	cmd.len = mbuf_length(m);
 	shm = ptr_to_shmptr(&netcfg.tx_region, mbuf_data(m), cmd.len);
 	cmd.olflags = m->txflags;
+	payload = txpkt_to_payload(shm, (uint16_t)m->hash);
 
 	assert_preempt_disabled();
 
@@ -422,7 +429,7 @@ static int net_tx_iokernel(struct mbuf *m)
 	compl = mbuf_push_hdr(m, *compl);
 	compl->m = m;
 
-	if (unlikely(!lrpc_send(&myk()->txpktq, cmd.lrpc_cmd, shm))) {
+	if (unlikely(!lrpc_send(&myk()->txpktq, cmd.lrpc_cmd, payload))) {
 		mbuf_pull_hdr(m, *compl);
 		return -1;
 	}
@@ -601,65 +608,15 @@ int net_tx_ip(struct mbuf *m, uint8_t proto, uint32_t daddr)
 		}
 	}
 
+	/* add hints for loopback via IOKernel */
+	if (local && !cfg_directpath_enabled()) {
+		m->tx_dst_ip = daddr;
+		m->hash = do_toeplitz(netcfg.addr, daddr, m->tx_l4_sport,
+			              m->tx_l4_dport);
+		m->txflags |= TXFLAG_LOCAL_HINT;
+	}
+
 	net_tx_eth(m, ETHTYPE_IP, &dhost, local);
-	return 0;
-}
-
-/**
- * net_tx_ip_burst - transmits a burst of IP packets
- * @ms: an array of mbuf pointers to transmit
- * @n: the number of mbufs in @ms
- * @proto: the transport protocol
- * @daddr: the destination IP address (in native byte order)
- *
- * The payload must start with the transport (L4) header. The IPv4 (L3) and
- * ethernet (L2) headers will be prepended by this function.
- *
- * @ms must have been allocated with net_tx_alloc_mbuf().
- *
- * Returns 0 if successful. If successful, the mbufs will be freed when the
- * transmit completes. Otherwise, the mbufs still belongs to the caller. If
- * ARP doesn't have a cached entry, only the first mbuf will be transmitted
- * when the ARP request resolves.
- */
-int net_tx_ip_burst(struct mbuf **ms, int n, uint8_t proto, uint32_t daddr)
-{
-	struct eth_addr dhost;
-	int ret, i;
-	bool local;
-
-	assert(n > 0);
-
-	/* prepare the mbufs */
-	for (i = 0; i < n; i++) {
-		/* prepend the IP header */
-		net_push_iphdr(ms[i], proto, daddr);
-
-		/* ask NIC to calculate IP checksum */
-		ms[i]->txflags |= OLFLAG_IP_CHKSUM | OLFLAG_IPV4;
-	}
-
-	/* apply IP routing */
-	daddr = net_get_ip_route(daddr);
-
-	/* use ARP to resolve dhost */
-	ret = arp_lookup(daddr, &dhost, ms[0], &local);
-	if (unlikely(ret)) {
-		if (ret == -EINPROGRESS) {
-			/* ARP code now owns the first mbuf */
-			return 0;
-		} else {
-			/* An unrecoverable error occurred */
-			for (i = 0; i < n; i++)
-				mbuf_pull_hdr(ms[i], struct ip_hdr);
-			return ret;
-		}
-	}
-
-	/* finally, transmit the packets */
-	for (i = 0; i < n; i++)
-		net_tx_eth(ms[i], ETHTYPE_IP, &dhost, local);
-
 	return 0;
 }
 

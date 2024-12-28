@@ -255,6 +255,7 @@ static struct proc *control_create_proc(int mem_fd, size_t len,
 	p->thread_count = hdr.thread_count;
 	p->uses_hugepages = hdr.shared_reg_page_size == PGSIZE_2MB;
 	p->max_overflows = hdr.egress_buf_count;
+	list_head_init(&p->owned_rx_bufs);
 
 	if (!hdr.ip_addr)
 		goto fail;
@@ -449,10 +450,6 @@ static void control_instruct_dataplane_to_remove_client(struct proc *p)
 
 static void control_remove_client(struct proc *p)
 {
-	/* client failed to attach to scheduler, notify with signal */
-	if (p->attach_fail)
-		kill(p->pid, SIGINT);
-
 	if (!p->removed) {
 		epoll_ctl_del(p->control_fd);
 		close(p->control_fd);

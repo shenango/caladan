@@ -35,6 +35,7 @@ static int owners[NCPU];
 struct list_head congested_procs[NCPU + 1];
 /* number of congested lc procs */
 uint64_t congested_lc_procs_nr;
+uint64_t congested_procs_nr;
 
 /*
  * make sure sd is in the right congestion list, should be called any time
@@ -65,6 +66,7 @@ static void ias_mark_congested(struct ias_data *sd)
 
 	congestion_rank = sd->threads_active;
 
+	congested_procs_nr++;
 	congested_lc_procs_nr += sd->is_lc;
 	congestion_rank += !sd->is_lc * !sd->threads_active;
 
@@ -79,6 +81,7 @@ static void ias_unmark_congested(struct ias_data *sd)
 
 	congested_lc_procs_nr -= sd->is_lc;
 
+	congested_procs_nr--;
 	sd->is_congested = false;
 	list_del(&sd->congested_link);
 }
@@ -511,6 +514,9 @@ static struct ias_data *ias_choose_kthread(unsigned int core)
 	struct ias_data *sd, *best_sd = NULL;
 	int rank, score, best_score = -1;
 
+	if (!congested_procs_nr)
+		return NULL;
+
 	/* feed starving LCs in a FIFO order */
 	list_for_each(&congested_procs[0], sd, congested_link) {
 		/* check if we're constrained by the thread limit */
@@ -621,16 +627,23 @@ static void ias_sched_poll(uint64_t now, int idle_cnt, bitmap_ptr_t idle)
 	now_us = now;
 
 	/* mark cores idle */
-	if (idle_cnt != 0)
+	if (idle_cnt != 0) {
 		bitmap_or(ias_idle_cores, ias_idle_cores, idle, NCPU);
+		bitmap_for_each_set(idle, NCPU, core) {
+			if (bitmap_test(ias_ht_punished_cores, core))
+				continue;
+			if (cores[core] != NULL)
+				ias_unmark_congested(cores[core]);
+			ias_cleanup_core(core);
+		}
+	}
 
 	/* try to allocate any idle cores */
 	bitmap_for_each_set(ias_idle_cores, NCPU, core) {
+		if (!congested_procs_nr)
+			break;
 		if (bitmap_test(ias_ht_punished_cores, core))
 			continue;
-		if (cores[core] != NULL)
-			ias_unmark_congested(cores[core]);
-		ias_cleanup_core(core);
 		ias_add_kthread_on_core(core);
 	}
 

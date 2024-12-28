@@ -10,9 +10,27 @@
 
 #include "defs.h"
 
-static int commands_drain_queue(struct thread *t, struct rte_mbuf **bufs, int n)
+static struct rte_mbuf *free_rx_mbuf(struct thread *t, unsigned long payload)
+{
+	struct rte_mbuf *buf = mbuf_from_addr(payload);
+	if (unlikely(!buf))
+		return NULL;
+
+	/* validate this buf was owned by this proc */
+	struct rx_priv_data *pdata = rte_mbuf_to_priv(buf);
+	if (unlikely(pdata->owner != t->p))
+		return NULL;
+
+	pdata->owner = NULL;
+	list_del_from(&t->p->owned_rx_bufs, &pdata->link);
+	return buf;
+}
+
+static int commands_drain_queue(struct thread *t, struct rte_mbuf **bufs, int n,
+	                        bool *error)
 {
 	int i, n_bufs = 0;
+	struct rte_mbuf *buf;
 
 	for (i = 0; i < n; i++) {
 		union txcmdq_cmd cmd;
@@ -23,17 +41,26 @@ static int commands_drain_queue(struct thread *t, struct rte_mbuf **bufs, int n)
 
 		switch (cmd.txcmd) {
 		case TXCMD_NET_COMPLETE:
-			void *data = shmptr_to_ptr(&dp.ingress_mbuf_region, payload, 0);
-			bufs[n_bufs++] = (struct rte_mbuf *)(data - cmd.data_offset);
-			/* TODO: validate pointer @buf */
+			buf = free_rx_mbuf(t, payload);
+			if (unlikely(!buf)) {
+				log_err("received invalid response");
+				goto error;
+			}
+			bufs[n_bufs++] = buf;
 			break;
 
 		default:
-			/* kill the runtime? */
-			BUG();
+			log_err("invalid command: %hu", cmd.txcmd);
+			goto error;
 		}
 	}
 
+	return n_bufs;
+
+error:
+	t->p->dataplane_error = true;
+	dp_clients_remove_client(t->p);
+	*error = true;
 	return n_bufs;
 }
 
@@ -46,6 +73,7 @@ bool commands_rx(void)
 	int i, n_bufs = 0;
 	static unsigned int pos;
 	struct thread *t;
+	bool error = false;
 
 	/*
 	 * Poll each thread in each runtime until all have been polled or we
@@ -59,7 +87,10 @@ bool commands_rx(void)
 
 		t = ts[idx];
 		n_bufs += commands_drain_queue(t, &bufs[n_bufs],
-				IOKERNEL_CMD_BURST_SIZE - n_bufs);
+				IOKERNEL_CMD_BURST_SIZE - n_bufs, &error);
+
+		if (unlikely(error))
+			break;
 
 		if (unlikely(!t->active)) {
 			if (!lrpc_empty(&t->txcmdq))
