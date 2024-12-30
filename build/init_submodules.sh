@@ -54,7 +54,7 @@ export PKG_CONFIG_PATH=$PWD/rdma-core/build/lib/pkgconfig
 
 
 cd dpdk
-git apply ../build/dpdk.patch
+git -c user.name="x" -c user.email="x" am ../build/patches/dpdk/*
 meson build
 meson configure -Ddisable_drivers=$disable_driver -Dexamples='' -Denable_kmods=false -Dtests=false build
 meson configure -Dprefix=$PWD/build build

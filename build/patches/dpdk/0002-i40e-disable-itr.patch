@@ -1,16 +1,12 @@
-diff --git a/config/rte_config.h b/config/rte_config.h
-index da265d7dd2..88ad16cc37 100644
---- a/config/rte_config.h
-+++ b/config/rte_config.h
-@@ -30,7 +30,7 @@
- /* EAL defines */
- #define RTE_CACHE_GUARD_LINES 1
- #define RTE_MAX_HEAPS 32
--#define RTE_MAX_MEMSEG_LISTS 128
-+#define RTE_MAX_MEMSEG_LISTS 1024
- #define RTE_MAX_MEMSEG_PER_LIST 8192
- #define RTE_MAX_MEM_MB_PER_LIST 32768
- #define RTE_MAX_MEMSEG_PER_TYPE 32768
+From df9791417a07e6eb333be938f89bb7f9a20e865b Mon Sep 17 00:00:00 2001
+From: Josh Fried <joshuafried@gmail.com>
+Date: Mon, 30 Dec 2024 17:30:52 -0600
+Subject: [PATCH 2/3] i40e: disable itr
+
+---
+ drivers/net/i40e/i40e_ethdev.h | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
 diff --git a/drivers/net/i40e/i40e_ethdev.h b/drivers/net/i40e/i40e_ethdev.h
 index 1bbe7ad376..3dac4b4be9 100644
 --- a/drivers/net/i40e/i40e_ethdev.h
@@ -27,3 +23,6 @@ index 1bbe7ad376..3dac4b4be9 100644
  /* Special FW support this floating VEB feature */
  #define FLOATING_VEB_SUPPORTED_FW_MAJ 5
  #define FLOATING_VEB_SUPPORTED_FW_MIN 0
+-- 
+2.43.0
+
