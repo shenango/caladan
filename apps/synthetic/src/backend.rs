@@ -209,13 +209,6 @@ impl Read for Connection {
     }
 }
 
-impl Drop for Connection {
-    fn drop(&mut self) {
-        if let Connection::RuntimeTcp(ref mut s) = *self {
-            s.abort();
-        }
-    }
-}
 
 impl<'a> Read for &'a Connection {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
