@@ -600,7 +600,10 @@ static inline int directpath_get_clock(unsigned int *f, ...)
 }
 
 static inline void directpath_poll_thread_delay(struct proc *p, ...) {}
-static inline bool directpath_poll_proc(struct proc *p, uint64_t *delay_cycles, uint64_t cur_tsc) { return true; }
+static inline bool directpath_poll_proc(struct proc *p, uint64_t *delay_cycles, uint64_t cur_tsc, bool should_arm)
+{
+       return true;
+}
 static inline void directpath_notify_waking(struct proc *p, struct thread *th) {}
 
 #endif
