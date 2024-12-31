@@ -83,6 +83,10 @@ INC += $(MLX5_INC)
 FLAGS += -DDIRECTPATH
 endif
 
+ifeq ($(CONFIG_SPLIT_TX),y)
+FLAGS += -DSPLIT_TX
+endif
+
 CFLAGS = -std=gnu11 $(FLAGS)
 CXXFLAGS = -std=gnu++20 $(FLAGS)
 

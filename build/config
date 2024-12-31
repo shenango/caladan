@@ -2,8 +2,6 @@
 
 # Enable Mellanox ConnectX-4,5 NIC Support
 CONFIG_MLX5=n
-# Enable Mellanox ConnectX-3 NIC Support
-CONFIG_MLX4=n
 # Enable SPDK NVMe support
 CONFIG_SPDK=n
 # Enable debug build mode (slower but enables several runtime checks)
@@ -14,3 +12,5 @@ CONFIG_OPTIMIZE=n
 CONFIG_DIRECTPATH=n
 # Build with clang instead of gcc
 CONFIG_CLANG=n
+# Build with split TX pool
+CONFIG_SPLIT_TX=n

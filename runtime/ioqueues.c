@@ -346,8 +346,7 @@ int ioqueues_register_iokernel(void)
 	BUG_ON((uintptr_t)iok.hdr != (uintptr_t)r->base);
 	hdr->magic = CONTROL_HDR_MAGIC;
 	hdr->version_no = CONTROL_HDR_VERSION;
-	/* TODO: overestimating is okay, but fix this later */
-	hdr->egress_buf_count = div_up(iok.tx_len, net_get_mtu() + MBUF_HEAD_LEN);
+	hdr->egress_buf_count = div_up(iok.tx_len, calculate_egress_buf_size());
 	hdr->thread_count = maxks;
 	hdr->ip_addr = netcfg.addr;
 	hdr->shared_reg_page_size = shm_page_size();

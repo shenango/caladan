@@ -430,7 +430,7 @@ ssize_t udp_write_to(udpconn_t *c, const void *buf, size_t len,
 	c->outq_len++;
 	spin_unlock_np(&c->outq_lock);
 
-	m = net_tx_alloc_mbuf(udp_headroom());
+	m = net_tx_alloc_mbuf_sz(udp_headroom(), len);
 	if (unlikely(!m))
 		return -ENOBUFS;
 
@@ -747,7 +747,7 @@ ssize_t udp_sendv(const struct iovec *iov, int iovcnt,
 	if (raddr.ip == MAKE_IP_ADDR(127, 0, 0, 1))
 		raddr.ip = netcfg.addr;
 
-	m = net_tx_alloc_mbuf(udp_headroom());
+	m = net_tx_alloc_mbuf_sz(udp_headroom(), len);
 	if (unlikely(!m))
 		return -ENOBUFS;
 

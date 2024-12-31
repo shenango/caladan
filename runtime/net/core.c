@@ -23,30 +23,70 @@
 struct net_cfg netcfg __aligned(CACHE_LINE_SIZE);
 struct net_driver_ops net_ops;
 unsigned int eth_mtu = ETH_DEFAULT_MTU;
+static size_t extra_headroom;
 
 /* TX buffer allocation */
 static struct mempool net_tx_buf_mp;
 static struct tcache *net_tx_buf_tcache;
 static DEFINE_PERTHREAD(struct tcache_perthread, net_tx_buf_pt);
 
+#ifdef SPLIT_TX
+/* Pool of buffers for small TX packets */
+static struct mempool net_tx_buf_sm_mp;
+static struct tcache *net_tx_buf_sm_tcache;
+static DEFINE_PERTHREAD(struct tcache_perthread, net_tx_buf_sm_pt);
+#endif
+
+/* slab allocator for mbuf structs */
+static struct slab mbuf_slab;
+static struct tcache *mbuf_tcache;
+DEFINE_PERTHREAD(struct tcache_perthread, mbuf_pt);
+
+struct tx_completion_data {
+	struct mbuf	*m;
+	char		payload[];	/* packet data */
+} __attribute__((__packed__));
+
 int net_init_mempool_threads(void)
 {
 	int i;
 
-	for (i = 0; i < maxks; i++)
+	for (i = 0; i < maxks; i++) {
 		tcache_init_perthread(net_tx_buf_tcache,
 			&perthread_get_remote(net_tx_buf_pt, i));
 
+#ifdef SPLIT_TX
+		tcache_init_perthread(net_tx_buf_sm_tcache,
+			&perthread_get_remote(net_tx_buf_sm_pt, i));
+#endif
+	}
+
 	return 0;
+}
+
+size_t calculate_egress_buf_size(void)
+{
+	size_t iok_headroom = 0;
+	if (!cfg_directpath_enabled())
+		iok_headroom = align_up(sizeof(struct tx_completion_data),
+			                CACHE_LINE_SIZE);
+	return align_up(iok_headroom + net_get_mtu() + eth_headroom() + MBUF_HEAD_LEN,
+	                CACHE_LINE_SIZE * 2);
 }
 
 int net_init_mempool(void)
 {
 	int ret;
+	size_t pool_sz = iok.tx_len;
+#ifdef SPLIT_TX
+	pool_sz /= 2;
+#endif
+	if (!cfg_directpath_enabled())
+		extra_headroom = align_up(sizeof(struct tx_completion_data),
+			                  CACHE_LINE_SIZE);
 
-	ret = mempool_create(&net_tx_buf_mp, iok.tx_buf, iok.tx_len, PGSIZE_2MB,
-			     align_up(net_get_mtu() + MBUF_HEAD_LEN + MBUF_DEFAULT_HEADROOM,
-				      CACHE_LINE_SIZE * 2));
+	ret = mempool_create(&net_tx_buf_mp, iok.tx_buf, pool_sz, PGSIZE_2MB,
+			     calculate_egress_buf_size());
 	if (unlikely(ret))
 		return ret;
 
@@ -54,6 +94,20 @@ int net_init_mempool(void)
 		"runtime_tx_bufs", TCACHE_DEFAULT_MAG_SIZE);
 	if (unlikely(!net_tx_buf_tcache))
 		return -ENOMEM;
+
+#ifdef SPLIT_TX
+	ret = mempool_create(&net_tx_buf_sm_mp, iok.tx_buf + pool_sz, pool_sz,
+			     PGSIZE_2MB,
+			     align_up(extra_headroom + SMALL_BUF_SIZE,
+			              CACHE_LINE_SIZE));
+	if (unlikely(ret))
+		return ret;
+
+	net_tx_buf_sm_tcache = mempool_create_tcache(&net_tx_buf_sm_mp,
+		"runtime_tx_sm_bufs", TCACHE_DEFAULT_MAG_SIZE);
+	if (unlikely(!net_tx_buf_sm_tcache))
+		return -ENOMEM;
+#endif
 
 	return 0;
 }
@@ -273,11 +327,6 @@ void net_rx_batch(struct mbuf **ms, unsigned int nr)
 	}
 }
 
-struct tx_completion_data {
-	struct mbuf	*m;
-	char		payload[];	/* packet data */
-} __attribute__((__packed__));
-
 static void handle_tx_completion(unsigned long payload)
 {
 	struct tx_completion_data *compl;
@@ -349,9 +398,22 @@ static void iokernel_softirq(void *arg)
  */
 void net_tx_release_mbuf(struct mbuf *m)
 {
+#ifdef SPLIT_TX
+	bool lg = mempool_member(&net_tx_buf_mp, m);
+
+	preempt_disable();
+	if (lg) {
+		tcache_free(perthread_ptr(net_tx_buf_pt), m);
+	} else {
+		tcache_free(perthread_ptr(net_tx_buf_sm_pt), m->head);
+		tcache_free(perthread_ptr(mbuf_pt), m);
+	}
+	preempt_enable();
+#else
 	preempt_disable();
 	tcache_free(perthread_ptr(net_tx_buf_pt), m);
 	preempt_enable();
+#endif
 }
 
 /**
@@ -367,8 +429,8 @@ struct mbuf *net_tx_alloc_mbuf(size_t header_len)
 	preempt_disable();
 	m = tcache_alloc(perthread_ptr(net_tx_buf_pt));
 	if (unlikely(!m)) {
-		preempt_enable();
 		log_warn_ratelimited("net: out of tx buffers");
+		preempt_enable();
 		return NULL;
 	}
 	preempt_enable();
@@ -376,12 +438,44 @@ struct mbuf *net_tx_alloc_mbuf(size_t header_len)
 	buf = (unsigned char *)m + MBUF_HEAD_LEN;
 	// Set headroom so completion header is likely not on the same cache
 	// line as the payload.
-	mbuf_init(m, buf, net_get_mtu(), CACHE_LINE_SIZE + header_len);
+	mbuf_init(m, buf, net_get_mtu() + eth_headroom() + extra_headroom,
+		  extra_headroom + header_len);
 	m->txflags = 0;
-	m->release_data = 0;
 	m->release = net_tx_release_mbuf;
 	return m;
 }
+
+#ifdef SPLIT_TX
+struct mbuf *net_tx_alloc_mbuf_small(size_t header_len)
+{
+	struct mbuf *m;
+	unsigned char *buf;
+
+	preempt_disable();
+	buf = tcache_alloc(perthread_ptr(net_tx_buf_sm_pt));
+	if (unlikely(!buf)) {
+		log_warn_ratelimited("net: out of tx buffers");
+		preempt_enable();
+		return NULL;
+	}
+
+	m = tcache_alloc(perthread_ptr(mbuf_pt));
+	if (unlikely(!m)) {
+		tcache_free(perthread_ptr(net_tx_buf_sm_pt), buf);
+		log_warn_ratelimited("net: out of mbufs");
+		preempt_enable();
+		return NULL;
+	}
+
+	preempt_enable();
+
+	mbuf_init(m, buf, SMALL_BUF_SIZE + extra_headroom,
+		  header_len + extra_headroom);
+	m->txflags = 0;
+	m->release = net_tx_release_mbuf;
+	return m;
+}
+#endif
 
 /* drains overflow queues */
 int __noinline net_tx_drain_overflow(void)
@@ -668,8 +762,14 @@ int net_init_thread(void)
 
 	k->iokernel_softirq = th;
 
-	if (!cfg_directpath_external())
+	tcache_init_perthread(mbuf_tcache, &perthread_get(mbuf_pt));
+
+	if (!cfg_directpath_external()) {
 		tcache_init_perthread(net_tx_buf_tcache, &perthread_get(net_tx_buf_pt));
+#ifdef SPLIT_TX
+		tcache_init_perthread(net_tx_buf_sm_tcache, &perthread_get(net_tx_buf_sm_pt));
+#endif
+	}
 
 	return 0;
 }
@@ -716,6 +816,18 @@ static struct net_driver_ops iokernel_ops = {
  */
 int net_init(void)
 {
+	size_t sz;
+	int ret;
+
+	sz = sizeof(struct mbuf) + MBUF_INL_DATA_SZ;
+	ret = slab_create(&mbuf_slab, "mbufs", sz, 0);
+	if (ret)
+		return ret;
+
+	mbuf_tcache = slab_create_tcache(&mbuf_slab, TCACHE_DEFAULT_MAG_SIZE);
+	if (!mbuf_tcache)
+		return -ENOMEM;
+
 	log_info("net: started network stack");
 	net_dump_config();
 

@@ -16,7 +16,6 @@
 #include <iokernel/queue.h>
 
 #define MBUF_DEFAULT_LEN	2048
-#define MBUF_DEFAULT_HEADROOM	128
 
 
 struct mbuf {

@@ -17,8 +17,6 @@
 #define MLX5_MPRQ_STRIDE_NUM_SHIFT 16
 #define MLX5_MPRQ_FILLER_MASK 0x80000000
 
-#define MBUF_COPY_THRESH (2 * CACHE_LINE_SIZE)
-
 /* number of total buffers in rx mempool */
 static size_t nrbufs;
 /* array of ref counters for buffers in rx mempool */
@@ -31,11 +29,6 @@ BUILD_ASSERT(DIRECTPATH_NUM_STRIDES <= UINT16_MAX);
 static void **sw_pending_buffers;
 static uint64_t sw_pending_head;
 static uint64_t sw_pending_tail;
-
-/* slab allocator for mbuf structs */
-static struct slab mbuf_slab;
-static struct tcache *mbuf_tcache;
-static DEFINE_PERTHREAD(struct tcache_perthread, mbuf_pt);
 
 static inline bool shared_rmp_enabled(void)
 {
@@ -311,7 +304,7 @@ static struct mbuf *mbuf_fill_cqe(void *dbuf, struct mlx5_cqe64 *cqe,
 	}
 
 	/* copy small packets directly into mbuf */
-	if (len <= MBUF_COPY_THRESH) {
+	if (len <= MBUF_INL_DATA_SZ) {
 		void *buf = (void *)m + sizeof(*m);
 		memcpy(buf, dbuf + 2, len);
 		dec_sw_ref(dbuf, num_strides);
@@ -463,28 +456,12 @@ int mlx5_rx_stride_init_thread(void)
 
 	myk()->q_ptrs->directpath_strides_consumed = 0;
 
-	tcache_init_perthread(mbuf_tcache, &perthread_get(mbuf_pt));
 	return 0;
 }
 
 int mlx5_rx_stride_init(void)
 {
-	int ret;
-	size_t sz;
-
-	if (!cfg_directpath_strided)
-		return 0;
-
-	sz = sizeof(struct mbuf) + MBUF_COPY_THRESH;
-	ret = slab_create(&mbuf_slab, "mbufs", sz, 0);
-	if (ret)
-		return ret;
-
-	mbuf_tcache = slab_create_tcache(&mbuf_slab, TCACHE_DEFAULT_MAG_SIZE);
-	if (!mbuf_tcache)
-		return -ENOMEM;
-
-	if (cfg_directpath_external())
+	if (!cfg_directpath_strided || cfg_directpath_external())
 		return 0;
 
 	return mlx5_rx_stride_init_bufs();

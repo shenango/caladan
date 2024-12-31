@@ -25,6 +25,11 @@ static inline void __mempool_alloc_debug_check(struct mempool *m, void *item) {}
 static inline void __mempool_free_debug_check(struct mempool *m, void *item) {}
 #endif /* DEBUG */
 
+static inline bool mempool_member(struct mempool *m, void *addr)
+{
+	return addr >= m->buf && addr < m->buf + m->len;
+}
+
 /**
  * mempool_alloc - allocates an item from the pool
  * @m: the memory pool to allocate from
