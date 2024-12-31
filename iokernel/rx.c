@@ -87,7 +87,7 @@ static bool rx_send_pkt_to_runtime(struct proc *p, struct rte_mbuf *buf)
 	assert(!pdata->owner);
 	pdata->owner = p;
 	list_add_tail(&p->owned_rx_bufs, &pdata->link);
-	assert(pdata == (void *)buf + sizeof(buf));
+	assert(pdata == (void *)buf + sizeof(*buf));
 	return true;
 }
 

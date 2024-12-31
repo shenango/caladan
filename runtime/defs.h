@@ -577,7 +577,7 @@ struct net_cfg {
 	uint32_t		gateway;
 	struct eth_addr		mac;
 	bool			no_tx_offloads;
-	bool 			pad1[1];
+	uint8_t			min_pkt_size;
 	int			directpath_mode;
 	uint8_t			pad2[8];
 };

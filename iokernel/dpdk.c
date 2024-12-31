@@ -131,6 +131,10 @@ static inline int dpdk_port_init(uint8_t port, struct rte_mempool *mbuf_pool)
 		cfg.tx_offloads_disabled = iok_info->no_tx_offloads = true;
 	}
 
+	// bnxt requires packets to be at least 52 bytes.
+	if (!strncmp(dev_info.driver_name, "net_bnxt", strlen("net_bnxt")))
+		iok_info->min_pkt_size = 52;
+
 	/* Configure the Ethernet device. */
 	retval = rte_eth_dev_configure(port, rx_rings, tx_rings, &port_conf);
 	if (retval != 0)

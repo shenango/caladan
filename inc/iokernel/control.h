@@ -18,7 +18,7 @@
  * struct control_hdr, please increment the version number!
  */
 
-#define CONTROL_HDR_VERSION 11
+#define CONTROL_HDR_VERSION 12
 
 /* The abstract namespace path for the control socket. */
 #define CONTROL_SOCK_PATH	"\0/control/iokernel.sock"
@@ -140,6 +140,7 @@ struct iokernel_info {
 	bool			external_directpath_rmp;
 	bool			transparent_hugepages;
 	bool			no_tx_offloads;
+	uint8_t			min_pkt_size;
 };
 
 BUILD_ASSERT(sizeof(struct iokernel_info) <= IOKERNEL_INFO_SIZE);

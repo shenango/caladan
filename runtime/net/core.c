@@ -415,10 +415,18 @@ static int net_tx_iokernel(struct mbuf *m)
 	union txpkt_xmit_cmd cmd;
 	shmptr_t shm;
 	uint64_t payload;
+	uint16_t len = mbuf_length(m);
+
+
+	if (netcfg.min_pkt_size && len < netcfg.min_pkt_size) {
+		unsigned char *pad = mbuf_put(m, netcfg.min_pkt_size - len);
+		memset(pad, 0, netcfg.min_pkt_size - len);
+		len = netcfg.min_pkt_size;
+	}
 
 	cmd.dst_ip = m->tx_dst_ip;
 	cmd.txcmd = TXPKT_NET_XMIT;
-	cmd.len = mbuf_length(m);
+	cmd.len = len;
 	shm = ptr_to_shmptr(&netcfg.tx_region, mbuf_data(m), cmd.len);
 	cmd.olflags = m->txflags;
 	payload = txpkt_to_payload(shm, (uint16_t)m->hash);
@@ -716,6 +724,7 @@ int net_init(void)
 	if (!cfg_directpath_enabled()) {
 		net_ops = iokernel_ops;
 		netcfg.no_tx_offloads = iok.iok_info->no_tx_offloads;
+		netcfg.min_pkt_size = iok.iok_info->min_pkt_size;
 	}
 
 	if (cfg_directpath_external())
