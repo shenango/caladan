@@ -10,6 +10,7 @@
 
 extern int cpu_count; /* the number of available CPUs */
 extern int numa_count; /* the number of NUMA nodes */
+extern int numa_count_with_mem; /* the number of NUMA nodes with local memory */
 
 struct cpu_info {
 	DEFINE_BITMAP(thread_siblings_mask, NCPU);

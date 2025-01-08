@@ -354,7 +354,7 @@ int page_init(void)
 	addr = (void *)align_up((uintptr_t)addr, PGSIZE_2MB);
 
 	/* Then map NUMA-local large pages on top. */
-	for (i = 0; i < numa_count; i++) {
+	for (i = 0; i < numa_count_with_mem; i++) {
 		node = &lgpage_nodes[i];
 		node->tbl = mem_map_anom(
 			(char *)addr + i * LGPAGE_META_LEN,

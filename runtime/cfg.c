@@ -18,7 +18,7 @@
 static size_t arp_static_sz;
 size_t arp_static_count;
 struct cfg_arp_static_entry *static_entries;
-int preferred_socket = 0;
+int preferred_socket;
 
 /*
  * Configuration Options

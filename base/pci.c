@@ -122,7 +122,8 @@ out:
  * @addr: a pointer to the output address
  *
  * String format is DDDD:BB:SS.f, where D = domain (hex), B = bus (hex),
- * S = slot (hex), and f = function number (decimal).
+ * S = slot (hex), and f = function number (decimal). The string may also omit
+ * the domain if it is 0000 and use BB:SS.f instead.
  *
  * Returns 0 if successful, otherwise failure.
  */
@@ -132,6 +133,13 @@ int pci_str_to_addr(const char *str, struct pci_addr *addr)
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Waddress-of-packed-member"
+	ret = sscanf(str, "%02hhx:%02hhx.%hhd", &addr->bus, &addr->slot,
+		     &addr->func);
+	if (ret == 3) {
+		addr->domain = 0;
+		return 0;
+	}
+
 	ret = sscanf(str, "%04hx:%02hhx:%02hhx.%hhd",
 		     &addr->domain, &addr->bus,
 		     &addr->slot, &addr->func);

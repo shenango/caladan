@@ -90,7 +90,7 @@ __slab_create(struct slab *s, const char *name, size_t size,
 	struct slab_node *n;
 	int i;
 
-	for (i = 0; i < numa_count; i++) {
+	for (i = 0; i < numa_count_with_mem; i++) {
 		n = (struct slab_node *)slab_alloc_on_node(&node_slab, i);
 		if (!n)
 			goto fail;
@@ -119,7 +119,7 @@ __slab_early_create(struct slab *s, struct slab_node *nodes,
 {
 	int i;
 
-	for (i = 0; i < numa_count; i++) {
+	for (i = 0; i < numa_count_with_mem; i++) {
 		__slab_create_node(&nodes[i], i, size, offset, flags, nr_elems);
 		s->nodes[i] = &nodes[i];
 	}
@@ -136,7 +136,7 @@ static int __slab_early_migrate(struct slab *s)
 	struct slab_node *n;
 	int i;
 
-	for (i = 0; i < numa_count; i++) {
+	for (i = 0; i < numa_count_with_mem; i++) {
 		n = (struct slab_node *)slab_alloc_on_node(&node_slab, i);
 		if (!n)
 			goto fail;
@@ -204,7 +204,7 @@ void slab_destroy(struct slab *s)
 	list_del(&s->link);
 	spin_unlock(&slab_lock);
 
-	for (i = 0; i < numa_count; i++) {
+	for (i = 0; i < numa_count_with_mem; i++) {
 		__slab_destroy_node(s->nodes[i]);
 		slab_free(&node_slab, s->nodes[i]);
 	}
@@ -460,7 +460,7 @@ void slab_print_usage(void)
 	list_for_each(&slab_list, s, link) {
 		size_t usage = 0;
 
-		for (i = 0; i < numa_count; i++) {
+		for (i = 0; i < numa_count_with_mem; i++) {
 			struct slab_node *n = s->nodes[i];
 
 			if (n->flags & SLAB_FLAG_LGPAGE) {

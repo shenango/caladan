@@ -20,6 +20,8 @@
 int cpu_count;
 /* the number of NUMA nodes detected */
 int numa_count;
+/* the number of NUMA nodes detected with memory */
+int numa_count_with_mem;
 /* a table of information on each CPU */
 struct cpu_info cpu_info_tbl[NCPU];
 
@@ -27,6 +29,7 @@ static int cpu_scan_topology(void)
 {
 	char path[PATH_MAX];
 	DEFINE_BITMAP(numa_mask, NNUMA);
+	DEFINE_BITMAP(numa_mem_mask, NNUMA);
 	DEFINE_BITMAP(cpu_mask, NCPU);
 	uint64_t tmp;
 	int i;
@@ -35,10 +38,22 @@ static int cpu_scan_topology(void)
 	if (sysfs_parse_bitlist("/sys/devices/system/node/online",
 			        numa_mask, NNUMA))
 		return -EIO;
+	/* How many NUMA nodes with memory? */
+	if (sysfs_parse_bitlist("/sys/devices/system/node/has_memory",
+			        numa_mem_mask, NNUMA))
+		return -EIO;
+
 	bitmap_for_each_set(numa_mask, NNUMA, i) {
 		numa_count++;
 		if (numa_count <= i) {
 			log_err("cpu: can't support non-contiguous NUMA mask.");
+			return -EINVAL;
+		}
+		if (!bitmap_test(numa_mem_mask, i))
+			continue;
+		numa_count_with_mem++;
+		if (numa_count_with_mem <= i) {
+			log_err("cpu: can't support non-contiguous NUMA mem mask.");
 			return -EINVAL;
 		}
 	}
@@ -48,7 +63,7 @@ static int cpu_scan_topology(void)
 			numa_count);
 		return -EINVAL;
 	}
-	
+
 	/* How many CPUs? */
 	if (sysfs_parse_bitlist("/sys/devices/system/cpu/online",
 			        cpu_mask, NCPU))
@@ -104,6 +119,7 @@ int cpu_init(void)
 	if (ret)
 		return ret;
 
-	log_info("cpu: detected %d cores, %d nodes", cpu_count, numa_count);
+	log_info("cpu: detected %d cores, %d nodes (%d with mem)", cpu_count,
+		 numa_count, numa_count_with_mem);
 	return 0;
 }
