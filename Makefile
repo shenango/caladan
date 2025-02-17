@@ -80,6 +80,8 @@ asm = $(runtime_asm) $(base_asm)
 obj = $(src:.c=.o) $(asm:.S=.o)
 dep = $(obj:.o=.d)
 
+$(obj): build/config Makefile build/shared.mk
+
 ifneq ($(MAKECMDGOALS),clean)
 -include $(dep)   # include all dep files in the makefile
 endif
