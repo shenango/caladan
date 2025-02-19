@@ -225,7 +225,7 @@ int udp_listen(struct netaddr laddr, udpconn_t **c_out)
 	int ret;
 
 	/* only can support one local IP so far */
-	if (laddr.ip == 0)
+	if (laddr.ip == 0 || laddr.ip == MAKE_IP_ADDR(127, 0, 0, 1))
 		laddr.ip = netcfg.addr;
 	else if (laddr.ip != netcfg.addr)
 		return -EINVAL;
@@ -701,7 +701,7 @@ ssize_t udp_send(const void *buf, size_t len,
 
 	if (len > udp_get_payload_size())
 		return -EMSGSIZE;
-	if (laddr.ip == 0)
+	if (laddr.ip == 0 || laddr.ip == MAKE_IP_ADDR(127, 0, 0, 1))
 		laddr.ip = netcfg.addr;
 	else if (laddr.ip != netcfg.addr)
 		return -EINVAL;
@@ -736,7 +736,7 @@ ssize_t udp_sendv(const struct iovec *iov, int iovcnt,
 	int i, ret;
 	ssize_t len = 0;
 
-	if (laddr.ip == 0)
+	if (laddr.ip == 0 || laddr.ip == MAKE_IP_ADDR(127, 0, 0, 1))
 		laddr.ip = netcfg.addr;
 	else if (laddr.ip != netcfg.addr)
 		return -EINVAL;
