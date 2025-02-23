@@ -27,7 +27,7 @@
 
 static const struct rte_eth_conf port_conf_default = {
 	.rxmode = {
-		.max_lro_pkt_size = RTE_ETHER_MAX_LEN,
+		.mtu = RTE_ETHER_MAX_LEN,
 		.offloads = DEV_RX_OFFLOAD_IPV4_CKSUM,
 	},
 	.txmode = {
