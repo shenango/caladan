@@ -27,7 +27,7 @@
 
 static const struct rte_eth_conf port_conf_default = {
 	.rxmode = {
-		.max_rx_pkt_len = RTE_ETHER_MAX_LEN,
+		.mtu = RTE_ETHER_MAX_LEN,
 		.offloads = DEV_RX_OFFLOAD_IPV4_CKSUM,
 	},
 	.txmode = {
@@ -271,8 +271,8 @@ static void send_arp(uint16_t op, struct rte_ether_addr dst_eth, uint32_t dst_ip
 	buf_ptr = rte_pktmbuf_append(buf, RTE_ETHER_HDR_LEN);
 	eth_hdr = (struct rte_ether_hdr *) buf_ptr;
 
-	rte_ether_addr_copy(&my_eth, &eth_hdr->s_addr);
-	rte_ether_addr_copy(&dst_eth, &eth_hdr->d_addr);
+	rte_ether_addr_copy(&my_eth, &eth_hdr->src_addr);
+	rte_ether_addr_copy(&dst_eth, &eth_hdr->dst_addr);
 	eth_hdr->ether_type = rte_cpu_to_be_16(RTE_ETHER_TYPE_ARP);
 
 	/* arp header */
@@ -305,8 +305,8 @@ static bool check_eth_hdr(struct rte_mbuf *buf)
 	struct rte_arp_hdr *a_hdr;
 
 	ptr_mac_hdr = rte_pktmbuf_mtod(buf, struct rte_ether_hdr *);
-	if (!rte_is_same_ether_addr(&ptr_mac_hdr->d_addr, &my_eth) &&
-			!rte_is_broadcast_ether_addr(&ptr_mac_hdr->d_addr)) {
+	if (!rte_is_same_ether_addr(&ptr_mac_hdr->dst_addr, &my_eth) &&
+			!rte_is_broadcast_ether_addr(&ptr_mac_hdr->dst_addr)) {
 		/* packet not to our ethernet addr */
 		return false;
 	}
@@ -409,7 +409,7 @@ static void do_client(uint8_t port)
 			buf = bufs[i];
 
 			ptr_mac_hdr = rte_pktmbuf_mtod(buf, struct rte_ether_hdr *);
-			if (!rte_is_same_ether_addr(&ptr_mac_hdr->d_addr, &my_eth)) {
+			if (!rte_is_same_ether_addr(&ptr_mac_hdr->dst_addr, &my_eth)) {
 					/* packet not to our ethernet addr */
 					continue;
 			}
@@ -450,8 +450,8 @@ got_mac:
 		buf_ptr = rte_pktmbuf_append(buf, RTE_ETHER_HDR_LEN);
 		eth_hdr = (struct rte_ether_hdr *) buf_ptr;
 
-		rte_ether_addr_copy(&my_eth, &eth_hdr->s_addr);
-		rte_ether_addr_copy(p_server_eth, &eth_hdr->d_addr);
+		rte_ether_addr_copy(&my_eth, &eth_hdr->src_addr);
+		rte_ether_addr_copy(p_server_eth, &eth_hdr->dst_addr);
 		eth_hdr->ether_type = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4);
 
 		/* IPv4 header */
@@ -642,9 +642,9 @@ do_server(void *arg)
 
 				/* swap src and dst ether addresses */
 				ptr_mac_hdr = rte_pktmbuf_mtod(buf, struct rte_ether_hdr *);
-				rte_ether_addr_copy(&ptr_mac_hdr->s_addr, &src_addr);
-				rte_ether_addr_copy(&ptr_mac_hdr->d_addr, &ptr_mac_hdr->s_addr);
-				rte_ether_addr_copy(&src_addr, &ptr_mac_hdr->d_addr);
+				rte_ether_addr_copy(&ptr_mac_hdr->src_addr, &src_addr);
+				rte_ether_addr_copy(&ptr_mac_hdr->dst_addr, &ptr_mac_hdr->src_addr);
+				rte_ether_addr_copy(&src_addr, &ptr_mac_hdr->dst_addr);
 
 				/* swap src and dst IP addresses */
 				ptr_ipv4_hdr = rte_pktmbuf_mtod_offset(buf, struct rte_ipv4_hdr *,
@@ -856,7 +856,7 @@ main(int argc, char *argv[])
 		do_client(dpdk_port);
 	else {
 		i = 0;
-		RTE_LCORE_FOREACH_SLAVE(lcore_id)
+		RTE_LCORE_FOREACH_WORKER(lcore_id)
 			rte_eal_remote_launch(do_server, (void *) i++, lcore_id);
 		do_server((void *) i);
 	}
