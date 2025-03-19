@@ -34,8 +34,8 @@
 
 /* special-purpose registers */
 #define RAX	(112)	/* return code */
-#define RIP	(120)	/* instruction pointer */
-#define RSP	(128)	/* stack pointer */
+#define RIP	(136)	/* instruction pointer */
+#define RSP	(152)	/* stack pointer */
 
 /**
  * __jmp_thread - executes a thread from the runtime

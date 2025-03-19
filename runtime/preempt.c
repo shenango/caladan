@@ -79,10 +79,11 @@ static void handle_sigusr2(int s, siginfo_t *si, void *c)
  * WARNING: any functions called from this function before xsavec is called
  * must be marked with __nofp.
  */
-__weak __nofp void uintr_entry(struct uintr_frame *uintr_frame)
+__weak __nofp void uintr_entry(struct thread_tf *tf)
 {
 	struct kthread *k;
 	unsigned char *xsave_buf;
+	unsigned long active_xstates;
 
 	STAT(PREEMPTIONS)++;
 
@@ -107,8 +108,10 @@ __weak __nofp void uintr_entry(struct uintr_frame *uintr_frame)
 	/* zero xsave header */
 	__builtin_memset(xsave_buf + 512, 0, 64);
 
+	active_xstates = __builtin_ia32_xgetbv(1);
+
 	/* save state */
-	__builtin_ia32_xsavec64(xsave_buf, xsave_features);
+	__builtin_ia32_xsavec64(xsave_buf, active_xstates);
 
 	if (do_cede) {
 		thread_cede();
@@ -120,7 +123,7 @@ __weak __nofp void uintr_entry(struct uintr_frame *uintr_frame)
 	}
 
 	/* restore state */
-	__builtin_ia32_xrstor64(xsave_buf, xsave_features);
+	__builtin_ia32_xrstor64(xsave_buf, active_xstates);
 }
 
 /**
