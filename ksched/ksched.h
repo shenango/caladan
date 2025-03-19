@@ -56,7 +56,7 @@ struct ksched_shm_cpu {
 };
 
 #define KSCHED_MAGIC		0xF0
-#define KSCHED_IOC_MAXNR	6
+#define KSCHED_IOC_MAXNR	7
 
 #define KSCHED_IOC_START	_IO(KSCHED_MAGIC, 1)
 #define KSCHED_IOC_PARK		_IO(KSCHED_MAGIC, 2)
@@ -64,4 +64,4 @@ struct ksched_shm_cpu {
 #define KSCHED_IOC_UINTR_MULTICAST _IOW(KSCHED_MAGIC, 4, struct ksched_intr_req)
 #define KSCHED_IOC_UINTR_SETUP_USER		_IO(KSCHED_MAGIC, 5)
 #define KSCHED_IOC_UINTR_SETUP_ADMIN		_IO(KSCHED_MAGIC, 6)
-
+#define KSCHED_IOC_GETTID        _IO(KSCHED_MAGIC, 7)

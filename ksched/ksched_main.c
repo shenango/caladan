@@ -315,7 +315,7 @@ static long ksched_park(struct uintr_ctx *ctx, u64 next_stack)
 	p->last_gen = gen;
 
 	/* are we waking the current pid? */
-	if (tid == task_pid_vnr(current)) {
+	if (tid == task_pid_nr(current)) {
 		WRITE_ONCE(s->busy, true);
 		local_set(&p->busy, true);
 		smp_store_release(&s->last_gen, gen);
@@ -448,6 +448,8 @@ ksched_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		return uintr_setup_user(filp, arg);
 	case KSCHED_IOC_UINTR_SETUP_ADMIN:
 		return uintr_setup_admin(filp);
+	case KSCHED_IOC_GETTID:
+		return task_pid_nr(current);
 	default:
 		break;
 	}

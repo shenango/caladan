@@ -68,6 +68,7 @@ static struct kthread *allock(void)
  */
 int kthread_init_thread(void)
 {
+	long ret;
 	struct kthread *mykthread;
 
 	mykthread = allock();
@@ -82,6 +83,13 @@ int kthread_init_thread(void)
 
 	perthread_store(kthread_idx, mykthread->kthread_idx);
 	perthread_store(mykthread, mykthread);
+
+	mykthread->tid = thread_gettid();
+
+	ret = syscall_ioctl(ksched_fd, KSCHED_IOC_GETTID, 0);
+	BUG_ON(ret <= 0);
+
+	iok.threads[mykthread->kthread_idx].tid = ret;
 
 	return 0;
 }

@@ -417,11 +417,9 @@ fail:
 int ioqueues_init_thread(void)
 {
 	int ret;
-	pid_t tid = myk()->tid = thread_gettid();
 	struct shm_region *r = &netcfg.tx_region;
 
 	struct thread_spec *ts = &iok.threads[myk()->kthread_idx];
-	ts->tid = tid;
 
 	ret = shm_init_lrpc_in(r, &ts->rxq, &myk()->rxq);
 	BUG_ON(ret);
