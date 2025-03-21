@@ -2,6 +2,8 @@
  * switch.S - assembly routines for switching trap frames
  */
 
+#include <base/trapframe.h>
+
 /*
  * Trap Frame Format
  * WARNING: These values reflect the layout of struct thread_tf. Don't change
@@ -11,31 +13,6 @@
 .file "switch.S"
 .section        .note.GNU-stack,"",@progbits
 .text
-
-/* arguments registers (can be clobbered) */
-#define RDI	(0)
-#define RSI	(8)
-#define RDX	(16)
-#define RCX	(24)
-#define R8	(32)
-#define R9	(40)
-
-/* temporary registers (can be clobbered) */
-#define R10	(48)
-#define R11	(56)
-
-/* callee-saved registers (can not be clobbered) */
-#define RBX	(64)
-#define RBP	(72)
-#define R12	(80)
-#define R13	(88)
-#define R14	(96)
-#define R15	(104)
-
-/* special-purpose registers */
-#define RAX	(112)	/* return code */
-#define RIP	(136)	/* instruction pointer */
-#define RSP	(152)	/* stack pointer */
 
 /**
  * __jmp_thread - executes a thread from the runtime

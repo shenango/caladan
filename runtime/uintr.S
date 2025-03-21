@@ -15,6 +15,10 @@ uintr_asm_entry:
 	.cfi_offset rsp, -8
 	.cfi_offset rip, -24
 
+	// skip pad
+	subq  $8, %rsp
+	.cfi_adjust_cfa_offset 8
+
 	// set xsave_area to NULL
 	pushq $0
 	.cfi_adjust_cfa_offset 8
@@ -83,7 +87,14 @@ uintr_asm_entry:
 	// set first argument to beginning of trapframe
 	movq    %rsp, %rdi
 
+	// Align the stack
+	subq    $8, %rsp
+	.cfi_adjust_cfa_offset 8
+
 	call     uintr_entry
+
+	addq	$8, %rsp
+	.cfi_adjust_cfa_offset -8
 
 .align 16
 .globl uintr_asm_return
@@ -135,9 +146,9 @@ uintr_asm_return:
 	popq   %rax;
 	.cfi_adjust_cfa_offset -8
 
-	// remove uirrv, xsave_area
-	addq    $16, %rsp
-	.cfi_adjust_cfa_offset -16
+	// remove pad, uirrv, xsave_area
+	addq    $24, %rsp
+	.cfi_adjust_cfa_offset -24
 
 	uiret
 	nop
