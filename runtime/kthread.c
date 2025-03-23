@@ -320,5 +320,11 @@ int kthread_init(void)
 	ksched_fd = open("/dev/ksched", O_RDWR);
 	if (ksched_fd < 0)
 		return -errno;
+
+	if (ioctl(ksched_fd, KSCHED_IOC_GET_USER_API_VER) != KSCHED_USER_API_VER) {
+		log_err("ksched: version mismatch");
+		return -1;
+	}
+
 	return 0;
 }

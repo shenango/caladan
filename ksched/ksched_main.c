@@ -436,8 +436,6 @@ ksched_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		return -ENOTTY;
 
 	switch (cmd) {
-	case KSCHED_IOC_START:
-		return ksched_start(to_uintr_ctx(filp), arg);
 	case KSCHED_IOC_PARK:
 		return ksched_park(to_uintr_ctx(filp), arg);
 	case KSCHED_IOC_INTR:
@@ -448,8 +446,14 @@ ksched_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		return uintr_setup_user(filp, arg);
 	case KSCHED_IOC_UINTR_SETUP_ADMIN:
 		return uintr_setup_admin(filp);
+	case KSCHED_IOC_START:
+		return ksched_start(to_uintr_ctx(filp), arg);
 	case KSCHED_IOC_GETTID:
 		return task_pid_nr(current);
+	case KSCHED_IOC_GET_USER_API_VER:
+		return KSCHED_USER_API_VER;
+	case KSCHED_IOC_GET_SCHED_API_VER:
+		return KSCHED_SCHED_API_VER;
 	default:
 		break;
 	}

@@ -14,6 +14,13 @@
 #define KSCHED_MAJOR		280
 #define KSCHED_MINOR		0
 
+/*
+ * Bump these version numbers when the API for the scheduler or programs is
+ * modified.
+ */
+#define KSCHED_SCHED_API_VER 	2
+#define KSCHED_USER_API_VER 	2
+
 struct ksched_intr_req {
 	size_t			len;
 	const void __user	*mask;
@@ -56,7 +63,7 @@ struct ksched_shm_cpu {
 };
 
 #define KSCHED_MAGIC		0xF0
-#define KSCHED_IOC_MAXNR	7
+#define KSCHED_IOC_MAXNR	9
 
 #define KSCHED_IOC_START	_IO(KSCHED_MAGIC, 1)
 #define KSCHED_IOC_PARK		_IO(KSCHED_MAGIC, 2)
@@ -65,3 +72,5 @@ struct ksched_shm_cpu {
 #define KSCHED_IOC_UINTR_SETUP_USER		_IO(KSCHED_MAGIC, 5)
 #define KSCHED_IOC_UINTR_SETUP_ADMIN		_IO(KSCHED_MAGIC, 6)
 #define KSCHED_IOC_GETTID        _IO(KSCHED_MAGIC, 7)
+#define KSCHED_IOC_GET_USER_API_VER        _IO(KSCHED_MAGIC, 8)
+#define KSCHED_IOC_GET_SCHED_API_VER        _IO(KSCHED_MAGIC, 9)

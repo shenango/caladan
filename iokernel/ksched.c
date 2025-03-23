@@ -64,6 +64,11 @@ int ksched_init(void)
 		return -errno;
 	}
 
+	if (ioctl(ksched_fd, KSCHED_IOC_GET_SCHED_API_VER) != KSCHED_SCHED_API_VER) {
+		log_err("ksched module API mismatch");
+		return -1;
+	}
+
 	/* then map the shared memory region with the kernel */
 	ksched_addr = mmap(NULL, sizeof(struct ksched_shm_cpu) * NCPU,
 		    PROT_READ | PROT_WRITE, MAP_SHARED, ksched_fd, 0);
