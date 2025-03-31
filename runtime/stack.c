@@ -108,10 +108,10 @@ int stack_init_thread(void)
 }
 
 /**
- * stack_init - initializes the stack allocator
+ * runtime_stack_init - initializes the stack allocator
  * Returns 0 if successful, or -ENOMEM if out of memory.
  */
-int stack_init(void)
+int runtime_stack_init(void)
 {
 	stack_tcache = tcache_create("runtime_stacks", &stack_tcache_ops,
 				     TCACHE_DEFAULT_MAG_SIZE,

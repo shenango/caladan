@@ -691,7 +691,7 @@ extern int preempt_init_thread(void);
 /* global initialization */
 extern int kthread_init(void);
 extern int ioqueues_init(void);
-extern int stack_init(void);
+extern int runtime_stack_init(void);
 extern int sched_init(void);
 extern int preempt_init(void);
 extern int net_init(void);

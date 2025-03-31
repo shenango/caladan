@@ -32,7 +32,7 @@ static const struct init_entry global_init_handlers[] = {
 	/* runtime core */
 	GLOBAL_INITIALIZER(kthread),
 	GLOBAL_INITIALIZER(ioqueues),
-	GLOBAL_INITIALIZER(stack),
+	GLOBAL_INITIALIZER(runtime_stack),
 	GLOBAL_INITIALIZER(sched),
 	GLOBAL_INITIALIZER(preempt),
 	GLOBAL_INITIALIZER(smalloc),
