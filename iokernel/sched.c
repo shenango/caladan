@@ -196,7 +196,7 @@ static struct thread *sched_pick_kthread(struct proc *p, uint16_t core)
 	uint16_t i;
 
 	for (i = 0; i < p->thread_count; i++) {
-		if (p->last_core[i] == core || p->last_core[i] == sched_siblings[core])
+		if (p->last_core[i] == core || (!cfg.noht && p->last_core[i] == sched_siblings[core]))
 			return &p->threads[i];
 	}
 
