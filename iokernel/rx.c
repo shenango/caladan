@@ -124,6 +124,9 @@ static void rx_one_pkt(struct rte_mbuf *buf)
 	uint16_t ether_type;
 	uint32_t dst_ip;
 
+	ptr_mac_hdr = rte_pktmbuf_mtod(buf, struct rte_ether_hdr *);
+	ptr_dst_addr = &ptr_mac_hdr->dst_addr;
+
 	/* use hardware assisted flow tagging to match packets to procs */
 	if (buf->ol_flags & RTE_MBUF_F_RX_FDIR_ID) {
 		STAT_INC(RX_FLOW_TAG_MATCH, 1);
@@ -139,8 +142,6 @@ static void rx_one_pkt(struct rte_mbuf *buf)
 		}
 	}
 
-	ptr_mac_hdr = rte_pktmbuf_mtod(buf, struct rte_ether_hdr *);
-	ptr_dst_addr = &ptr_mac_hdr->dst_addr;
 	log_debug("rx: rx packet with MAC %02" PRIx8 " %02" PRIx8 " %02"
 		  PRIx8 " %02" PRIx8 " %02" PRIx8 " %02" PRIx8,
 		  ptr_dst_addr->addr_bytes[0], ptr_dst_addr->addr_bytes[1],

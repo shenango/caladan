@@ -2,6 +2,7 @@
  * sched.c - low-level scheduler routines (e.g. adding and preempting cores)
  */
 
+#include <float.h>
 #include <stdio.h>
 
 #include <base/stddef.h>
@@ -599,7 +600,7 @@ static void sched_measure_delay(struct proc *p)
 	dl.standing_queue = false;
 	dl.parked_thread_busy = false;
 	dl.max_delay_us = 0;
-	dl.min_delay_us = UINT64_MAX;
+	dl.min_delay_us = FLT_MAX;
 	dl.avg_delay_us = 0;
 
 	directpath_poll_proc_prefetch(p);

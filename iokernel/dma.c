@@ -205,7 +205,7 @@ static int dma_chan_init(struct dma_chan *chan, int16_t next_dev_id)
 		return -1;
 
 	chan->dev_id = rte_dma_next_dev(next_dev_id);
-	if (chan->dev_id == UINT16_MAX || chan->dev_id < next_dev_id)
+	if ((uint16_t)chan->dev_id == UINT16_MAX || chan->dev_id < next_dev_id)
 		return -1;
 
 	ret = rte_dma_configure(chan->dev_id, &dev_config);

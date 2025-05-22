@@ -86,11 +86,6 @@ tcp_push_tcphdr(struct mbuf *m, tcpconn_t *c, uint8_t flags,
 	return __tcp_add_tcphdr(m, c, flags, off, l4len, true);
 }
 
-static __always_inline struct tcp_hdr *
-tcp_put_tcphdr(struct mbuf *m, tcpconn_t *c, uint8_t flags,
-		uint8_t off, uint16_t l4len) {
-	return __tcp_add_tcphdr(m, c, flags, off, l4len, false);
-}
 
 /**
  * tcp_tx_raw_rst - send a RST without an established connection

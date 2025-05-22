@@ -254,7 +254,8 @@ void kthread_park(void)
 	struct kthread *k = myk();
 	bool voluntary;
 
-	voluntary = !preempt_cede_needed(k) & !preempt_park_needed(k);
+	voluntary = !preempt_cede_needed(k);
+	voluntary &= !preempt_park_needed(k);
 
 	assert_preempt_disabled();
 
