@@ -69,11 +69,9 @@ RUNTIME_LIBS += $(shell PKG_CONFIG_PATH="$(PKG_CONFIG_PATH)" pkg-config --libs -
 RUNTIME_LIBS += $(shell PKG_CONFIG_PATH="$(PKG_CONFIG_PATH)" pkg-config --libs --static spdk_syslibs)
 INC += -I$(ROOT_PATH)/spdk/include
 endif
-ifeq ($(CONFIG_DIRECTPATH),y)
 RUNTIME_LIBS += $(MLX5_LIBS)
 INC += $(MLX5_INC)
 FLAGS += -DDIRECTPATH
-endif
 
 ifeq ($(CONFIG_SPLIT_TX),y)
 FLAGS += -DSPLIT_TX

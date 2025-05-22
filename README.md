@@ -24,10 +24,9 @@ sudo apt install make gcc cmake pkg-config libnl-3-dev libnl-route-3-dev libnuma
 make submodules
 ```
 
-4) Build the scheduler (IOKernel), the Caladan runtime, and Ksched and perform some machine setup.
-Before building, set the parameters in build/config (e.g., `CONFIG_SPDK=y` to use
-storage, `CONFIG_DIRECTPATH=y` to use directpath, and the MLX4 or MLX5 flags to use
-MLX4 or MLX5 NICs, respectively, ). To enable debugging, set `CONFIG_DEBUG=y` before building.
+4) Build the scheduler (IOKernel), the Caladan runtime, and Ksched, and perform machine setup.
+Before building, optionally set parameters in build/config (e.g., `CONFIG_SPDK=y` to enable
+storage support). To enable debugging, set `CONFIG_DEBUG=y`.
 ```
 make clean && make
 pushd ksched
@@ -93,9 +92,8 @@ NIC firmware must include support for User Context Objects (DEVX) and Software M
 For the ConnectX-5, the firmware version must be at least 16.26.1040. Additionally, directpath requires
 Linux kernel version 5.0.0 or newer.
 
-To enable directpath, set `CONFIG_DIRECTPATH=y` in build/config before building and add `enable_directpath`
-to the config file for all runtimes that should use directpath. Each runtime launched with directpath must
-currently run as root and have a unique IP address.
+To enable directpath, add `enable_directpath` to the config file for all runtimes that should use directpath.
+Each runtime launched with directpath must currently run as root and have a unique IP address.
 
 ### Storage
 This code has been tested with an Intel Optane SSD 900P Series NVMe device.
