@@ -14,7 +14,7 @@
 /* used to define perthread variables */
 #define DEFINE_PERTHREAD(type, name)                                           \
   typeof(type) __perthread_##name __perthread                                  \
-      __attribute__((section(".perthread,\"\",@nobits#")))
+      __attribute__((section(".perthread")))
 
 /* used to make perthread variables externally available */
 #define DECLARE_PERTHREAD(type, name) extern DEFINE_PERTHREAD(type, name)
