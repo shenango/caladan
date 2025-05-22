@@ -61,14 +61,6 @@ else
 FLAGS += -mssse3
 endif
 endif
-ifeq ($(CONFIG_MLX5),y)
-FLAGS += -DMLX5
-else
-ifeq ($(CONFIG_MLX4),y)
-$(error mlx4 support is not available currently)
-FLAGS += -DMLX4
-endif
-endif
 ifeq ($(CONFIG_SPDK),y)
 FLAGS += -DDIRECT_STORAGE
 RUNTIME_LIBS += $(shell PKG_CONFIG_PATH="$(PKG_CONFIG_PATH)" pkg-config --libs --static libdpdk)

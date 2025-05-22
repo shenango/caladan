@@ -2,8 +2,6 @@
  * hw_timestamp.h - methods for tracking hardware timestamps in MLX5
  */
 
-#ifdef MLX5
-
 #include <infiniband/mlx5dv.h>
 #include <util/mmio.h>
 
@@ -41,30 +39,3 @@ static inline uint64_t hw_timestamp_delay_us(struct mlx5_cqe64 *cqe)
 	}
 	return 0;
 }
-
-#else
-
-struct mlx5_cqe64;
-
-static inline bool is_hw_timestamp_enabled()
-{
-	return false;
-}
-static inline void hw_timestamp_update(void) {}
-static inline uint64_t hw_timestamp_delay_us(struct mlx5_cqe64 *cqe)
-{
-	return 0;
-}
-
-static inline int nl_register_mac_address(struct eth_addr *mac)
-{
-	return 0;
-}
-
-static inline int nl_remove_mac_address(struct eth_addr *mac)
-{
-	return 0;
-}
-
-
-#endif

@@ -49,9 +49,7 @@ all: libbase.a libnet.a libruntime.a iokerneld $(test_targets) shim
 $(iokernel_obj): INC += -I$(DPDK_PATH)/build/include
 
 # additional libs for running with Mellanox NICs
-ifeq ($(CONFIG_MLX5),y)
 $(iokernel_obj): INC += $(MLX5_INC)
-endif
 
 libbase.a: $(base_obj)
 	$(AR) rcs $@ $^

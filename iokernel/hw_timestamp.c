@@ -2,8 +2,6 @@
  * hw_timestamp.c - methods for tracking hardware timestamps in MLX5
  */
 
-#ifdef MLX5
-
 #include <asm/ops.h>
 #include <base/log.h>
 #include <base/stddef.h>
@@ -162,14 +160,3 @@ int hw_timestamp_init(void)
 
 	return 0;
 }
-
-#else
-
-int hw_timestamp_init(void)
-{
-	return 0;
-}
-
-#endif
-
-
