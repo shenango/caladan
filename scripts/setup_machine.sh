@@ -27,7 +27,7 @@ mknod /dev/ksched c 280 0
 chmod uga+rwx /dev/ksched
 
 # reserve huge pages
-echo 5192 | sudo tee  /sys/devices/system/node/node*/hugepages/hugepages-2048kB/nr_hugepages > /dev/null
+echo 5192 | tee /sys/devices/system/node/node*/hugepages/hugepages-2048kB/nr_hugepages > /dev/null
 
 echo madvise > /sys/kernel/mm/transparent_hugepage/enabled
 
