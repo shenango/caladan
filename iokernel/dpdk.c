@@ -114,6 +114,7 @@ static inline int dpdk_port_init(uint8_t port, struct rte_mempool *mbuf_pool)
 		nb_rxd = MLX5_RX_RING_SIZE;
 		nb_txd = MLX5_TX_RING_SIZE;
 		port_conf.lpbk_mode = 1;
+		dataplane_mode = IOK_NET_MODE_DPDK_MLX5;
 	}
 
 	bool is_tap =
@@ -129,6 +130,7 @@ static inline int dpdk_port_init(uint8_t port, struct rte_mempool *mbuf_pool)
 		// allocate a new buffer from the same mempool, since our TX
 		// mempool only attaches to external buffers.
 		cfg.tx_offloads_disabled = iok_info->no_tx_offloads = true;
+		dataplane_mode = IOK_NET_MODE_DPDK_TAP;
 	}
 
 	// bnxt requires packets to be at least 52 bytes.
@@ -405,8 +407,10 @@ deregister:
 int dpdk_late_init(void)
 {
 
-	if (cfg.vfio_directpath)
+	if (cfg.vfio_directpath) {
+		dataplane_mode = IOK_NET_MODE_VFIO_MLX5;
 		return 0;
+	}
 
 	/* initialize port */
 	if (dpdk_port_init(dp.port, dp.rx_mbuf_pool) != 0) {

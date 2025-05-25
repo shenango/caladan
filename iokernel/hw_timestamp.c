@@ -95,6 +95,11 @@ int hw_timestamp_init(void)
 		return 0;
 	}
 
+	if (dataplane_mode != IOK_NET_MODE_DPDK_MLX5) {
+		cfg.no_hw_qdel = true;
+		return 0;
+	}
+
 	dev_list = ibv_get_device_list(NULL);
 	if (!dev_list) {
 		perror("Failed to get IB devices list");

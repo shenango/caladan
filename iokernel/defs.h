@@ -19,6 +19,23 @@
 
 #define STATS 1
 
+
+enum {
+	// Low performance.
+	IOK_NET_MODE_DPDK_TAP = 0,
+
+	// Medium performance.
+	// IOK_NET_MODE_DPDK_GVE,
+	// IOK_NET_MODE_DPDK_MANA,
+	// IOK_NET_MODE_DPDK_BNXT,
+	// IOK_NET_MODE_DPDK_IXGBE,
+	// IOK_NET_MODE_DPDK_I40E,
+
+	// High performance.
+	IOK_NET_MODE_DPDK_MLX5,
+	IOK_NET_MODE_VFIO_MLX5,
+};
+
 /*
  * configuration parameters
  */
@@ -42,6 +59,7 @@ extern struct iokernel_cfg cfg;
 extern uint32_t nr_vfio_prealloc;
 extern unsigned int vfio_prealloc_nrqs;
 extern bool vfio_prealloc_rmp;
+extern int dataplane_mode;
 
 /*
  * Constant limits

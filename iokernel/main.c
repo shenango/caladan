@@ -21,6 +21,7 @@
 struct iokernel_cfg cfg;
 struct dataplane dp;
 
+int dataplane_mode;
 unsigned int vfio_prealloc_nrqs = 1;
 bool vfio_prealloc_rmp = true;
 uint32_t nr_vfio_prealloc;
