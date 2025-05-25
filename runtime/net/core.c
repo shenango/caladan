@@ -835,6 +835,12 @@ int net_init(void)
 		net_ops = iokernel_ops;
 		netcfg.no_tx_offloads = iok.iok_info->no_tx_offloads;
 		netcfg.min_pkt_size = iok.iok_info->min_pkt_size;
+		log_warn("****************************************************************************************");
+		log_warn("*                           WARNING: DIRECTPATH DISABLED                               *");
+		log_warn("*                                                                                      *");
+		log_warn("*                        DO NOT USE FOR PERFORMANCE BENCHMARKS                         *");
+		log_warn("*                                                                                      *");
+		log_warn("****************************************************************************************");
 	}
 
 	if (cfg_directpath_external())

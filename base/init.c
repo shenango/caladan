@@ -63,6 +63,15 @@ int base_init(void)
 	if (ret)
 		return ret;
 
+#ifndef BUILD_OPTIMIZED
+	log_warn("****************************************************************************************");
+	log_warn("*                           WARNING: NON-OPTIIMIZED BUILD                              *");
+	log_warn("*                                                                                      *");
+	log_warn("*                        DO NOT USE FOR PERFORMANCE BENCHMARKS                         *");
+	log_warn("*                                                                                      *");
+	log_warn("****************************************************************************************");
+#endif
+
 	base_init_done = true;
 	return 0;
 }
