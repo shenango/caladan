@@ -156,8 +156,7 @@ static void flow_registration_worker(void *arg)
 
 void register_flow(struct flow_registration *f)
 {
-	if (!cfg_directpath_enabled())
-		return;
+	thread_t *wth = NULL;
 
 	if (netcfg.directpath_mode != DIRECTPATH_MODE_FLOW_STEERING)
 		return;
@@ -167,40 +166,39 @@ void register_flow(struct flow_registration *f)
 
 	spin_lock_np(&flow_worker_lock);
 	list_add(&flow_to_register, &f->flow_reg_link);
-	if (flow_worker_th) {
-		thread_ready(flow_worker_th);
-		flow_worker_th = NULL;
-	}
+	swapvars(wth, flow_worker_th);
 	spin_unlock_np(&flow_worker_lock);
 
+	if (wth)
+		thread_ready(wth);
 }
 
 void deregister_flow(struct flow_registration *f)
 {
-	if (!cfg_directpath_enabled())
-		return;
+	thread_t *wth = NULL;
 
 	if (netcfg.directpath_mode != DIRECTPATH_MODE_FLOW_STEERING)
 		return;
 
 	spin_lock_np(&flow_worker_lock);
 	list_add(&flow_to_deregister, &f->flow_dereg_link);
-	if (flow_worker_th) {
-		thread_ready(flow_worker_th);
-		flow_worker_th = NULL;
-	}
+	swapvars(wth, flow_worker_th);
 	spin_unlock_np(&flow_worker_lock);
+
+	if (wth)
+		thread_ready(wth);
 }
 
 int directpath_init_late(void)
 {
-	if (!cfg_directpath_enabled())
-		return 0;
-
 	if (netcfg.directpath_mode != DIRECTPATH_MODE_FLOW_STEERING)
 		return 0;
 
-	return thread_spawn(flow_registration_worker, NULL);
+	flow_worker_th = thread_create(flow_registration_worker, NULL);
+	if (!flow_worker_th)
+		return -ENOMEM;
+
+	return 0;
 }
 
 #else
