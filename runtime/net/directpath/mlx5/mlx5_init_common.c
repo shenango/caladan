@@ -177,7 +177,7 @@ int mlx5_init(void)
 
 		/* try to initialize in DevX mode */
 		ret = mlx5_verbs_init_context(false);
-		if (ret == 0) {
+		if (ret == 0 && mlx5_sw_flow_steering_early_init()) {
 			netcfg.directpath_mode = DIRECTPATH_MODE_FLOW_STEERING;
 			log_err("directpath_init: selected flow steering mode");
 

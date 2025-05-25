@@ -235,10 +235,6 @@ static int mlx5_init_root_table(void)
 	union match mask = {0};
 	struct mlx5dv_dr_action *action[1];
 
-	root_tbl = mlx5dv_dr_table_create(dmn, 0);
-	if (!root_tbl)
-		return -errno;
-
 	mask.size = DEVX_ST_SZ_BYTES(fte_match_param);
 	DEVX_SET(fte_match_param, mask.buf, outer_headers.ethertype, __devx_mask(16));
 	DEVX_SET(fte_match_param, mask.buf, outer_headers.dst_ipv4_dst_ipv6.ipv4_layout.ipv4, __devx_mask(32));
@@ -385,12 +381,6 @@ static int mlx5_init_flows(void)
 
 	spin_lock_init(&direct_rule_lock);
 
-	dmn = mlx5dv_dr_domain_create(context,
-		MLX5DV_DR_DOMAIN_TYPE_NIC_RX);
-
-	if (!dmn)
-		return -errno;
-
 	ret = mlx5_init_fg_tables();
 	if (ret)
 		return ret;
@@ -418,6 +408,37 @@ static int mlx5_init_flows(void)
 	return 0;
 
 }
+
+bool mlx5_sw_flow_steering_early_init(void)
+{
+	struct mlx5dv_dr_table *test_sw_tbl;
+
+	dmn = mlx5dv_dr_domain_create(context,
+		MLX5DV_DR_DOMAIN_TYPE_NIC_RX);
+
+	if (!dmn)
+		return false;
+
+	root_tbl = mlx5dv_dr_table_create(dmn, 0);
+	if (!root_tbl)
+		goto out_destroy_domain;
+
+	log_err("root tbl %p, root_tbl");
+
+	test_sw_tbl = mlx5dv_dr_table_create(dmn, 1);
+	if (!test_sw_tbl)
+		goto out_destroy_hw_tbl;
+
+	mlx5dv_dr_table_destroy(test_sw_tbl);
+	return true;
+
+out_destroy_hw_tbl:
+	mlx5dv_dr_table_destroy(root_tbl);
+out_destroy_domain:
+	mlx5dv_dr_domain_destroy(dmn);
+	return false;
+}
+
 
 int mlx5_init_flow_steering(void)
 {

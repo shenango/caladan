@@ -91,6 +91,7 @@ extern bool mlx5_rx_poll_locked(unsigned int q_index);
 extern int mlx5_verbs_init_context(bool uses_qsteering);
 extern int mlx5_verbs_init(bool uses_qsteering);
 extern int mlx5_init_flow_steering(void);
+extern bool mlx5_sw_flow_steering_early_init(void);
 extern int mlx5_init_queue_steering(void);
 extern int mlx5_rx_stride_init(void);
 extern int mlx5_rx_stride_init_thread(void);
