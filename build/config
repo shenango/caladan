@@ -10,3 +10,5 @@ CONFIG_OPTIMIZE=y
 CONFIG_CLANG=n
 # Build with split TX pool
 CONFIG_SPLIT_TX=n
+# Don't compile with UINTR instructions (useful for out-of-date compilers)
+CONFIG_NO_UINTR=n

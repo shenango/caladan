@@ -9,7 +9,12 @@ include $(ROOT_PATH)/build/config
 
 # shared toolchain definitions
 INC = -I$(ROOT_PATH)/inc
-FLAGS  = -g -Wall -D_GNU_SOURCE $(INC) -m64 -mxsavec -m64 -mxsave -m64 -muintr
+FLAGS  = -g -Wall -D_GNU_SOURCE $(INC) -m64 -mxsavec -m64 -mxsave -m64
+
+ifeq ($(CONFIG_NO_UINTR),n)
+FLAGS += -muintr -DCONFIG_UINTR
+endif
+
 LDFLAGS = -T $(ROOT_PATH)/base/base.ld
 CC      ?= gcc
 LD      = $(CC)

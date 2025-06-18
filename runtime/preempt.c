@@ -75,6 +75,8 @@ static void handle_sigusr2(int s, siginfo_t *si, void *c)
 	thread_yield();
 }
 
+#ifdef CONFIG_UINTR
+
 /*
  * WARNING: any functions called from this function before xsavec is called
  * must be marked with __nofp.
@@ -126,6 +128,8 @@ __weak __nofp void uintr_entry(struct thread_tf *tf)
 	__builtin_ia32_xrstor64(xsave_buf, active_xstates);
 }
 
+#endif
+
 /**
  * preempt - entry point for preemption
  */
@@ -175,10 +179,11 @@ int preempt_init_thread(void)
  */
 int preempt_init(void)
 {
-	int ret;
 	struct sigaction act;
+#ifdef CONFIG_UINTR
+	int ret;
 	struct cpuid_info regs;
-
+#endif
 	act.sa_flags = SA_SIGINFO | SA_NODEFER;
 
 	if (sigemptyset(&act.sa_mask) != 0) {
@@ -198,6 +203,7 @@ int preempt_init(void)
 		return -1;
 	}
 
+#ifdef CONFIG_UINTR
 	ret = ioctl(ksched_fd, KSCHED_IOC_UINTR_SETUP_USER, uintr_asm_entry);
 	if (ret) {
 		log_err("uintr: unavailable");
@@ -214,6 +220,8 @@ int preempt_init(void)
 
 	cpuid(0xd, 0, &regs);
 	xsave_max_size = regs.ecx;
-
+#else
+	log_err("uintr: unavailable");
+#endif
 	return 0;
 }

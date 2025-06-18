@@ -148,6 +148,7 @@ static inline void ksched_send_intrs(void)
 
 	request = KSCHED_IOC_INTR;
 
+#ifdef CONFIG_UINTR
 	/* use UINTR if available (and not collecting pmc samples) */
 	if (ksched_has_uintr && !ksched_pmc_count) {
 		/* use senduipi instruction if there's just one interrupt */
@@ -159,6 +160,7 @@ static inline void ksched_send_intrs(void)
 		/* otherwise use ksched to multicast the UIPI */
 		request = KSCHED_IOC_UINTR_MULTICAST;
 	}
+#endif
 
 	req.len = sizeof(ksched_set);
 	req.mask = &ksched_set;
@@ -166,7 +168,9 @@ static inline void ksched_send_intrs(void)
 	BUG_ON(ret);
 	ksched_pmc_count = 0;
 
+#ifdef CONFIG_UINTR
 done:
+#endif
 	ksched_count = 0;
 	CPU_ZERO(&ksched_set);
 }

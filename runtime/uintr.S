@@ -1,4 +1,6 @@
 
+#ifdef CONFIG_UINTR
+
 .file "uintr.S"
 .section        .note.GNU-stack,"",@progbits
 .text
@@ -153,3 +155,5 @@ uintr_asm_return:
 	uiret
 	nop
 	.cfi_endproc
+
+#endif
