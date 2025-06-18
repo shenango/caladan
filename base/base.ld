@@ -1,9 +1,9 @@
 SECTIONS
 {
-  .perthread (READONLY) : {
+  .perthread : {
     PROVIDE(__perthread_start = .);
     *(.perthread)
     PROVIDE(__perthread_end = .);
   }
 }
-INSERT AFTER .text
+INSERT AFTER .data

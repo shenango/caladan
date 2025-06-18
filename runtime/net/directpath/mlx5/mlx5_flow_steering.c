@@ -423,8 +423,6 @@ bool mlx5_sw_flow_steering_early_init(void)
 	if (!root_tbl)
 		goto out_destroy_domain;
 
-	log_err("root tbl %p, root_tbl");
-
 	test_sw_tbl = mlx5dv_dr_table_create(dmn, 1);
 	if (!test_sw_tbl)
 		goto out_destroy_hw_tbl;
