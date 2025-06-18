@@ -76,8 +76,7 @@ cd ..
 
 echo building PCM
 cd deps/pcm
-rm -f src/pcm-caladan.cpp
-patch -p1 -N < ../../build/pcm.patch
+git -c user.name="x" -c user.email="x" am ../../build/patches/pcm/*
 mkdir -p build
 cd build
 cmake ..
