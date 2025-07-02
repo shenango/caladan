@@ -21,45 +21,20 @@
 #include "defs.h"
 #include "../ksched/ksched.h"
 
-/* protects @ks and @nrks below */
-DEFINE_SPINLOCK(klock);
-/* the maximum number of kthreads */
-unsigned int maxks;
-/* the total number of attached kthreads (i.e. the size of @ks) */
-static unsigned int nrks;
 /* the number of busy spinning kthreads (threads that don't park) */
 unsigned int spinks;
 /* the number of guaranteed kthreads (we can always have this many if we want) */
 unsigned int guaranteedks = 0;
 /* the number of active kthreads */
 atomic_t runningks;
-/* an array of attached kthreads (@nrks in total) */
-struct kthread *ks[NCPU];
+/* an array of kthreads (thread_count/maxks in total) */
+struct kthread ks[NCPU];
 /* kernel thread-local data */
 DEFINE_PERTHREAD(struct kthread *, mykthread);
-DEFINE_PERTHREAD(unsigned int, kthread_idx);
 /* Map of cpu to kthread */
 struct cpu_record cpu_map[NCPU] __attribute__((aligned(CACHE_LINE_SIZE)));
 /* the file descriptor for the ksched module */
 int ksched_fd;
-
-static struct kthread *allock(void)
-{
-	struct kthread *k;
-
-	k = aligned_alloc(CACHE_LINE_SIZE,
-			  align_up(sizeof(*k), CACHE_LINE_SIZE));
-	if (!k)
-		return NULL;
-
-	memset(k, 0, sizeof(*k));
-	spin_lock_init(&k->lock);
-	list_head_init(&k->rq_overflow);
-	mbufq_init(&k->txpktq_overflow);
-	mbufq_init(&k->txcmdq_overflow);
-	spin_lock_init(&k->timer_lock);
-	return k;
-}
 
 /**
  * kthread_init_thread - initializes state for the kthread
@@ -69,27 +44,20 @@ static struct kthread *allock(void)
 int kthread_init_thread(void)
 {
 	long ret;
-	struct kthread *mykthread;
+	struct kthread *mykthread = myk();
 
-	mykthread = allock();
-	if (!mykthread)
-		return -ENOMEM;
-
-	spin_lock_np(&klock);
-	mykthread->kthread_idx = nrks;
-	ks[nrks++] = mykthread;
-	assert(nrks <= maxks);
-	spin_unlock_np(&klock);
-
-	perthread_store(kthread_idx, mykthread->kthread_idx);
-	perthread_store(mykthread, mykthread);
+	spin_lock_init(&mykthread->lock);
+	list_head_init(&mykthread->rq_overflow);
+	mbufq_init(&mykthread->txpktq_overflow);
+	mbufq_init(&mykthread->txcmdq_overflow);
+	spin_lock_init(&mykthread->timer_lock);
 
 	mykthread->tid = thread_gettid();
 
 	ret = syscall_ioctl(ksched_fd, KSCHED_IOC_GETTID, 0);
 	BUG_ON(ret <= 0);
 
-	iok.threads[mykthread->kthread_idx].tid = ret;
+	iok.threads[kthread_idx(mykthread)].tid = ret;
 
 	return 0;
 }
@@ -182,7 +150,7 @@ static void flows_notify_waking(void)
 	if (!net_ops.steer_flows)
 		return;
 
-	bitmap_atomic_set(kthread_awake, myk()->kthread_idx);
+	bitmap_atomic_set(kthread_awake, kthread_idx(myk()));
 	atomic64_inc(&kthread_gen);
 	flows_update();
 }
@@ -192,7 +160,7 @@ static void flows_notify_parking(bool voluntary)
 	if (!net_ops.steer_flows)
 		return;
 
-	bitmap_atomic_clear(kthread_awake, myk()->kthread_idx);
+	bitmap_atomic_clear(kthread_awake, kthread_idx(myk()));
 	atomic64_inc(&kthread_gen);
 	if (voluntary)
 		flows_update();

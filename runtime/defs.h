@@ -321,7 +321,7 @@ struct timer_idx {
 struct kthread {
 	/* 1st cache-line */
 	spinlock_t		lock;
-	uint32_t		kthread_idx;
+	uint32_t		pad0;
 	uint32_t		rq_head;
 	uint32_t		rq_tail;
 	struct list_head	rq_overflow;
@@ -369,7 +369,7 @@ struct kthread {
 
 	/* 10th cache-line, statistics counters */
 	uint64_t		stats[STAT_NR];
-};
+} __aligned(CACHE_LINE_SIZE * 2);
 
 /* compile-time verification of cache-line alignment */
 BUILD_ASSERT(offsetof(struct kthread, lock) % CACHE_LINE_SIZE == 0);
@@ -382,20 +382,32 @@ BUILD_ASSERT(offsetof(struct kthread, storage_q) % CACHE_LINE_SIZE == 0);
 #endif
 BUILD_ASSERT(offsetof(struct kthread, stats) % CACHE_LINE_SIZE == 0);
 
-DECLARE_PERTHREAD(struct kthread *, mykthread);
-DECLARE_PERTHREAD(unsigned int, kthread_idx);
+extern struct kthread ks[NCPU];
 
 /**
  * myk - returns the per-kernel-thread data
  */
 static inline struct kthread *myk(void)
 {
-	return perthread_read(mykthread);
+	return &ks[this_thread_id()];
+}
+
+/**
+ * myk_stable - returns the per-kernel-thread data, may used a cached value
+ */
+static inline struct kthread *myk_stable(void)
+{
+	return &ks[perthread_read_stable(thread_id)];
 }
 
 static inline unsigned int myk_index(void)
 {
-	return perthread_read(kthread_idx);
+	return this_thread_id();
+}
+
+static inline unsigned int kthread_idx(struct kthread *k)
+{
+	return k - ks;
 }
 
 /**
@@ -407,7 +419,7 @@ static inline unsigned int myk_index(void)
 static __always_inline __nofp struct kthread *getk(void)
 {
 	preempt_disable();
-	return perthread_read(mykthread);
+	return &ks[this_thread_id()];
 }
 
 /**
@@ -466,11 +478,9 @@ static inline bool storage_pending_completions(struct kthread *k)
 
 
 
-DECLARE_SPINLOCK(klock);
 extern unsigned int spinks;
 extern unsigned int maxks;
 extern unsigned int guaranteedks;
-extern struct kthread *ks[NCPU];
 extern bool cfg_prio_is_lc;
 extern unsigned int cfg_request_hardware_queues;
 extern uint64_t cfg_ht_punish_us;
@@ -502,7 +512,7 @@ extern int preferred_socket;
  * Deliberately could race with preemption.
  */
 #define STAT(counter)  \
-	((perthread_read_stable(mykthread))->stats[STAT_ ## counter])
+	(myk_stable()->stats[STAT_ ## counter])
 
 
 /*
@@ -594,13 +604,13 @@ static inline bool cfg_directpath_external(void)
 static inline bool rx_poll(struct kthread *k)
 {
 	// Note: the caller must not hold the kthread-local lock
-	return net_ops.rx_poll && net_ops.rx_poll(k->kthread_idx);
+	return net_ops.rx_poll && net_ops.rx_poll(kthread_idx(k));
 }
 
 static inline bool rx_poll_locked(struct kthread *k)
 {
 	assert(spin_lock_held(&myk()->lock));
-	return net_ops.rx_poll_locked && net_ops.rx_poll_locked(k->kthread_idx);
+	return net_ops.rx_poll_locked && net_ops.rx_poll_locked(kthread_idx(k));
 }
 
 extern size_t directpath_rx_buf_pool_sz(unsigned int nrqs);

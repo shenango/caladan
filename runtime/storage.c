@@ -253,7 +253,7 @@ void storage_softirq(void *arg)
 int storage_init_thread(void)
 {
 	struct kthread *k = myk();
-	struct hardware_queue_spec *hs = &iok.threads[k->kthread_idx].storage_hwq;
+	struct hardware_queue_spec *hs = &iok.threads[kthread_idx(k)].storage_hwq;
 	struct storage_q *q = &k->storage_q;
 	thread_t *th;
 

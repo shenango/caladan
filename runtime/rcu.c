@@ -59,7 +59,7 @@ static void rcu_worker(void *arg)
 
 		/* read the RCU generation counters */
 		for (i = 0; i < maxks; i++)
-			last_rcu_gen[i] = load_acquire(&ks[i]->rcu_gen);
+			last_rcu_gen[i] = load_acquire(&ks[i].rcu_gen);
 
 		while (true) {
 			/* wait for RCU generation counters to increase */
@@ -67,7 +67,7 @@ static void rcu_worker(void *arg)
 
 			/* read the RCU generation counters again */
 			for (i = 0; i < maxks; i++) {
-				gen = load_acquire(&ks[i]->rcu_gen);
+				gen = load_acquire(&ks[i].rcu_gen);
 				if ((gen & 0x1) == 0x1 &&
 				    gen == last_rcu_gen[i]) {
 					break;

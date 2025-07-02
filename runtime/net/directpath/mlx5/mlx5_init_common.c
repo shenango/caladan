@@ -118,7 +118,7 @@ int mlx5_init_thread(void)
 	int ret;
 	struct kthread *k = myk();
 	struct hardware_queue_spec *hs;
-	struct mlx5_rxq *v = &rxqs[k->kthread_idx];
+	struct mlx5_rxq *v = &rxqs[kthread_idx(k)];
 
 	v->shadow_tail = &k->q_ptrs->directpath_rx_tail;
 
@@ -136,7 +136,7 @@ int mlx5_init_thread(void)
 	if (netcfg.directpath_mode == DIRECTPATH_MODE_EXTERNAL)
 		return 0;
 
-	hs = &iok.threads[k->kthread_idx].direct_rxq;
+	hs = &iok.threads[kthread_idx(k)].direct_rxq;
 	hs->descriptor_log_size = __builtin_ctz(sizeof(struct mlx5_cqe64));
 	hs->nr_descriptors = v->cq.cnt;
 	hs->descriptor_table = ptr_to_shmptr(&netcfg.tx_region,

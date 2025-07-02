@@ -105,7 +105,7 @@ class Preempt {
   // Gets the current CPU index (not the same as the core number).
   unsigned int get_cpu() const {
     assert(IsHeld());
-    return perthread_read(kthread_idx);
+    return this_thread_id();
   }
 };
 
@@ -141,7 +141,7 @@ class Spin {
   // Gets the current CPU index (not the same as the core number).
   unsigned int get_cpu() {
     assert(IsHeld());
-    return perthread_read(kthread_idx);
+    return this_thread_id();
   }
 
  private:

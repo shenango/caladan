@@ -419,7 +419,7 @@ int ioqueues_init_thread(void)
 	int ret;
 	struct shm_region *r = &netcfg.tx_region;
 
-	struct thread_spec *ts = &iok.threads[myk()->kthread_idx];
+	struct thread_spec *ts = &iok.threads[kthread_idx(myk())];
 
 	ret = shm_init_lrpc_in(r, &ts->rxq, &myk()->rxq);
 	BUG_ON(ret);

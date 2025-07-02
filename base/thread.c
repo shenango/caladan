@@ -19,6 +19,8 @@
 static DEFINE_SPINLOCK(thread_lock);
 
 unsigned int thread_count;
+extern unsigned int maxks  __attribute__((alias("thread_count")));
+
 void *perthread_offsets[NTHREAD];
 DEFINE_PERTHREAD(void *, perthread_ptr);
 

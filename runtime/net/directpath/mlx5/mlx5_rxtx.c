@@ -242,7 +242,7 @@ int mlx5_transmit_one(struct mbuf *m)
 	int i, compl = 0;
 
 	k = getk();
-	v = &txqs[k->kthread_idx];
+	v = &txqs[kthread_idx(k)];
 	idx = v->wq.head & (v->wq.cnt - 1);
 
 	if (nr_inflight_tx(v) >= SQ_CLEAN_THRESH) {

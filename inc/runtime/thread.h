@@ -28,11 +28,10 @@ extern thread_t *thread_create(thread_fn_t fn, void *arg);
 extern thread_t *thread_create_with_buf(thread_fn_t fn, void **buf, size_t len);
 
 DECLARE_PERTHREAD(thread_t *, __self);
-DECLARE_PERTHREAD(unsigned int, kthread_idx);
 
 static inline unsigned int get_current_affinity(void)
 {
-	return perthread_read(kthread_idx);
+	return this_thread_id();
 }
 
 /**

@@ -78,6 +78,7 @@ static int append_stat(char **pos, char *end, const char *name, uint64_t val)
 static ssize_t stat_write_buf(char *buf, size_t len)
 {
 	uint64_t stats[STAT_NR], tc_stats[4];
+	struct kthread *k;
 	char *pos = buf, *end = buf + len;
 	int i, j, ret;
 
@@ -86,8 +87,9 @@ static ssize_t stat_write_buf(char *buf, size_t len)
 
 	/* gather stats from each kthread */
 	for (i = 0; i < maxks; i++) {
+		k = &ks[i];
 		for (j = 0; j < STAT_NR; j++)
-			stats[j] += ks[i]->stats[j];
+			stats[j] += k->stats[j];
 	}
 
 	for_each_thread(i) {

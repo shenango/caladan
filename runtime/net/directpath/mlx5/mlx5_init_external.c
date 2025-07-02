@@ -37,7 +37,7 @@ static int mlx5_init_ext_thread_rx(struct shm_region *reg,
                                    struct kthread *k, uint32_t lkey)
 {
 	int ret;
-	struct mlx5_rxq *v = &rxqs[k->kthread_idx];
+	struct mlx5_rxq *v = &rxqs[kthread_idx(k)];
 	void *buf, *dbr;
 
 	if (unlikely(spec->rx_cq.stride != sizeof(struct mlx5_cqe64)))
@@ -75,7 +75,7 @@ static int mlx5_init_ext_thread_tx(struct shm_region *reg,
                                    struct kthread *k, uint32_t lkey,
                                    void *bfreg)
 {
-	struct mlx5_txq *t = &txqs[k->kthread_idx];
+	struct mlx5_txq *t = &txqs[kthread_idx(k)];
 	int ret;
 	void *buf, *dbr;
 
@@ -179,7 +179,7 @@ int mlx5_init_ext_late(struct directpath_spec *spec, int bar_fd, int mem_fd)
 
 	/* set up each queue pair */
 	for (i = 0; i < maxks; i++) {
-		ret = mlx5_init_ext_thread_rx(&memfd_reg, &spec->qs[i], ks[i],
+		ret = mlx5_init_ext_thread_rx(&memfd_reg, &spec->qs[i], &ks[i],
 			                          spec->mr);
 		if (unlikely(ret))
 			return ret;
@@ -197,7 +197,7 @@ int mlx5_init_ext_late(struct directpath_spec *spec, int bar_fd, int mem_fd)
 		}
 		bfreg = bar_reg + spec->qs[i].uar_offset;
 
-		ret = mlx5_init_ext_thread_tx(&memfd_reg, &spec->qs[i], ks[i],
+		ret = mlx5_init_ext_thread_tx(&memfd_reg, &spec->qs[i], &ks[i],
 			                          spec->mr, bfreg);
 		if (unlikely(ret))
 			return ret;
