@@ -90,6 +90,12 @@ static ssize_t stat_write_buf(char *buf, size_t len)
 		k = &ks[i];
 		for (j = 0; j < STAT_NR; j++)
 			stats[j] += k->stats[j];
+
+		/* get cycles for currently running uthreads */
+		if ((ACCESS_ONCE(k->q_ptrs->rcu_gen) & 0x1) == 0)
+			continue;
+
+		stats[STAT_PROGRAM_CYCLES] += rdtsc() - ACCESS_ONCE(k->q_ptrs->run_start_tsc);
 	}
 
 	for_each_thread(i) {
