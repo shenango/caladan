@@ -46,10 +46,6 @@ static const struct init_entry global_init_handlers[] = {
 
 	/* storage */
 	GLOBAL_INITIALIZER(storage),
-
-#ifdef GC
-	GLOBAL_INITIALIZER(gc),
-#endif
 };
 
 #define THREAD_INITIALIZER(name) \

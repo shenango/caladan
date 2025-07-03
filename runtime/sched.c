@@ -160,13 +160,6 @@ static void drain_overflow(struct kthread *l)
 
 static bool work_available(struct kthread *k, uint64_t now_tsc)
 {
-#ifdef GC
-	if (get_gc_gen() != ACCESS_ONCE(k->local_gc_gen) &&
-	    ACCESS_ONCE(k->parked)) {
-		return true;
-	}
-#endif
-
 	return ACCESS_ONCE(k->rq_tail) != ACCESS_ONCE(k->rq_head) ||
 	       softirq_pending(k, now_tsc);
 }
@@ -269,17 +262,6 @@ static bool steal_work(struct kthread *l, struct kthread *r)
 	if (!work_available(r, now_tsc) || !spin_try_lock(&r->lock))
 		return rx_poll_locked(r);
 
-#ifdef GC
-	if (unlikely(get_gc_gen() != r->local_gc_gen)) {
-		if (!ACCESS_ONCE(r->parked)) {
-			spin_unlock(&r->lock);
-			return false;
-		}
-		gc_kthread_report(r);
-		drain_overflow(r);
-	}
-#endif
-
 	/* first try to steal directly from the runqueue */
 	lsize = l->q_ptrs->rq_head - l->q_ptrs->rq_tail;
 	rsize = ACCESS_ONCE(r->q_ptrs->rq_head) - r->q_ptrs->rq_tail;
@@ -356,11 +338,6 @@ static __noreturn __noinline void schedule(void)
 		l->parked = false;
 	}
 
-#ifdef GC
-	if (unlikely(get_gc_gen() != l->local_gc_gen))
-		gc_kthread_report(l);
-#endif
-
 	/* if it's been too long, run the softirq handler */
 	if (!disable_watchdog &&
 	    unlikely(start_tsc - l->last_softirq_tsc >=
@@ -408,11 +385,6 @@ again:
 		STAT(SOFTIRQS_LOCAL)++;
 		goto done;
 	}
-
-#ifdef GC
-	if (unlikely(get_gc_gen() != l->local_gc_gen))
-		gc_kthread_report(l);
-#endif
 
 	/* keep trying to find work until the polling timeout expires */
 	perthread_get_stable(last_tsc) = rdtsc();
@@ -487,9 +459,6 @@ static __always_inline void enter_schedule(thread_t *curth)
 	/* slow path: switch from the uthread stack to the runtime stack */
 	if (k->rq_head == k->rq_tail ||
 	    preempt_cede_needed(k) ||
-#ifdef GC
-	    get_gc_gen() != k->local_gc_gen ||
-#endif
 	    (!disable_watchdog &&
 	     unlikely(now_tsc - k->last_softirq_tsc >
 		      cycles_per_us * RUNTIME_WATCHDOG_US))) {
@@ -820,7 +789,6 @@ thread_t *thread_create(thread_fn_t fn, void *arg)
 	th->tf.rdi = (uint64_t)arg;
 	th->tf.rbp = (uint64_t)0; /* just in case base pointers are enabled */
 	th->tf.rip = (uint64_t)fn;
-	gc_register_thread(th);
 	return th;
 }
 
@@ -846,7 +814,6 @@ thread_t *thread_create_with_buf(thread_fn_t fn, void **buf, size_t buf_len)
 	th->tf.rbp = (uint64_t)0; /* just in case base pointers are enabled */
 	th->tf.rip = (uint64_t)fn;
 	*buf = ptr;
-	gc_register_thread(th);
 	return th;
 }
 
@@ -895,7 +862,6 @@ static void thread_finish_exit(void)
 {
 	struct thread *th = thread_self();
 
-	gc_remove_thread(th);
 	perthread_store(__self, NULL);
 
 	/* if the main thread dies, kill the whole program */

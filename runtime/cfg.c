@@ -346,18 +346,6 @@ static int parse_enable_directpath(const char *name, const char *val)
 #endif
 }
 
-static int parse_enable_gc(const char *name, const char *val)
-{
-#ifdef GC
-	panic("GC support is currently broken");
-	cfg_gc_enabled = true;
-	return 0;
-#else
-	log_err("cfg: cannot enable GC, please recompile with GC support");
-	return -EINVAL;
-#endif
-}
-
 static int parse_enable_transparent_hugepages(const char *name, const char *val)
 {
   cfg_transparent_hugepages_enabled = true;
@@ -398,7 +386,6 @@ static const struct cfg_handler cfg_handlers[] = {
 	{ "preferred_socket", parse_preferred_socket, false },
 	{ "enable_storage", parse_enable_storage, false },
 	{ "enable_directpath", parse_enable_directpath, false },
-	{ "enable_gc", parse_enable_gc, false },
 	{ "enable_transparent_hugepages", parse_enable_transparent_hugepages, false},
 
 };

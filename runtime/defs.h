@@ -17,7 +17,6 @@
 #include <net/ip.h>
 #include <iokernel/control.h>
 #include <net/mbufq.h>
-#include <runtime/gc.h>
 #include <runtime/net.h>
 #include <runtime/runtime.h>
 #include <runtime/thread.h>
@@ -58,10 +57,6 @@ struct thread {
 	uint64_t		run_start_tsc;
 	uint64_t		ready_tsc;
 	uint64_t		tlsvar;
-#ifdef GC
-	struct list_node	gc_link;
-	unsigned int		onk;
-#endif
 };
 
 typedef void (*runtime_fn_t)(void);
@@ -261,10 +256,6 @@ static inline bool storage_enabled(void) {
 
 #endif
 
-#ifdef GC
-extern bool cfg_gc_enabled;
-#endif
-
 /*
  * Per-kernel-thread State
  */
@@ -335,12 +326,7 @@ struct kthread {
 	struct mbufq		txcmdq_overflow;
 	unsigned int		rcu_gen;
 	unsigned int		curr_cpu;
-#ifdef GC
-	uint64_t		local_gc_gen;
-	unsigned long		pad1[1];
-#else
 	unsigned long		pad1[2];
-#endif
 
 	/* 3rd cache-line */
 	struct lrpc_chan_out	txpktq;
@@ -711,9 +697,6 @@ extern int trans_init(void);
 extern int smalloc_init(void);
 extern int storage_init(void);
 extern int directpath_init(void);
-#ifdef GC
-extern int gc_init(void);
-#endif
 
 /* late initialization */
 extern int ioqueues_register_iokernel(void);
