@@ -21,10 +21,12 @@
 #include "defs.h"
 #include "../ksched/ksched.h"
 
+/* number of kthreads */
+unsigned int maxks;
 /* the number of busy spinning kthreads (threads that don't park) */
 unsigned int spinks;
 /* the number of guaranteed kthreads (we can always have this many if we want) */
-unsigned int guaranteedks = 0;
+unsigned int guaranteedks;
 /* the number of active kthreads */
 atomic_t runningks;
 /* an array of kthreads (thread_count/maxks in total) */
