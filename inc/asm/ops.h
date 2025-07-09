@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <immintrin.h>
 #include <features.h>
 #include <base/types.h>
 
@@ -33,6 +34,11 @@ static inline void cpuid(int leaf, int subleaf, struct cpuid_info *regs)
 	asm volatile("cpuid" : "=a" (regs->eax), "=b" (regs->ebx),
 		     "=c" (regs->ecx), "=d" (regs->edx) : "a" (leaf),
 		     "c"(subleaf));
+}
+
+static inline void set_fsbase(uint64_t val)
+{
+	_writefsbase_u64(val);
 }
 
 static inline uint64_t rdtsc(void)

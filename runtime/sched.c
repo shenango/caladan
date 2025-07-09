@@ -3,6 +3,7 @@
  */
 
 #include <sched.h>
+#include <immintrin.h>
 
 #include <base/stddef.h>
 #include <base/lock.h>
@@ -21,7 +22,7 @@
 DEFINE_PERTHREAD(thread_t *, __self);
 /* a pointer to the top of the per-kthread (TLS) runtime stack */
 static DEFINE_PERTHREAD(void *, runtime_stack);
-
+DEFINE_PERTHREAD(uint64_t, runtime_fsbase);
 /* Flag to prevent watchdog from running */
 bool disable_watchdog;
 
@@ -43,16 +44,13 @@ static DEFINE_PERTHREAD(uint64_t, last_tsc);
  */
 thread_t *thread_self(void);
 
-uint64_t get_uthread_specific(void)
+void thread_set_fsbase(thread_t *th, uint64_t fsbase)
 {
-	BUG_ON(!perthread_read_stable(__self));
-	return (perthread_read_stable(__self))->tlsvar;
-}
-
-void set_uthread_specific(uint64_t val)
-{
-	BUG_ON(!perthread_read_stable(__self));
-	(perthread_read_stable(__self))->tlsvar = val;
+	th->fsbase = fsbase;
+	barrier();
+	th->has_fsbase = true;
+	if (thread_self() == th)
+		set_fsbase(fsbase);
 }
 
 /**
@@ -85,6 +83,12 @@ static __noreturn void jmp_thread(thread_t *th)
 		while (load_acquire(&th->thread_running))
 			cpu_relax();
 	}
+
+	if (!th->has_fsbase)
+		th->fsbase = perthread_read(runtime_fsbase);
+
+	set_fsbase(th->fsbase);
+
 	th->thread_running = true;
 	__jmp_thread(&th->tf);
 }
@@ -109,6 +113,12 @@ static void jmp_thread_direct(thread_t *oldth, thread_t *newth)
 		while (load_acquire(&newth->thread_running))
 			cpu_relax();
 	}
+
+	if (!newth->has_fsbase)
+		newth->fsbase = perthread_read(runtime_fsbase);
+
+	set_fsbase(newth->fsbase);
+
 	newth->thread_running = true;
 	__jmp_thread_direct(&oldth->tf, &newth->tf, &oldth->thread_running);
 }
@@ -128,6 +138,8 @@ static void jmp_runtime(runtime_fn_t fn)
 	assert_preempt_disabled();
 	assert(thread_self() != NULL);
 
+	set_fsbase(perthread_read(runtime_fsbase));
+
 	__jmp_runtime(&thread_self()->tf, fn, perthread_read(runtime_stack));
 }
 
@@ -140,6 +152,7 @@ static __noreturn void jmp_runtime_nosave(runtime_fn_t fn)
 {
 	assert_preempt_disabled();
 
+	set_fsbase(perthread_read(runtime_fsbase));
 	__jmp_runtime_nosave(fn, perthread_read(runtime_stack));
 }
 
@@ -766,8 +779,10 @@ static __always_inline thread_t *__thread_create(void)
 
 	th->stack = s;
 	th->main_thread = false;
+	th->has_fsbase = false;
 	th->thread_ready = false;
 	th->thread_running = false;
+	th->tlsvar = 0;
 
 	return th;
 }
@@ -941,6 +956,7 @@ int sched_init_thread(void)
 		return -ENOMEM;
 
 	perthread_store(runtime_stack, (void *)stack_init_to_rsp(s, runtime_top_of_stack));
+	perthread_store(runtime_fsbase, _readfsbase_u64());
 
 	return 0;
 }

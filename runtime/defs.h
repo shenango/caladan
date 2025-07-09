@@ -84,7 +84,7 @@ static inline struct stack *stack_alloc(void)
 	void *s = tcache_alloc(perthread_ptr(stack_pt));
 	if (unlikely(!s))
 		return NULL;
-	return container_of(s, struct stack, usable);
+	return container_of((uintptr_t (*)[STACK_PTR_SIZE])s, struct stack, usable);
 }
 
 /**
@@ -199,7 +199,7 @@ static inline bool hardware_q_pending(struct hardware_q *q)
 	tail = ACCESS_ONCE(*q->consumer_idx);
 	idx = tail & (q->nr_descriptors - 1);
 	parity = !!(tail & q->nr_descriptors);
-	addr = q->descriptor_table +
+	addr = (unsigned char *)q->descriptor_table +
 		     (idx << q->descriptor_log_size) + q->parity_byte_offset;
 	hd_parity = !!(ACCESS_ONCE(*addr) & q->parity_bit_mask);
 

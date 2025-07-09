@@ -24,11 +24,13 @@ struct thread {
 	struct list_node	link;
 	struct stack		*stack;
 	unsigned int		main_thread:1;
+	unsigned int            has_fsbase:1;
 	unsigned int		thread_ready;
 	unsigned int		thread_running;
 	unsigned int		last_cpu;
 	uint64_t		run_start_tsc;
 	uint64_t		ready_tsc;
+	uint64_t		fsbase;
 	uint64_t		tlsvar;
 };
 
@@ -43,8 +45,10 @@ extern void thread_ready(thread_t *thread);
 extern void thread_ready_head(thread_t *thread);
 extern thread_t *thread_create(thread_fn_t fn, void *arg);
 extern thread_t *thread_create_with_buf(thread_fn_t fn, void **buf, size_t len);
+extern void thread_set_fsbase(thread_t *th, uint64_t fsbase);
 
 DECLARE_PERTHREAD(thread_t *, __self);
+DECLARE_PERTHREAD(uint64_t, runtime_fsbase);
 
 static inline unsigned int get_current_affinity(void)
 {
@@ -59,9 +63,15 @@ inline thread_t *thread_self(void)
 	return perthread_read_stable(__self);
 }
 
+static inline uint64_t get_uthread_specific(void)
+{
+    return thread_self()->tlsvar;
+}
 
-extern uint64_t get_uthread_specific(void);
-extern void set_uthread_specific(uint64_t val);
+static inline void set_uthread_specific(uint64_t val)
+{
+    thread_self()->tlsvar = val;
+}
 
 
 /*
