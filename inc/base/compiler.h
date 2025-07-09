@@ -57,6 +57,9 @@
 	 sizeof(t) == sizeof(int)   || \
 	 sizeof(t) == sizeof(long))
 
+#define type_is_pointer(t) \
+	(__builtin_types_compatible_p(typeof(t), typeof(&*t)))
+
 /*
  * These attributes are defined only with the sparse checker tool.
  */

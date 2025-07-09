@@ -99,6 +99,7 @@ fn gen_bindings(root_dir: &Path) -> anyhow::Result<()> {
     let inc_dir = root_dir.join("inc");
     let bindings = bindgen::Builder::default()
         .clang_arg(format!("-I{}", inc_dir.to_str().unwrap()))
+        .clang_arg("-fheinous-gnu-extensions")
         // The input header we would like to generate
         // bindings for.
         .header("shenango.h")

@@ -16,6 +16,13 @@
   typeof(type) __perthread_##name __perthread                                  \
       __attribute__((section(".perthread")))
 
+#define DEFINE_PERTHREAD_ALIAS(type, name, alias_name)                         \
+  extern typeof(type) __perthread_##alias_name                                 \
+      __attribute__((alias ("__perthread_"#name)))
+
+#define DECLARE_PERTHREAD_ALIAS(type, name, alias_name)                         \
+  extern typeof(type) __perthread_##alias_name
+
 /* used to make perthread variables externally available */
 #define DECLARE_PERTHREAD(type, name) extern DEFINE_PERTHREAD(type, name)
 
@@ -95,6 +102,12 @@ extern const char __perthread_start[];
     }                                                                          \
   } while (0);
 
+#define __perthread_read_const_p(key)                                          \
+  ({                                                                           \
+    BUILD_ASSERT(type_is_pointer(key));                                        \
+    __perthread_read_qual((typeof(&*key)) key, /* */);                         \
+  })
+
 /**
  * perthread_incr - increments a native-type perthread
  * variable using a single instruction.
@@ -151,6 +164,17 @@ extern const char __perthread_start[];
  */
 #define perthread_read_stable(var)                                             \
   __perthread_read_qual(__perthread_##var, /* */)
+
+/**
+ * perthread_read_const_p - read the value stored at
+ * a native-type perthread variable. The value must be a const pointer and
+ * may be cached by the compiler.
+ * @var: the perthread variable (of type T * const)
+ *
+ * Returns the pointer stored at @var
+ *
+ */
+#define perthread_read_const_p(var) __perthread_read_const_p(__perthread_##var)
 
 /**
  * perthread_ptr_stable - get a pointer to a local perthread variable

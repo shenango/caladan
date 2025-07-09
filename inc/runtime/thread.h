@@ -48,6 +48,7 @@ extern thread_t *thread_create_with_buf(thread_fn_t fn, void **buf, size_t len);
 extern void thread_set_fsbase(thread_t *th, uint64_t fsbase);
 
 DECLARE_PERTHREAD(thread_t *, __self);
+DECLARE_PERTHREAD_ALIAS(thread_t * const, __self, __const_self);
 DECLARE_PERTHREAD(uint64_t, runtime_fsbase);
 
 static inline unsigned int get_current_affinity(void)
@@ -58,9 +59,9 @@ static inline unsigned int get_current_affinity(void)
 /**
  * thread_self - gets the currently running thread
  */
-inline thread_t *thread_self(void)
+static inline thread_t *thread_self(void)
 {
-	return perthread_read_stable(__self);
+	return perthread_read_const_p(__const_self);
 }
 
 static inline uint64_t get_uthread_specific(void)

@@ -20,6 +20,8 @@
 
 /* the current running thread, or NULL if there isn't one */
 DEFINE_PERTHREAD(thread_t *, __self);
+DEFINE_PERTHREAD_ALIAS(thread_t * const, __self, __const_self);
+
 /* a pointer to the top of the per-kthread (TLS) runtime stack */
 static DEFINE_PERTHREAD(void *, runtime_stack);
 DEFINE_PERTHREAD(uint64_t, runtime_fsbase);
@@ -313,7 +315,7 @@ static __noreturn __noinline void schedule(void)
 {
 	struct kthread *r = NULL, *l = myk();
 	uint64_t start_tsc;
-	thread_t *th = NULL;
+	thread_t *th;
 	unsigned int start_idx;
 	unsigned int iters = 0;
 	int i, sibling;
@@ -324,10 +326,14 @@ static __noreturn __noinline void schedule(void)
 	/* detect misuse of preempt disable */
 	BUG_ON((perthread_read(preempt_cnt) & ~PREEMPT_NOT_PENDING) != 1);
 
+	th = perthread_read_stable(__self);
+	assert(th == thread_self());
+
 	/* unmark busy for the stack of the last uthread */
-	if (likely(perthread_get_stable(__self) != NULL)) {
-		store_release(&perthread_get_stable(__self)->thread_running, false);
-		perthread_get_stable(__self) = NULL;
+	if (likely(th != NULL)) {
+		store_release(&th->thread_running, false);
+		perthread_store(__self, NULL);
+		th = NULL;
 	}
 
 	/* update entry stat counters */
