@@ -29,12 +29,15 @@ struct thread {
 	uint16_t	last_cpu;
 	uint16_t	cur_kthread;
 	uint64_t	ready_tsc;
+	uint64_t	total_cycles;
 	struct thread_tf	tf;
 	struct list_node	link;
 	struct list_node	interruptible_link;
 	uint64_t	tlsvar;
 	uint64_t	fsbase;
 };
+
+extern uint64_t thread_get_total_cycles(thread_t *th);
 
 /*
  * Low-level routines, these are helpful for bindings and synchronization

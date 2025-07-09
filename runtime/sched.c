@@ -315,7 +315,7 @@ static __noinline bool do_watchdog(struct kthread *l)
 static __noinline void schedule(void)
 {
 	struct kthread *r = NULL, *l = myk();
-	uint64_t start_tsc;
+	uint64_t prog_cycles, start_tsc;
 	thread_t *th;
 	unsigned int start_idx;
 	unsigned int iters = 0;
@@ -327,21 +327,22 @@ static __noinline void schedule(void)
 	/* detect misuse of preempt disable */
 	BUG_ON((perthread_read(preempt_cnt) & ~PREEMPT_NOT_PENDING) != 1);
 
+	/* update entry stat counters */
+	STAT(RESCHEDULES)++;
+	start_tsc = rdtsc();
+	prog_cycles = start_tsc - perthread_read_stable(last_tsc);
+	STAT(PROGRAM_CYCLES) += prog_cycles;
+
 	th = perthread_read_stable(__self);
-	assert(th == thread_self());
 
 	/* unmark busy for the stack of the last uthread */
 	if (likely(th != NULL)) {
 		store_release(&th->thread_running, false);
+		th->total_cycles += prog_cycles;
 		store_release(&th->cur_kthread, NCPU);
 		perthread_store(__self, NULL);
 		th = NULL;
 	}
-
-	/* update entry stat counters */
-	STAT(RESCHEDULES)++;
-	start_tsc = rdtsc();
-	STAT(PROGRAM_CYCLES) += start_tsc - perthread_read_stable(last_tsc);
 
 	/* increment the RCU generation number (even is in scheduler) */
 	store_release(&l->rcu_gen, l->rcu_gen + 1);
@@ -469,7 +470,7 @@ static __always_inline void enter_schedule(thread_t *curth)
 {
 	struct kthread *k = myk();
 	thread_t *th;
-	uint64_t now_tsc;
+	uint64_t now_tsc, prog_cycles;
 
 	assert_preempt_disabled();
 
@@ -492,7 +493,9 @@ static __always_inline void enter_schedule(thread_t *curth)
 	}
 
 	/* fast path: switch directly to the next uthread */
-	STAT(PROGRAM_CYCLES) += now_tsc - perthread_get_stable(last_tsc);
+	prog_cycles = now_tsc - perthread_get_stable(last_tsc);
+	STAT(PROGRAM_CYCLES) += prog_cycles;
+	curth->total_cycles += prog_cycles;
 	perthread_get_stable(last_tsc) = now_tsc;
 
 	/* pop the next runnable thread from the queue */
@@ -705,17 +708,41 @@ void thread_ready_head(thread_t *th)
 	putk();
 }
 
+// Hacky way to calculate total cycle time.
+uint64_t thread_get_total_cycles(thread_t *th) {
+
+	unsigned int k = load_acquire(&th->cur_kthread);
+	uint64_t k_run_start, cycles = ACCESS_ONCE(th->total_cycles);
+	// th is not running on any kthread or we just missed it starting to run.
+	// Either way the last total_cycles should be accurate.
+	if (k == NCPU)
+		return cycles;
+
+	bool correct_k = false;
+	spin_lock_np(&ks[k].lock);
+	correct_k = th->cur_kthread == k;
+	cycles = ACCESS_ONCE(th->total_cycles);
+	k_run_start = ks[k].q_ptrs->run_start_tsc;
+	spin_unlock_np(&ks[k].lock);
+
+	if (correct_k)
+		return cycles + rdtsc() - k_run_start;
+	return cycles;
+}
+
 static void thread_finish_cede(void)
 {
 	struct kthread *k = myk();
 	thread_t *myth = thread_self();
-	uint64_t tsc = rdtsc();
+	uint64_t prog_cycles, tsc = rdtsc();
 
 	/* update stats and scheduler state */
 	myth->thread_running = false;
 	myth->last_cpu = k->curr_cpu;
 	perthread_store(__self, NULL);
-	STAT(PROGRAM_CYCLES) += tsc - perthread_get_stable(last_tsc);
+	prog_cycles = tsc - perthread_get_stable(last_tsc);
+	STAT(PROGRAM_CYCLES) += prog_cycles;
+	myth->total_cycles += prog_cycles;
 
 	/* mark ceded thread ready at head of runqueue */
 	thread_ready_head(myth);
@@ -799,6 +826,7 @@ static __always_inline thread_t *__thread_create(void)
 	th->cur_kthread = NCPU;
 	// Can be used to detect newly created thread.
 	th->ready_tsc = 0;
+	th->total_cycles = 0;
 	atomic8_write(&th->interrupt_state, 0);
 
 	return th;
