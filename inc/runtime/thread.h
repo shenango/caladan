@@ -20,18 +20,20 @@ typedef struct thread thread_t;
  * Internal thread structure, only intended for building low level primitives.
  */
 struct thread {
+	bool	main_thread:1;
+	bool	has_fsbase:1;
+	bool	thread_ready:1;
+	bool	thread_running;
+	atomic8_t	interrupt_state;
+	struct stack	*stack;
+	uint16_t	last_cpu;
+	uint16_t	cur_kthread;
+	uint64_t	ready_tsc;
 	struct thread_tf	tf;
 	struct list_node	link;
-	struct stack		*stack;
-	unsigned int		main_thread:1;
-	unsigned int            has_fsbase:1;
-	unsigned int		thread_ready;
-	unsigned int		thread_running;
-	unsigned int		last_cpu;
-	uint64_t		run_start_tsc;
-	uint64_t		ready_tsc;
-	uint64_t		fsbase;
-	uint64_t		tlsvar;
+	struct list_node	interruptible_link;
+	uint64_t	tlsvar;
+	uint64_t	fsbase;
 };
 
 /*

@@ -12,6 +12,7 @@
 #include <runtime/sync.h>
 #include <runtime/thread.h>
 #include <runtime/timer.h>
+#include <runtime/interruptible_wait.h>
 
 #include "defs.h"
 
@@ -268,13 +269,44 @@ static void __timer_sleep(uint64_t deadline_us)
 	timer_init(&e, timer_finish_sleep, (unsigned long)thread_self());
 
 	k = getk();
-	spin_lock_np(&k->timer_lock);
-	putk();
+	spin_lock(&k->timer_lock);
 	timer_start_locked(k, &e, deadline_us);
 	update_q_ptrs(k);
 	thread_park_and_unlock_np(&k->timer_lock);
 
 	timer_finish(&e);
+}
+
+static void timer_finish_interruptible_sleep(unsigned long arg)
+{
+	thread_t *th = (thread_t *)arg;
+	interruptible_wake_prepared(th);
+}
+
+
+void __timer_sleep_interruptible(uint64_t deadline_us)
+{
+	struct kthread *k;
+	struct timer_entry e;
+
+	thread_t *th = thread_self();
+
+	timer_init(&e, timer_finish_interruptible_sleep, (unsigned long)th);
+
+	k = getk();
+
+	spin_lock(&k->timer_lock);
+
+	if (prepare_interruptible(th)) {
+		spin_unlock_np(&k->timer_lock);
+		return;
+	}
+
+	timer_start_locked(k, &e, deadline_us);
+	update_q_ptrs(k);
+	thread_park_and_unlock_np(&k->timer_lock);
+
+	timer_cancel(&e);
 }
 
 /**
@@ -296,6 +328,15 @@ void timer_sleep_until(uint64_t deadline_us)
 void timer_sleep(uint64_t duration_us)
 {
 	__timer_sleep(microtime() + duration_us);
+}
+
+/**
+ * timer_sleep - sleeps for a duration
+ * @duration_us: the duration time in microseconds
+ */
+void timer_sleep_interruptible(uint64_t duration_us)
+{
+	__timer_sleep_interruptible(microtime() + duration_us);
 }
 
 static void timer_softirq_one(struct kthread *k)

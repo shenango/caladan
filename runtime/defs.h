@@ -47,10 +47,10 @@
 typedef void (*runtime_fn_t)(void);
 
 /* assembly helper routines from switch.S */
-extern void __jmp_thread(struct thread_tf *tf) __noreturn;
+extern void __jmp_thread(struct thread_tf *tf);
 extern void __jmp_thread_direct(struct thread_tf *oldtf,
 				struct thread_tf *newtf,
-				unsigned int *thread_running);
+				bool *thread_running);
 extern void __jmp_runtime(struct thread_tf *tf, runtime_fn_t fn,
 			  void *stack);
 extern void __jmp_runtime_nosave(runtime_fn_t fn, void *stack) __noreturn;

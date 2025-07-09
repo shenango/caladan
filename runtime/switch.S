@@ -95,7 +95,7 @@ __jmp_thread_direct:
 	movq    RIP(%rsi), %r8
 
 	/* clear the stack busy flag */
-	movl	$0, (%rdx)
+	movb	$0, (%rdx)
 
 	/* restore callee regs */
 	movq    RBX(%rsi), %rbx

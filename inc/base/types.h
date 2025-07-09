@@ -42,6 +42,10 @@ typedef struct {
 } spinlock_t;
 
 typedef struct {
+	volatile int8_t cnt;
+} atomic8_t;
+
+typedef struct {
 	volatile int cnt;
 } atomic_t;
 

@@ -17,7 +17,17 @@ static inline int atomic_read(const atomic_t *a)
 	return *((volatile int *)&a->cnt);
 }
 
+static inline int8_t atomic8_read(const atomic8_t *a)
+{
+	return *((volatile int8_t *)&a->cnt);
+}
+
 static inline void atomic_write(atomic_t *a, int val)
+{
+	a->cnt = val;
+}
+
+static inline void atomic8_write(atomic8_t *a, int8_t val)
 {
 	a->cnt = val;
 }
@@ -25,6 +35,16 @@ static inline void atomic_write(atomic_t *a, int val)
 static inline int atomic_fetch_and_add(atomic_t *a, int val)
 {
 	return __sync_fetch_and_add(&a->cnt, val);
+}
+
+static inline int atomic_fetch_and_add_relaxed(atomic_t *a, int val)
+{
+	return __atomic_fetch_add(&a->cnt, val, __ATOMIC_RELAXED);
+}
+
+static inline int8_t atomic8_fetch_and_add_relaxed(atomic8_t *a, int8_t val)
+{
+	return __atomic_fetch_add(&a->cnt, val, __ATOMIC_RELAXED);
 }
 
 static inline int atomic_fetch_and_sub(atomic_t *a, int val)
@@ -55,6 +75,16 @@ static inline int atomic_add_and_fetch(atomic_t *a, int val)
 static inline int atomic_sub_and_fetch(atomic_t *a, int val)
 {
 	return __sync_sub_and_fetch(&a->cnt, val);
+}
+
+static inline int atomic_sub_and_fetch_relaxed(atomic_t *a, int val)
+{
+	return __atomic_sub_fetch(&a->cnt, val, __ATOMIC_RELAXED);
+}
+
+static inline int8_t atomic8_sub_and_fetch_relaxed(atomic8_t *a, int8_t val)
+{
+	return __atomic_sub_fetch(&a->cnt, val, __ATOMIC_RELAXED);
 }
 
 static inline void atomic_inc(atomic_t *a)

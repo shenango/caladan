@@ -92,3 +92,5 @@ extern bool timer_cancel_recurring(struct timer_entry *e);
 
 extern void timer_sleep_until(uint64_t deadline_us);
 extern void timer_sleep(uint64_t duration_us);
+extern void __timer_sleep_interruptible(uint64_t deadline_us);
+extern void timer_sleep_interruptible(uint64_t duration_us);
