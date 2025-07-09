@@ -4,9 +4,11 @@
 
 #pragma once
 
-#include <base/thread.h>
-#include <base/types.h>
 #include <base/compiler.h>
+#include <base/list.h>
+#include <base/thread.h>
+#include <base/trapframe.h>
+#include <base/types.h>
 #include <runtime/preempt.h>
 #include <iokernel/control.h>
 
@@ -14,6 +16,21 @@ struct thread;
 typedef void (*thread_fn_t)(void *arg);
 typedef struct thread thread_t;
 
+/*
+ * Internal thread structure, only intended for building low level primitives.
+ */
+struct thread {
+	struct thread_tf	tf;
+	struct list_node	link;
+	struct stack		*stack;
+	unsigned int		main_thread:1;
+	unsigned int		thread_ready;
+	unsigned int		thread_running;
+	unsigned int		last_cpu;
+	uint64_t		run_start_tsc;
+	uint64_t		ready_tsc;
+	uint64_t		tlsvar;
+};
 
 /*
  * Low-level routines, these are helpful for bindings and synchronization
