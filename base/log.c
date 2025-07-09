@@ -11,6 +11,7 @@
 #include <base/stddef.h>
 #include <base/log.h>
 #include <base/time.h>
+#include <base/syscall.h>
 #include <asm/ops.h>
 
 #define MAX_LOG_LEN 4096
@@ -23,7 +24,7 @@ void logk(int level, const char *fmt, ...)
 	char buf[MAX_LOG_LEN];
 	va_list ptr;
 	off_t off;
-	int cpu;
+	int cpu, ret;
 
 	if (level > max_loglevel)
 		return;
@@ -41,12 +42,15 @@ void logk(int level, const char *fmt, ...)
 
 	off = strlen(buf);
 	va_start(ptr, fmt);
-	vsnprintf(buf + off, MAX_LOG_LEN - off, fmt, ptr);
+	ret = vsnprintf(buf + off, MAX_LOG_LEN - off, fmt, ptr);
 	va_end(ptr);
-	puts(buf);
 
-	if (level <= LOG_ERR)
-		fflush(stdout);
+	if (unlikely(ret < 0))
+		ret = 0;
+
+	off = MIN(MAX_LOG_LEN - 1, off + ret);
+	buf[off] = '\n';
+	syscall_write(1, buf, off + 1);
 }
 
 #define MAX_CALL_DEPTH	256
