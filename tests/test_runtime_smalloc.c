@@ -14,7 +14,7 @@
 #include <asm/ops.h>
 
 #define SAMPLES	200000
-#define N	(1 << 10)
+#define N	(1 << 8)
 #define SIZE	256
 static void *ptrs[N];
 

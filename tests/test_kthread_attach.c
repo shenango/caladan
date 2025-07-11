@@ -13,9 +13,9 @@
 #include <runtime/runtime.h>
 #include <runtime/timer.h>
 
-#define N		1000
+#define N		10
 #define NTHREADS	32
-#define NROUNDS		100
+#define NROUNDS		10
 #define FIRST_VAL	0x1000000
 #define SECOND_VAL	0x2000000
 

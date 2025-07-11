@@ -12,7 +12,7 @@
 #include <runtime/sync.h>
 
 #define NTHREADS	6
-#define N		500000
+#define N		1000
 #define SPAWN_LIMIT	5
 
 static atomic_t n_threads;

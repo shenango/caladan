@@ -3,6 +3,7 @@
  */
 
 #include <stdio.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #include <base/log.h>
@@ -24,7 +25,7 @@ static void main_handler(void *arg)
 
 int main(int argc, char *argv[])
 {
-	int i, pid, ret;
+	int i, pid, ret, wstatus;
 
 	if (argc < 1 + N_RUNTIMES) {
 		printf("arg must provide a config file for each runtime\n");
@@ -41,6 +42,11 @@ int main(int argc, char *argv[])
 		}
 
 		sleep(1);
+	}
+
+	for (i = 0; i < N_RUNTIMES; i++) {
+		wait(&wstatus);
+		BUG_ON(!WIFEXITED(wstatus) || WEXITSTATUS(wstatus) != 0);
 	}
 
 	return 0;
