@@ -6,7 +6,7 @@ set -ex
 sudo pkill -9 netperf || true
 sudo scripts/setup_machine.sh ${NOUINTR}
 sudo ./iokerneld ias nobw noht no_hw_qdel numanode -1 -- --allow 00:00.0 --vdev=net_tap0 > /tmp/iokernel_$USER.log 2>&1 &
-
+iokpid=$!
 
 while ! grep -q 'running dataplan' /tmp/iokernel_$USER.log; do
       sleep 0.3
@@ -56,3 +56,5 @@ gen_configs
 apps/bench/netperf /proc/self/fd/$test_fd2 tcpstream 192.168.1.5 10 10000 4096
 
 kill $np
+sudo kill $iokpid
+wait
