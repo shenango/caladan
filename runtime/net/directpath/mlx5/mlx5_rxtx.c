@@ -292,16 +292,44 @@ int mlx5_transmit_one(struct mbuf *m)
 
 }
 
-static void mbuf_fill_cqe(struct mbuf *m, struct mlx5_cqe64 *cqe)
+static void mlx5_rx_inl_completion(struct mbuf *m)
+{
+	preempt_disable();
+	tcache_free(perthread_ptr(mbuf_pt), m);
+	preempt_enable();
+}
+
+
+static struct mbuf *mbuf_fill_cqe(struct mbuf *m, struct mlx5_cqe64 *cqe)
 {
 	uint32_t len;
 
 	len = be32toh(cqe->byte_cnt);
+	void *dbuf, *inbuf = (unsigned char *)m + RX_BUF_HEAD;
 
-	mbuf_init(m, (unsigned char *)m + RX_BUF_HEAD, len, 0);
+	if (len <= MBUF_INL_DATA_SZ) {
+		struct mbuf *m2;
+		m2 = tcache_alloc(perthread_ptr(mbuf_pt));
+		if (unlikely(!m2)) {
+			log_warn_ratelimited("dropping packet; oom");
+			directpath_rx_completion(m);
+			return NULL;
+		}
+
+		dbuf = (void *)m2 + sizeof(*m2);
+		memcpy(dbuf, inbuf, len);
+		directpath_rx_completion(m);
+		m = m2;
+		m->release = mlx5_rx_inl_completion;
+	} else {
+		m->release = directpath_rx_completion;
+		dbuf = inbuf;
+	}
+
+	mbuf_init(m, dbuf, len, 0);
 	m->len = len;
 	m->csum_type = mlx5_csum_ok(cqe);
-	m->release = directpath_rx_completion;
+	return m;
 }
 
 int mlx5_gather_rx(struct mlx5_rxq *v, struct mbuf **ms, unsigned int budget)
@@ -330,7 +358,7 @@ int mlx5_gather_rx(struct mlx5_rxq *v, struct mbuf **ms, unsigned int budget)
 
 		wqe_idx = be16toh(cqe->wqe_counter) & (v->wq.cnt - 1);
 		m = v->wq.buffers[wqe_idx];
-		mbuf_fill_cqe(m, cqe);
+		m = mbuf_fill_cqe(m, cqe);
 		ms[rx_cnt] = m;
 	}
 
