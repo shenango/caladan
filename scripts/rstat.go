@@ -72,7 +72,7 @@ func main() {
 
 	for {
 		last_write := time.Now()
-		_, err = c.Write([]byte("stat"))
+		_, err = c.Write([]byte("s"))
 		if err != nil {
 			os.Exit(1)
 		}

@@ -141,7 +141,7 @@ static void stat_tcp_worker(void *arg)
 	tcpconn_t *c = arg;
 
 	while (true) {
-		ret = tcp_read(c, resp.buf, sizeof(resp.buf));
+		ret = tcp_read(c, resp.buf, 1);
 		if (ret <= 0)
 			goto done;
 

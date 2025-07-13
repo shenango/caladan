@@ -209,7 +209,6 @@ impl Read for Connection {
     }
 }
 
-
 impl<'a> Read for &'a Connection {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         match *self {

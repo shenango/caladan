@@ -17,7 +17,7 @@ extern crate arrayvec;
 
 use arrayvec::ArrayVec;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::f32::INFINITY;
 use std::io;
 use std::io::{Error, ErrorKind, Read, Write};
@@ -41,6 +41,8 @@ mod lockstep;
 
 mod payload;
 use payload::{Payload, SyntheticProtocol, PAYLOAD_SIZE};
+
+const KBUFSIZE: usize = 16384;
 
 #[derive(Default)]
 pub struct Packet {
@@ -173,7 +175,7 @@ fn run_linux_udp_server(
             backend.spawn_thread(move || {
                 let socket = backend.create_udp_connection(addr, None).unwrap();
                 println!("Bound to address {}", socket.local_addr());
-                let mut buf = vec![0; 4096];
+                let mut buf = vec![0; KBUFSIZE];
                 loop {
                     let (len, remote_addr) = socket.recv_from(&mut buf[..]).unwrap();
                     let payload = Payload::deserialize(&mut &buf[..len]).unwrap();
@@ -283,8 +285,8 @@ fn run_memcached_preload(
                     }
                 });
 
-                let mut vec_s: Vec<u8> = Vec::with_capacity(4096);
-                let mut vec_r: Vec<u8> = vec![0; 4096];
+                let mut vec_s: Vec<u8> = Vec::with_capacity(KBUFSIZE);
+                let mut vec_r: Vec<u8> = vec![0; KBUFSIZE];
                 let mut buf = Buffer::new(&mut vec_r[..]);
                 for n in 0..perthread {
                     vec_s.clear();
@@ -421,11 +423,36 @@ fn gen_loadshift_experiment(
         .collect()
 }
 
+fn get_rt_stat_headers() -> Vec<String> {
+    let mut headers = Vec::with_capacity(1);
+    headers.push("CPU Used (%)".to_string());
+    headers
+}
+
+fn get_rt_stat_values(map1: &StatMap, map0: &StatMap) -> Vec<String> {
+    let cycles1 = map1.get("program_cycles").unwrap() + map1.get("sched_cycles").unwrap();
+    let cycles0 = map0.get("program_cycles").unwrap() + map0.get("sched_cycles").unwrap();
+    let tsc1 = map1.get("tsc").unwrap();
+    let tsc0 = map0.get("tsc").unwrap();
+
+    // Calculate deltas
+    let delta_cycles = cycles1 - cycles0;
+    let delta_tsc = tsc1 - tsc0;
+
+    let mut values = Vec::with_capacity(1);
+    values.push(format!(
+        "{:.2}%",
+        (100.0 * delta_cycles as f64 / delta_tsc as f64)
+    ));
+    values
+}
+
 fn process_result_final(
     sched: &RequestSchedule,
     results: Vec<ScheduleResult>,
     wct_start: SystemTime,
     sched_start: Duration,
+    rt_stats: Option<(StatMap, StatMap)>,
 ) -> bool {
     let mut buckets: BTreeMap<u64, usize> = BTreeMap::new();
 
@@ -493,9 +520,13 @@ fn process_result_final(
         );
         return true;
     }
+    let rt_stat_values = rt_stats.map_or_else(
+        || String::new(),
+        |(map1, map0)| format!(", {}", get_rt_stat_values(&map1, &map0).join(", ")),
+    );
 
     println!(
-        "{}, {}, {}, {}, {}, {:.1}, {:.1}, {:.1}, {:.1}, {:.1}, {}, {}",
+        "{}, {}, {}, {}, {}, {:.1}, {:.1}, {:.1}, {:.1}, {:.1}, {}, {}{}",
         sched.service.name(),
         (packet_count + drop_count) as u64 * 1000_000_000 / duration_to_ns(last_send - first_send),
         packet_count as u64 * 1000_000_000 / duration_to_ns(last_send - first_send),
@@ -507,7 +538,8 @@ fn process_result_final(
         percentile(99.9),
         percentile(99.99),
         start_unix.duration_since(UNIX_EPOCH).unwrap().as_secs(),
-        first_tsc
+        first_tsc,
+        rt_stat_values
     );
 
     if let OutputMode::Buckets = sched.output {
@@ -656,8 +688,9 @@ fn run_client_worker(
     schedules: Arc<Vec<RequestSchedule>>,
     index: usize,
     live_mode_socket: Option<Arc<Connection>>,
+    stat_conn: Option<Arc<Connection>>,
 ) -> Vec<Option<ScheduleResult>> {
-    let mut payload = Vec::with_capacity(4096);
+    let mut payload = Vec::with_capacity(KBUFSIZE);
     let (mut packets, sched_boundaries) = gen_packets_for_schedule(&schedules);
     let src_addr = SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), (100 + index) as u16);
     let live_mode = live_mode_socket.is_some();
@@ -674,7 +707,7 @@ fn run_client_worker(
     let rproto = proto.clone();
     let wg2 = wg.clone();
     let receive_thread = backend.spawn_thread(move || {
-        let mut recv_buf = vec![0; 4096];
+        let mut recv_buf = vec![0; KBUFSIZE];
         let mut receive_times = vec![None; packets_per_thread];
         let mut buf = Buffer::new(&mut recv_buf);
         let use_ordering = rproto.uses_ordered_requests();
@@ -724,6 +757,11 @@ fn run_client_worker(
     wg.done();
     wg_start.wait();
     let start = Instant::now();
+    let mut sched_idx = 0;
+
+    if let Some(s) = stat_conn.as_ref() {
+        (&**s).write_all(b"s").unwrap();
+    }
 
     for (i, packet) in packets.iter_mut().enumerate() {
         payload.clear();
@@ -738,6 +776,13 @@ fn run_client_worker(
             continue;
         }
 
+        if i >= sched_boundaries[sched_idx] {
+            sched_idx += 1;
+            if let Some(s) = stat_conn.as_ref() {
+                (&**s).write_all(b"s").unwrap();
+            }
+        }
+
         packet.actual_start = Some(start.elapsed());
         if let Err(e) = (&*socket).write_all(&payload[..]) {
             packet.actual_start = None;
@@ -747,6 +792,10 @@ fn run_client_worker(
             }
             break;
         }
+    }
+
+    if let Some(s) = stat_conn.as_ref() {
+        (&**s).write_all(b"s").unwrap();
     }
 
     wg.done();
@@ -835,6 +884,7 @@ fn run_live_client(
                         schedules,
                         client_idx,
                         Some(sock.clone()),
+                        None,
                     )
                 })
             })
@@ -866,7 +916,7 @@ fn run_live_client(
             .enumerate()
             .map(|(i, sched)| {
                 let perthread = packets.iter_mut().filter_map(|p| p[i].take()).collect();
-                let r = process_result_final(sched, perthread, start_unix, sched_start);
+                let r = process_result_final(sched, perthread, start_unix, sched_start, None);
                 sched_start += sched.runtime;
                 r
             })
@@ -887,14 +937,14 @@ fn run_closed_loop_worker(
     start: Instant,
     end_time: Arc<AtomicUsize>,
 ) -> usize {
-    let mut payload = Vec::with_capacity(4096);
+    let mut payload = Vec::with_capacity(KBUFSIZE);
     let src_addr = SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 0);
     let mut socket = match tport {
         Transport::Tcp => backend.create_tcp_connection(Some(src_addr), addr).unwrap(),
         Transport::Udp => backend.create_udp_connection(src_addr, Some(addr)).unwrap(),
     };
 
-    let mut recv_buf = vec![0; 4096];
+    let mut recv_buf = vec![0; KBUFSIZE];
     let mut buf = Buffer::new(&mut recv_buf);
 
     wg.done();
@@ -991,6 +1041,52 @@ fn run_closed_loop_client(
     true
 }
 
+type StatMap = HashMap<String, u64>;
+
+fn stat_receiver(conn: Arc<Connection>, nschedules: usize) -> io::Result<Vec<StatMap>> {
+    let mut buf = vec![0; 4096];
+    let mut stat_results = Vec::with_capacity(nschedules);
+
+    for _ in 0..nschedules {
+        // Read message size (8 bytes)
+        if let Err(err) = (&*conn).read_exact(&mut buf[..8]) {
+            eprintln!("Stat receive error: {}", err);
+            return Err(err);
+        }
+
+        // Parse message size
+        let data_sz = u64::from_le_bytes(buf[..8].try_into().unwrap());
+
+        // Read message data
+        if let Err(err) = (&*conn).read_exact(&mut buf[..data_sz as usize]) {
+            eprintln!("Failed to read stats data: {}", err);
+            return Err(err);
+        }
+
+        // Parse stats string into map
+        match String::from_utf8(buf[..(data_sz - 1) as usize].to_vec()) {
+            Ok(stats) => {
+                let stats_map = stats
+                    .split(',')
+                    .filter_map(|stat| {
+                        let mut parts = stat.split(':');
+                        match (parts.next(), parts.next()) {
+                            (Some(key), Some(val)) => {
+                                val.parse().ok().map(|v| (key.to_string(), v))
+                            }
+                            _ => None,
+                        }
+                    })
+                    .collect();
+                stat_results.push(stats_map);
+            }
+            Err(err) => eprintln!("Failed to parse stats string: {}", err),
+        }
+    }
+
+    Ok(stat_results)
+}
+
 fn run_client(
     proto: Arc<Box<dyn LoadgenProtocol>>,
     backend: Backend,
@@ -1000,12 +1096,25 @@ fn run_client(
     barrier_group: &mut Option<lockstep::Group>,
     schedules: Vec<RequestSchedule>,
     index: usize,
+    do_runtime_stat: bool,
 ) -> bool {
     let schedules = Arc::new(schedules);
     let wg = shenango::WaitGroup::new();
     wg.add(3 * nthreads as i32);
     let wg_start = shenango::WaitGroup::new();
     wg_start.add(1 as i32);
+
+    // Dial stat connection.
+    let (stat_conn, stat_thread) = if do_runtime_stat {
+        let stat_addr = SocketAddrV4::new(*addrs[0].ip(), 40); // runtime stat port
+        let stat_conn = Arc::new(backend.create_tcp_connection(None, stat_addr).unwrap());
+        let stat_recv_conn = stat_conn.clone();
+        let sched_len = schedules.len() + 1;
+        let stat_thread = backend.spawn_thread(move || stat_receiver(stat_recv_conn, sched_len));
+        (Some(stat_conn), Some(stat_thread))
+    } else {
+        (None, None)
+    };
 
     let conn_threads: Vec<_> = (0..nthreads)
         .into_iter()
@@ -1016,10 +1125,15 @@ fn run_client(
             let wg_start = wg_start.clone();
             let schedules = schedules.clone();
             let addr = addrs[i % addrs.len()];
+            let stat_conn = match i {
+                0 => stat_conn.clone(),
+                _ => None,
+            };
 
             backend.spawn_thread(move || {
                 run_client_worker(
                     proto, backend, addr, tport, wg, wg_start, schedules, client_idx, None,
+                    stat_conn,
                 )
             })
         })
@@ -1046,13 +1160,24 @@ fn run_client(
         .map(|s| s.join().unwrap())
         .collect();
 
+    let rt_stats: Vec<Option<(StatMap, StatMap)>> = if do_runtime_stat {
+        let rt_stats = stat_thread.unwrap().join().unwrap().unwrap();
+        rt_stats
+            .windows(2)
+            .map(|w| Some((w[1].clone(), w[0].clone())))
+            .collect()
+    } else {
+        vec![None; schedules.len()]
+    };
+
     let mut sched_start = Duration::from_nanos(100_000_000);
     schedules
         .iter()
         .enumerate()
-        .map(|(i, sched)| {
+        .zip(rt_stats)
+        .map(|((i, sched), rt_stat)| {
             let perthread = packets.iter_mut().filter_map(|p| p[i].take()).collect();
-            let r = process_result_final(sched, perthread, start_unix, sched_start);
+            let r = process_result_final(sched, perthread, start_unix, sched_start, rt_stat);
             sched_start += sched.runtime;
             r
         })
@@ -1152,7 +1277,7 @@ fn run_local(
         .enumerate()
         .map(|(i, sched)| {
             let perthread = packets.iter_mut().filter_map(|p| p[i].take()).collect();
-            let r = process_result_final(sched, perthread, start_unix, sched_start);
+            let r = process_result_final(sched, perthread, start_unix, sched_start, None);
             sched_start += sched.runtime;
             r
         })
@@ -1372,6 +1497,12 @@ fn main() {
                 .default_value("0")
                 .help("seconds to sleep between samples"),
         )
+        .arg(
+            Arg::with_name("runtime_stat")
+                .long("runtime_stat")
+                .takes_value(false)
+                .help("run runtime stat"),
+        )
         .args(&SyntheticProtocol::args())
         .args(&MemcachedProtocol::args())
         .args(&DnsProtocol::args())
@@ -1396,6 +1527,10 @@ fn main() {
     let live_mode = matches.is_present("live");
     let closed_bench = matches.is_present("closed_bench");
     let depth = value_t_or_exit!(matches, "depth", usize);
+    let do_runtime_stat = matches.is_present("runtime_stat");
+    if do_runtime_stat && addrs.len() != 1 {
+        panic!("runtime_stat is only supported for single-node runs");
+    }
 
     let distspec = match matches.is_present("distspec") {
         true => value_t_or_exit!(matches, "distspec", String),
@@ -1574,7 +1709,8 @@ fn main() {
                     unreachable!();
                 }
 
-                println!("Distribution, Target, Actual, Dropped, Never Sent, Median, 90th, 99th, 99.9th, 99.99th, Start, StartTsc");
+                println!("Distribution, Target, Actual, Dropped, Never Sent, Median, 90th, 99th, 99.9th, 99.99th, Start, StartTsc{}", if do_runtime_stat {
+                    ", ".to_owned() + &get_rt_stat_headers().join(",") } else { "".to_owned() });
 
                 if !loadshift_spec.is_empty() {
                     let sched = gen_loadshift_experiment(&loadshift_spec, distribution, nthreads, output);
@@ -1587,6 +1723,7 @@ fn main() {
                         &mut barrier_group,
                         sched,
                         0,
+                        do_runtime_stat
                     );
                     if let Some(ref mut g) = barrier_group {
                         g.barrier();
@@ -1615,6 +1752,7 @@ fn main() {
                             &mut barrier_group,
                             sched,
                             0,
+                            do_runtime_stat
                         );
                     }
                     backend.sleep(Duration::from_secs(intersample_sleep));
@@ -1640,6 +1778,7 @@ fn main() {
                         &mut barrier_group,
                         sched,
                         j,
+                        do_runtime_stat
                     ) { break; }
                     if j != samples { backend.sleep(Duration::from_secs(intersample_sleep)); }
                 }
