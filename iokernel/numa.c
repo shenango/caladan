@@ -226,8 +226,8 @@ static unsigned int numa_choose_core(struct proc *p)
 			if (cores[sib] == sd || (cores[sib] != NULL &&
 				!numa_proc_is_preemptible(cores[sib], sd)))
 				continue;
-
-			return sib;
+			if (bitmap_test(sched_allowed_cores, sib))
+				return sib;
 		}
 	}
 
