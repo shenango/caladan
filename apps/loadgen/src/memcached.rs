@@ -1,5 +1,6 @@
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use clap::Arg;
+use serde::{Deserialize, Serialize};
 use std::io;
 use std::io::{Error, ErrorKind, Read};
 
@@ -8,6 +9,12 @@ use crate::Connection;
 use crate::LoadgenProtocol;
 use crate::Packet;
 use crate::Transport;
+
+// Constants for default values
+const DEFAULT_NVALUES: u64 = 1000000;
+const DEFAULT_PCT_SET: u64 = 2;
+const DEFAULT_VALUE_SIZE: usize = 2;
+const DEFAULT_KEY_SIZE: usize = 20;
 
 /** Packet code from https://github.com/aisk/rust-memcache **/
 
@@ -112,7 +119,7 @@ fn write_key(buf: &mut Vec<u8>, key: u64, key_size: usize) {
 
 static UDP_HEADER: &'static [u8] = &[0, 0, 0, 0, 0, 1, 0, 0];
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Serialize, Deserialize)]
 pub struct MemcachedProtocol {
     tport: Transport,
     pub nvalues: u64,
@@ -125,34 +132,46 @@ impl MemcachedProtocol {
     pub fn with_args(matches: &clap::ArgMatches, tport: Transport) -> Self {
         MemcachedProtocol {
             tport: tport,
-            nvalues: value_t!(matches, "nvalues", u64).unwrap(),
-            pct_set: value_t!(matches, "pctset", u64).unwrap(),
-            value_size: value_t!(matches, "value_size", usize).unwrap(),
-            key_size: value_t!(matches, "key_size", usize).unwrap(),
+            nvalues: matches
+                .get_one::<u64>("nvalues")
+                .copied()
+                .unwrap_or(DEFAULT_NVALUES),
+            pct_set: matches
+                .get_one::<u64>("pctset")
+                .copied()
+                .unwrap_or(DEFAULT_PCT_SET),
+            value_size: matches
+                .get_one::<usize>("value_size")
+                .copied()
+                .unwrap_or(DEFAULT_VALUE_SIZE),
+            key_size: matches
+                .get_one::<usize>("key_size")
+                .copied()
+                .unwrap_or(DEFAULT_KEY_SIZE),
         }
     }
 
-    pub fn args<'a, 'b>() -> Vec<clap::Arg<'a, 'b>> {
+    pub fn args() -> Vec<clap::Arg> {
         vec![
-            Arg::with_name("nvalues")
+            Arg::new("nvalues")
                 .long("nvalues")
-                .takes_value(true)
-                .default_value("1000000")
+                .num_args(1)
+                .value_parser(clap::value_parser!(u64))
                 .help("Memcached: number of key value pairs"),
-            Arg::with_name("pctset")
+            Arg::new("pctset")
                 .long("pctset")
-                .takes_value(true)
-                .default_value("2")
+                .num_args(1)
+                .value_parser(clap::value_parser!(u64))
                 .help("Memcached: set requsts per 1000 requests"),
-            Arg::with_name("value_size")
+            Arg::new("value_size")
                 .long("value_size")
-                .takes_value(true)
-                .default_value("2")
+                .num_args(1)
+                .value_parser(clap::value_parser!(usize))
                 .help("Memcached: value size"),
-            Arg::with_name("key_size")
+            Arg::new("key_size")
                 .long("key_size")
-                .takes_value(true)
-                .default_value("20")
+                .num_args(1)
+                .value_parser(clap::value_parser!(usize))
                 .help("Memcached: key size"),
         ]
     }
@@ -208,7 +227,6 @@ impl LoadgenProtocol for MemcachedProtocol {
             opcode: Opcode::Get as u8,
             key_length: self.key_size as u16,
             total_body_length: self.key_size as u32,
-            opaque: i as u32,
             ..Default::default()
         }
         .write(buf)

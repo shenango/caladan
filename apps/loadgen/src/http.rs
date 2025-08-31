@@ -1,10 +1,10 @@
 use clap::Arg;
 
+use serde::{Deserialize, Deserializer, Serialize};
 use std::cmp::min;
 use std::io;
 use std::io::{Error, ErrorKind, Read};
 use std::net::SocketAddrV4;
-use std::str::FromStr;
 
 use crate::Buffer;
 use crate::Connection;
@@ -12,10 +12,30 @@ use crate::LoadgenProtocol;
 use crate::Packet;
 use crate::Transport;
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Serialize)]
 pub struct HttpProtocol {
     host: &'static str,
     uri: &'static str,
+}
+
+impl<'de> Deserialize<'de> for HttpProtocol {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        // Deserialize into a temporary owned helper, then convert.
+        #[derive(Deserialize)]
+        struct Helper {
+            host: String,
+            uri: String,
+        }
+
+        let Helper { host, uri } = Helper::deserialize(deserializer)?;
+        Ok(HttpProtocol {
+            host: Box::leak(host.into_boxed_str()),
+            uri: Box::leak(uri.into_boxed_str()),
+        })
+    }
 }
 
 impl HttpProtocol {
@@ -24,12 +44,17 @@ impl HttpProtocol {
             panic!("udp is unsupported for http");
         }
 
-        let host = match matches.value_of("http_host_name").unwrap() {
-            "" => {
-                let addr: SocketAddrV4 =
-                    FromStr::from_str(matches.value_of("ADDR").unwrap()).unwrap();
-                addr.ip().to_string()
-            }
+        let host = match matches
+            .get_one::<String>("http_host_name")
+            .unwrap()
+            .as_str()
+        {
+            // TODO: This might not be correct with multiple addresses.
+            "" => matches
+                .get_one::<SocketAddrV4>("ADDR")
+                .unwrap()
+                .ip()
+                .to_string(),
             s => s.to_string(),
         };
 
@@ -37,7 +62,7 @@ impl HttpProtocol {
             host: Box::leak(host.into_boxed_str()),
             uri: Box::leak(
                 matches
-                    .value_of("http_uri")
+                    .get_one::<String>("http_uri")
                     .unwrap()
                     .to_string()
                     .into_boxed_str(),
@@ -45,16 +70,16 @@ impl HttpProtocol {
         }
     }
 
-    pub fn args<'a, 'b>() -> Vec<clap::Arg<'a, 'b>> {
+    pub fn args() -> Vec<clap::Arg> {
         vec![
-            Arg::with_name("http_host_name")
+            Arg::new("http_host_name")
                 .long("http_host_name")
-                .takes_value(true)
+                .num_args(1)
                 .default_value("")
                 .help("Hostname to use in request"),
-            Arg::with_name("http_uri")
+            Arg::new("http_uri")
                 .long("http_uri")
-                .takes_value(true)
+                .num_args(1)
                 .default_value("/")
                 .help("HTTP endpoint"),
         ]

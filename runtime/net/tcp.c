@@ -1219,7 +1219,7 @@ ssize_t tcp_readv2(tcpconn_t *c, const struct iovec *iov, int iovcnt, bool peek,
 	return len;
 }
 
-static int tcp_write_wait(tcpconn_t *c, size_t *winlen, bool nonblocking)
+static int tcp_write_wait(tcpconn_t *c, size_t *winlen, bool nonblocking, size_t min_winlen)
 {
 	int ret;
 	spin_lock_np(&c->lock);
@@ -1252,10 +1252,15 @@ static int tcp_write_wait(tcpconn_t *c, size_t *winlen, bool nonblocking)
 		return c->err ? -c->err : -EPIPE;
 	}
 
+	*winlen = c->pcb.snd_una + c->pcb.snd_wnd - c->pcb.snd_nxt;
+	if (*winlen < min_winlen) {
+		spin_unlock_np(&c->lock);
+		return -ENOSPC;
+	}
+
 	/* drop the lock to allow concurrent RX processing */
 	c->tx_exclusive = true;
 
-	*winlen = c->pcb.snd_una + c->pcb.snd_wnd - c->pcb.snd_nxt;
 	c->acks_delayed_cnt = 0;
 	c->ack_delayed = false;
 	spin_unlock_np(&c->lock);
@@ -1306,22 +1311,24 @@ static void tcp_write_finish(tcpconn_t *c)
 }
 
 /**
- * tcp_write2 - writes data to a TCP connection
+ * tcp_write3 - writes data to a TCP connection
  * @c: the TCP connection
  * @buf: a buffer from which to copy the data
  * @len: the length of the data
  * @nonblocking: true if this call should not block
+ * @no_partial_write: true if this call should not perform a partial write
  *
  * Returns the number of bytes written (could be less than @len), or < 0
  * if there was a failure.
  */
-ssize_t tcp_write2(tcpconn_t *c, const void *buf, size_t len, bool nonblocking)
+ssize_t tcp_write3(tcpconn_t *c, const void *buf, size_t len, bool nonblocking, bool no_partial_write)
 {
 	size_t winlen;
 	ssize_t ret;
 
 	/* block until the data can be sent */
-	ret = tcp_write_wait(c, &winlen, c->nonblocking || nonblocking);
+	ret = tcp_write_wait(c, &winlen, c->nonblocking || nonblocking,
+	                     no_partial_write ? len : 0);
 	if (ret)
 		return ret;
 
@@ -1352,7 +1359,7 @@ ssize_t tcp_writev2(tcpconn_t *c, const struct iovec *iov, int iovcnt,
 	int i;
 
 	/* block until the data can be sent */
-	ret = tcp_write_wait(c, &winlen, c->nonblocking || nonblocking);
+	ret = tcp_write_wait(c, &winlen, c->nonblocking || nonblocking, 0);
 	if (ret)
 		return ret;
 

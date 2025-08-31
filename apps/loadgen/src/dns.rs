@@ -6,11 +6,12 @@ use crate::Transport;
 
 use byteorder::{BigEndian, WriteBytesExt};
 use dns_parser::{Header, Opcode, QueryClass, QueryType, ResponseCode};
+use serde::{Deserialize, Serialize};
 
 use std::io;
 use std::io::{Error, ErrorKind, Read};
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Serialize, Deserialize)]
 pub struct DnsProtocol;
 
 const NDOMAINS: usize = 100000;
@@ -46,7 +47,7 @@ impl DnsProtocol {
         DnsProtocol {}
     }
 
-    pub fn args<'a, 'b>() -> Vec<clap::Arg<'a, 'b>> {
+    pub fn args() -> Vec<clap::Arg> {
         vec![]
     }
 }

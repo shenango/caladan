@@ -7,6 +7,7 @@ use crate::Transport;
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use clap::Arg;
+use serde::{Deserialize, Serialize};
 use std::io;
 use std::io::{Error, ErrorKind, Read};
 
@@ -16,6 +17,9 @@ use rand_distr::Distribution as DistR;
 use rand_mt::Mt64;
 
 use std::cmp::min;
+
+// Constants for default values
+const DEFAULT_REFLEX_SET_RATE: u64 = 0;
 
 const REFLEX_HDR_SZ: usize = 32;
 const REFLEX_MAGIC: u16 = REFLEX_HDR_SZ as u16;
@@ -77,7 +81,7 @@ impl PacketHeader {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Serialize, Deserialize)]
 pub struct ReflexProtocol {
     sectors_per_rq: Distribution,
     pct_set: u64,
@@ -92,7 +96,10 @@ impl ReflexProtocol {
         }
         ReflexProtocol {
             sectors_per_rq: dist,
-            pct_set: value_t!(matches, "reflex_set_rate", u64).unwrap(),
+            pct_set: matches
+                .get_one::<u64>("reflex_set_rate")
+                .copied()
+                .unwrap_or(DEFAULT_REFLEX_SET_RATE),
         }
     }
 
@@ -115,19 +122,12 @@ impl ReflexProtocol {
         }
     }
 
-    pub fn args<'a, 'b>() -> Vec<clap::Arg<'a, 'b>> {
-        vec![
-            Arg::with_name("reflex_set_rate")
-                .long("reflex_set_rate")
-                .takes_value(true)
-                .default_value("0")
-                .help("Reflex: set requsts per 1000 requests"),
-            Arg::with_name("request_size")
-                .long("request_size")
-                .takes_value(true)
-                .default_value("8")
-                .help("Reflex: request size in sectors"),
-        ]
+    pub fn args() -> Vec<clap::Arg> {
+        vec![Arg::new("reflex_set_rate")
+            .long("reflex_set_rate")
+            .num_args(1)
+            .value_parser(clap::value_parser!(u64))
+            .help("Reflex: set requsts per 1000 requests")]
     }
 }
 

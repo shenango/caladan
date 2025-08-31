@@ -51,6 +51,7 @@ unsafe impl Send for TcpQueue {}
 unsafe impl Sync for TcpQueue {}
 
 pub struct TcpConnection(*mut ffi::tcpconn_t);
+
 impl TcpConnection {
     pub fn dial(local_addr: SocketAddrV4, remote_addr: SocketAddrV4) -> io::Result<Self> {
         let laddr = ffi::netaddr {
@@ -69,6 +70,12 @@ impl TcpConnection {
         } else {
             Ok(TcpConnection(conn))
         }
+    }
+
+    pub fn nonpartial_write(&self, buf: &[u8], nonblocking: bool) -> io::Result<usize> {
+        isize_to_result(unsafe {
+            ffi::tcp_write3(self.0, buf.as_ptr() as *const c_void, buf.len() as _, nonblocking, true) as _
+        })
     }
 
     pub fn local_addr(&self) -> SocketAddrV4 {
@@ -124,7 +131,7 @@ impl Read for TcpConnection {
 impl<'a> Write for &'a TcpConnection {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         isize_to_result(unsafe {
-            ffi::tcp_write2(self.0, buf.as_ptr() as *const c_void, buf.len() as _, false) as _
+            ffi::tcp_write3(self.0, buf.as_ptr() as *const c_void, buf.len() as _, false, false) as _
         })
     }
     fn flush(&mut self) -> io::Result<()> {
@@ -134,7 +141,7 @@ impl<'a> Write for &'a TcpConnection {
 impl Write for TcpConnection {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         isize_to_result(unsafe {
-            ffi::tcp_write2(self.0, buf.as_ptr() as *const c_void, buf.len() as _, false)
+            ffi::tcp_write3(self.0, buf.as_ptr() as *const c_void, buf.len() as _, false, false)
         })
     }
     fn flush(&mut self) -> io::Result<()> {

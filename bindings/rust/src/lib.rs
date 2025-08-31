@@ -1,4 +1,3 @@
-#![feature(new_uninit)]
 #![feature(get_mut_unchecked)]
 
 extern crate byteorder;

@@ -5,6 +5,7 @@ use crate::Packet;
 use crate::Transport;
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
+use serde::{Deserialize, Serialize};
 use std::io;
 use std::io::Read;
 
@@ -16,7 +17,7 @@ pub struct Payload {
 
 pub const PAYLOAD_SIZE: usize = 24;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Serialize, Deserialize)]
 pub struct SyntheticProtocol {}
 
 impl LoadgenProtocol for SyntheticProtocol {
@@ -47,7 +48,7 @@ impl SyntheticProtocol {
         SyntheticProtocol {}
     }
 
-    pub fn args<'a, 'b>() -> Vec<clap::Arg<'a, 'b>> {
+    pub fn args() -> Vec<clap::Arg> {
         vec![]
     }
 }

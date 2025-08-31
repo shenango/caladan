@@ -4,6 +4,7 @@ use shenango::tcp::TcpConnection;
 use shenango::udp::UdpConnection;
 use std;
 
+use serde::{Deserialize, Serialize};
 use std::any::Any;
 use std::io;
 use std::io::{Error, ErrorKind, Read, Write};
@@ -16,7 +17,7 @@ use net2::unix::UnixUdpBuilderExt;
 use net2::TcpBuilder;
 use net2::UdpBuilder;
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Serialize, Deserialize)]
 pub enum Backend {
     Linux,
     Runtime,
@@ -24,9 +25,10 @@ pub enum Backend {
 impl Backend {
     pub fn create_udp_connection(
         &self,
-        local_addr: SocketAddrV4,
+        local_addr: Option<SocketAddrV4>,
         remote_addr: Option<SocketAddrV4>,
     ) -> io::Result<Connection> {
+        let local_addr = local_addr.unwrap_or("0.0.0.0:0".parse().unwrap());
         Ok(match (self, remote_addr) {
             (&Backend::Linux, None) => Connection::LinuxUdp(
                 UdpBuilder::new_v4()?
@@ -51,13 +53,12 @@ impl Backend {
         local_addr: Option<SocketAddrV4>,
         remote_addr: SocketAddrV4,
     ) -> io::Result<Connection> {
-        let laddr = match local_addr {
-            Some(x) => x,
-            _ => "0.0.0.0:0".parse().unwrap(),
-        };
+        let local_addr = local_addr.unwrap_or("0.0.0.0:0".parse().unwrap());
         Ok(match *self {
             Backend::Linux => Connection::LinuxTcp(TcpStream::connect(remote_addr)?),
-            Backend::Runtime => Connection::RuntimeTcp(TcpConnection::dial(laddr, remote_addr)?),
+            Backend::Runtime => {
+                Connection::RuntimeTcp(TcpConnection::dial(local_addr, remote_addr)?)
+            }
         })
     }
 
@@ -84,6 +85,19 @@ impl Backend {
         }
     }
 
+    pub fn spawn_detached<F>(&self, f: F)
+    where
+        F: FnOnce(),
+        F: Send + 'static,
+    {
+        match *self {
+            Backend::Linux => {
+                thread::spawn(f);
+            }
+            Backend::Runtime => shenango::thread::spawn_detached(f),
+        }
+    }
+
     pub fn sleep(&self, duration: Duration) {
         match *self {
             Backend::Linux => thread::sleep(duration),
@@ -106,7 +120,10 @@ impl Backend {
     {
         match *self {
             Backend::Linux => f(),
-            Backend::Runtime => shenango::runtime_init(cfgpath.unwrap().to_owned(), f).unwrap(),
+            Backend::Runtime => {
+                shenango::runtime_init(cfgpath.expect("Missing --config file").to_owned(), f)
+                    .unwrap();
+            }
         }
     }
 }
@@ -195,6 +212,18 @@ impl Connection {
                 }
             }
         }
+    }
+}
+
+impl<'a> Connection {
+    pub fn nonpartial_write(&'a self, buf: &[u8], nonblocking: bool) -> io::Result<()> {
+        match *self {
+            Connection::RuntimeTcp(ref s) => s.nonpartial_write(buf, nonblocking)?,
+            Connection::LinuxUdp(ref s) => s.send(buf)?,
+            Connection::LinuxTcp(ref _s) => Err(Error::new(ErrorKind::Other, "unimplemented"))?,
+            Connection::RuntimeUdp(ref s) => (&*s).write(buf)?,
+        };
+        Ok(())
     }
 }
 
