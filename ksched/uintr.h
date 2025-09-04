@@ -22,7 +22,7 @@ struct uintr_ctx {
 
 struct uintr_xstate {
 	struct xregs_state xregs;
-	struct uintr_state uintr;
+	struct uintr_xsave_state uintr;
 } __packed __aligned(64);
 
 struct uintr_percpu {

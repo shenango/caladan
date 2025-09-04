@@ -603,6 +603,11 @@ int __init uintr_init(void)
 	int ret;
 	bool failure = false;
 
+#ifdef CONFIG_X86_USER_INTERRUPTS
+	printk(KERN_INFO "UINTR: detected kernel support, not enabling");
+	return 0;
+#endif
+
 	if (!cpu_has(&boot_cpu_data, X86_FEATURE_UINTR)) {
 		printk(KERN_INFO "UINTR: not enabled (no support)");
 		return 0;

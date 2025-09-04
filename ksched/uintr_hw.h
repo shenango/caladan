@@ -4,7 +4,7 @@
 #pragma once
 
 #define X86_FEATURE_UINTR		(18*32+ 5) /* User Interrupts support */
-#define DISABLE_UINTR		(1 << (X86_FEATURE_UINTR & 31))
+#define DISABLE_UINTR_FLAG		(1 << (X86_FEATURE_UINTR & 31))
 
 /* User Interrupt interface */
 #define MSR_IA32_UINTR_RR		0x985
@@ -26,7 +26,7 @@
  * State component 14 is supervisor state used for User Interrupts state.
  * The size of this state is 48 bytes
  */
-struct uintr_state {
+struct uintr_xsave_state {
 	__u64 handler;
 	__u64 stack_adjust;
 	struct {
