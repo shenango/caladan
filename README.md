@@ -35,32 +35,30 @@ popd
 sudo ./scripts/setup_machine.sh
 ```
 
-5) Install Rust and build a synthetic client-server application.
+5) Install Rust and build the loadgen client-server application.
 
 ```
 curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain=nightly
 ```
 ```
-cd apps/synthetic
-cargo clean
-cargo update
+cd apps/loadgen
 cargo build --release
 ```
 
-6) Run the synthetic application with a client and server. The client
+6) Run the loadgen application with a client and server. The client
 sends requests to the server, which performs a specified amount of
 fake work (e.g., computing square roots for 10us), before responding.
 
 On the server:
 ```
 sudo ./iokerneld
-./apps/synthetic/target/release/synthetic 192.168.1.3:5000 --config server.config --mode spawner-server
+./apps/loadgen/target/release/loadgen 192.168.1.3:5000 --config server.config --mode spawner-server
 ```
 
 On the client:
 ```
 sudo ./iokerneld
-./apps/synthetic/target/release/synthetic 192.168.1.3:5000 --config client.config --mode runtime-client
+./apps/loadgen/target/release/loadgen 192.168.1.3:5000 --config client.config --mode runtime-client
 ```
 
 ## Supported Platforms
@@ -104,7 +102,7 @@ variable (or the known_devices list) in runtime/storage.c.
 
 #### Running a simple block storage server
 Ensure that you have compiled Caladan with storage support by setting the appropriate flag in build/config,
-and that you have built the synthetic client application.
+and that you have built the loadgen client application.
 
 Compile the C++ bindings and the storage server:
 ```
@@ -122,12 +120,12 @@ sudo apps/storage_service/storage_server storage_server.config
 On the client:
 ```
 sudo ./iokerneld
-sudo apps/synthetic/target/release/synthetic --config=storage_client.config --mode=runtime-client --mpps=0.55 --protocol=reflex --runtime=10 --samples=10 --threads=20 --transport=tcp 192.168.1.3:5000
+sudo apps/loadgen/target/release/loadgen --config=storage_client.config --mode=runtime-client --mpps=0.55 --protocol=reflex --runtime=10 --samples=10 --threads=20 --transport=tcp 192.168.1.3:5000
 ```
 
 #### Running with interference
 
-Ensure that you have built the synthetic application on client and server.
+Ensure that you have built the loadgen application on client and server.
 
 Compile the C++ bindings and the memory/cache antagonist:
 ```
@@ -136,21 +134,21 @@ make -C apps/netbench
 ```
 
 On the server, run the IOKernel with the interference-aware scheduler (ias),
-the synthetic application, and the cache antagonist:
+the loadgen application, and the cache antagonist:
 ```
 sudo ./iokerneld ias
-./apps/synthetic/target/release/synthetic 192.168.1.8:5000 --config victim.config --mode spawner-server
+./apps/loadgen/target/release/loadgen 192.168.1.8:5000 --config victim.config --mode spawner-server
 ./apps/netbench/stress antagonist.config 20 10 cacheantagonist:4090880
 ```
 
 On the client:
 ```
 sudo ./iokerneld
-./apps/synthetic/target/release/synthetic 192.168.1.8:5000 --config client.config --mode runtime-client
+./apps/loadgen/target/release/loadgen 192.168.1.8:5000 --config client.config --mode runtime-client
 ```
 
 You should observe that you can stop and start the antagonist and that the
-synthetic application's latency is not impacted. In contrast, if you use
+loadgen application's latency is not impacted. In contrast, if you use
 Shenango's default scheduler (`sudo ./iokerneld`) on the server, when you run
-the antagonist with the synthetic application, the synthetic application's
+the antagonist with the loadgen application, the loadgen application's
 latency degrades.

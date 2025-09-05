@@ -905,10 +905,7 @@ fn run_client_worker(
     let (mut packets, sched_boundaries) = gen_packets_for_schedule(&schedules);
     let src_addr = SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), (100 + index) as u16);
     let live_mode = live_mode_socket.is_some();
-    let socket = match live_mode_socket {
-        Some(sock) => sock,
-        _ => tport.dial(backend, Some(src_addr), addr)?,
-    };
+    let socket = live_mode_socket.unwrap_or(tport.dial(backend, Some(src_addr), addr)?);
 
     let packets_per_thread = packets.len();
     let socket2 = socket.clone();
