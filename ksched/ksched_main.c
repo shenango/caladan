@@ -25,6 +25,7 @@
 #include <linux/uaccess.h>
 #include <linux/signal.h>
 #include <linux/version.h>
+#include <linux/vmalloc.h>
 
 #include "ksched.h"
 #include "uintr.h"

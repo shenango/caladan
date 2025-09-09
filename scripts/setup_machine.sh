@@ -10,7 +10,7 @@ sysctl -w net.core.somaxconn=3072
 
 # check to see if we need a fake idle driver
 if grep -q none /sys/devices/system/cpu/cpuidle/current_driver; then
-  insmod $(dirname $0)/../ksched/build/fake_idle.ko
+  insmod $(dirname $0)/../ksched/fake_idle.ko
 fi
 
 # set up the ksched module
@@ -18,9 +18,9 @@ rmmod ksched
 rm /dev/ksched
 
 if [[ "$1x" = "nouintrx" ]]; then
-  insmod $(dirname $0)/../ksched/build/ksched.ko nouintr=1
+  insmod $(dirname $0)/../ksched/ksched.ko nouintr=1
 else
-  insmod $(dirname $0)/../ksched/build/ksched.ko
+  insmod $(dirname $0)/../ksched/ksched.ko
 fi
 
 mknod /dev/ksched c 280 0
