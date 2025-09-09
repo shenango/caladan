@@ -224,12 +224,17 @@ int ioqueues_init(void)
 
 #ifdef MFD_EXEC
 	flags |= MFD_EXEC;
+#else
+#define MFD_EXEC 0
 #endif
 
 	iok.mem_fd = memfd_create("iok_signals", flags);
 	if (iok.mem_fd < 0) {
-		log_err("ioqueues: failed to create mem fd");
-		return -errno;
+		iok.mem_fd = memfd_create("iok_signals", flags & ~MFD_EXEC);
+		if (iok.mem_fd < 0) {
+			log_err("ioqueues: failed to create mem fd");
+			return -errno;
+		}
 	}
 
 	if (!cfg_directpath_external()) {
