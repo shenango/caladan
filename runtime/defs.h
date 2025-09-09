@@ -330,7 +330,8 @@ struct kthread {
 	bool			iokernel_busy;
 	bool			timer_busy;
 	bool			storage_busy;
-	bool			pad2[5 + 8];
+	bool			pad2[5];
+	uint64_t		next_timer_tsc;
 	uint64_t		last_softirq_tsc;
 
 #ifdef DIRECT_STORAGE

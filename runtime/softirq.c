@@ -16,10 +16,7 @@ static bool softirq_iokernel_pending(struct kthread *k)
 
 static bool softirq_timer_pending(struct kthread *k, uint64_t now_tsc)
 {
-	uint64_t now_us = (now_tsc - start_tsc) / cycles_per_us;
-
-	return ACCESS_ONCE(k->timern) > 0 &&
-	       ACCESS_ONCE(k->timers[0].deadline_us) <= now_us;
+	return ACCESS_ONCE(k->next_timer_tsc) <= now_tsc;
 }
 
 /**
