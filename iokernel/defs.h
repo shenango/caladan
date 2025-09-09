@@ -60,6 +60,7 @@ extern uint32_t nr_vfio_prealloc;
 extern unsigned int vfio_prealloc_nrqs;
 extern bool vfio_prealloc_rmp;
 extern int dataplane_mode;
+extern bool is_azure;
 
 /*
  * Constant limits

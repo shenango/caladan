@@ -1,0 +1,63 @@
+From df523bc4a2e0d0d7da1037855a3133029d58c9e0 Mon Sep 17 00:00:00 2001
+From: Ubuntu
+ <josh@josh-h100-x1-east-norm.hsijogbcg05u3oxffmp2t0s2fh.bx.internal.cloudapp.net>
+Date: Tue, 27 May 2025 21:25:32 +0000
+Subject: [PATCH] failsafe
+
+---
+ drivers/net/failsafe/failsafe.c | 36 +++++++++++++++++++++++++++++++++
+ 1 file changed, 36 insertions(+)
+
+diff --git a/drivers/net/failsafe/failsafe.c b/drivers/net/failsafe/failsafe.c
+index 32811403b4..221f6f05f5 100644
+--- a/drivers/net/failsafe/failsafe.c
++++ b/drivers/net/failsafe/failsafe.c
+@@ -395,9 +395,45 @@ rte_pmd_failsafe_remove(struct rte_vdev_device *vdev)
+ 	return fs_rte_eth_free(name);
+ }
+ 
++static int rte_pmd_failsafe_dma_map(struct rte_vdev_device *dev, void *addr, uint64_t iova, size_t len) {
++	struct rte_eth_dev *eth_dev;
++	struct sub_device *sdev;
++	int ret;
++	uint8_t i;
++
++	const char *name = rte_vdev_device_name(dev);
++	eth_dev = rte_eth_dev_allocated(name);
++	FOREACH_SUBDEV(sdev, i, eth_dev) {
++		ret = rte_dev_dma_map(ETH(sdev)->device, addr, iova, len);
++		if (ret) ERROR("Failed to dma map");
++	}
++
++	return 0;
++
++}
++
++static int rte_pmd_failsafe_dma_unmap(struct rte_vdev_device *dev, void *addr, uint64_t iova, size_t len) {
++        struct rte_eth_dev *eth_dev;
++        struct sub_device *sdev;
++        int ret;
++        uint8_t i;
++
++        const char *name = rte_vdev_device_name(dev);
++        eth_dev = rte_eth_dev_allocated(name);
++        FOREACH_SUBDEV(sdev, i, eth_dev) {
++                ret = rte_dev_dma_unmap(ETH(sdev)->device, addr, iova, len);
++                if (ret) ERROR("Failed to dma map");
++        }
++
++        return 0;
++
++}
++
+ static struct rte_vdev_driver failsafe_drv = {
+ 	.probe = rte_pmd_failsafe_probe,
+ 	.remove = rte_pmd_failsafe_remove,
++	.dma_map = rte_pmd_failsafe_dma_map,
++	.dma_unmap = rte_pmd_failsafe_dma_unmap,
+ };
+ 
+ RTE_PMD_REGISTER_VDEV(net_failsafe, failsafe_drv);
+-- 
+2.43.0
+

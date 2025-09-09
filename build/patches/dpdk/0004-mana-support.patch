@@ -1,0 +1,297 @@
+From 3abe8cdfe0c098d18fa9bddf69202c5abe142d52 Mon Sep 17 00:00:00 2001
+From: Josh Fried <joshuafried@gmail.com>
+Date: Mon, 26 May 2025 17:52:33 +0000
+Subject: [PATCH 4/4] mana support
+
+---
+ drivers/net/mana/mana.c |  75 ++++++++++++++++++++++++++---
+ drivers/net/mana/mana.h |   5 +-
+ drivers/net/mana/mr.c   | 104 +++++++++++++++++++++++++++++++++++++++-
+ 3 files changed, 176 insertions(+), 8 deletions(-)
+
+diff --git a/drivers/net/mana/mana.c b/drivers/net/mana/mana.c
+index 2934da29f7..70d245a5b3 100644
+--- a/drivers/net/mana/mana.c
++++ b/drivers/net/mana/mana.c
+@@ -124,6 +124,12 @@ rx_intr_vec_disable(struct mana_priv *priv)
+ 	rte_intr_nb_efd_set(intr_handle, 0);
+ }
+ 
++/* Head of devices. */
++static TAILQ_HEAD(mana_devices, mana_priv) devices_list =
++				TAILQ_HEAD_INITIALIZER(devices_list);
++static pthread_mutex_t devices_list_lock;
++
++
+ static int
+ rx_intr_vec_enable(struct mana_priv *priv)
+ {
+@@ -188,12 +194,6 @@ mana_dev_start(struct rte_eth_dev *dev)
+ 	struct mana_priv *priv = dev->data->dev_private;
+ 
+ 	rte_spinlock_init(&priv->mr_btree_lock);
+-	ret = mana_mr_btree_init(&priv->mr_btree, MANA_MR_BTREE_CACHE_N,
+-				 dev->device->numa_node);
+-	if (ret) {
+-		DRV_LOG(ERR, "Failed to init device MR btree %d", ret);
+-		return ret;
+-	}
+ 
+ 	ret = mana_start_tx_queues(dev);
+ 	if (ret) {
+@@ -278,6 +278,10 @@ mana_dev_close(struct rte_eth_dev *dev)
+ 
+ 	mana_remove_all_mr(priv);
+ 
++	pthread_mutex_lock(&devices_list_lock);
++	TAILQ_REMOVE(&devices_list, priv, next);
++	pthread_mutex_unlock(&devices_list_lock);
++
+ 	ret = mana_intr_uninstall(priv);
+ 	if (ret)
+ 		return ret;
+@@ -1223,6 +1227,8 @@ mana_init_once(void)
+ 
+ 	rte_spinlock_lock(&mana_shared_data_lock);
+ 
++	pthread_mutex_init(&devices_list_lock, NULL);
++
+ 	switch (rte_eal_process_type()) {
+ 	case RTE_PROC_PRIMARY:
+ 		if (mana_local_data.init_done)
+@@ -1379,6 +1385,14 @@ mana_probe_port(struct ibv_device *ibdev, struct ibv_device_attr_ex *dev_attr,
+ 	priv->dev_port = port;
+ 	eth_dev->data->dev_private = priv;
+ 	priv->dev_data = eth_dev->data;
++	priv->rte_dev = &pci_dev->device;
++
++	ret = mana_mr_btree_init(&priv->mr_btree, MANA_MR_BTREE_CACHE_N,
++				 pci_dev->device.numa_node);
++	if (ret) {
++		DRV_LOG(ERR, "Failed to init device MR btree %d", ret);
++		return ret;
++	}
+ 
+ 	priv->max_rx_queues = dev_attr->orig_attr.max_qp;
+ 	priv->max_tx_queues = dev_attr->orig_attr.max_qp;
+@@ -1419,6 +1433,10 @@ mana_probe_port(struct ibv_device *ibdev, struct ibv_device_attr_ex *dev_attr,
+ 
+ 	rte_eth_dev_probing_finish(eth_dev);
+ 
++	pthread_mutex_lock(&devices_list_lock);
++	TAILQ_INSERT_HEAD(&devices_list, priv, next);
++	pthread_mutex_unlock(&devices_list_lock);
++
+ 	return 0;
+ 
+ failed:
+@@ -1641,11 +1659,56 @@ static const struct rte_pci_id mana_pci_id_map[] = {
+ 	},
+ };
+ 
++// pci_dev to mana_priv
++static struct mana_priv *
++mana_pci_dev_to_priv(struct rte_pci_device *pci_dev)
++{
++	struct mana_priv *priv;
++	pthread_mutex_lock(&devices_list_lock);
++	TAILQ_FOREACH(priv, &devices_list, next) {
++		DRV_LOG(INFO, "priv->rte_dev %p pci_dev->device %p", priv->rte_dev, &pci_dev->device);
++		if (priv->rte_dev == &pci_dev->device) {
++			pthread_mutex_unlock(&devices_list_lock);
++			return priv;
++		}
++	}
++	pthread_mutex_unlock(&devices_list_lock);
++	return NULL;
++}
++
++static int
++mana_pci_dma_map(struct rte_pci_device *pci_dev, void *addr,
++			uint64_t iova __rte_unused, size_t len)
++{
++	struct mana_priv *p = mana_pci_dev_to_priv(pci_dev);
++	if (!p) {
++		DRV_LOG(ERR, "Failed to find mana_priv for pci_dev");
++		return -ENODEV;
++	}
++
++	return mana_new_mr(p, addr, len);
++}
++
++static int
++mana_pci_dma_unmap(struct rte_pci_device *pci_dev, void *addr,
++			  uint64_t iova __rte_unused, size_t len)
++{
++	struct mana_priv *p = mana_pci_dev_to_priv(pci_dev);
++	if (!p) {
++		DRV_LOG(ERR, "Failed to find mana_priv for pci_dev");
++		return -ENODEV;
++	}
++
++	return mana_del_mr(p, addr, len);
++}
++
+ static struct rte_pci_driver mana_pci_driver = {
+ 	.id_table = mana_pci_id_map,
+ 	.probe = mana_pci_probe,
+ 	.remove = mana_pci_remove,
+ 	.drv_flags = RTE_PCI_DRV_INTR_RMV,
++	.dma_map = mana_pci_dma_map,
++	.dma_unmap = mana_pci_dma_unmap,
+ };
+ 
+ RTE_PMD_REGISTER_PCI(net_mana, mana_pci_driver);
+diff --git a/drivers/net/mana/mana.h b/drivers/net/mana/mana.h
+index 855d98911b..b6936228b4 100644
+--- a/drivers/net/mana/mana.h
++++ b/drivers/net/mana/mana.h
+@@ -334,6 +334,7 @@ struct mana_process_priv {
+ 
+ struct mana_priv {
+ 	struct rte_eth_dev_data *dev_data;
++	struct rte_device *rte_dev;
+ 	struct mana_process_priv *process_priv;
+ 	int num_queues;
+ 
+@@ -363,6 +364,7 @@ struct mana_priv {
+ 	uint64_t max_mr_size;
+ 	struct mana_mr_btree mr_btree;
+ 	rte_spinlock_t	mr_btree_lock;
++	TAILQ_ENTRY(mana_priv) next;
+ };
+ 
+ struct mana_txq_desc {
+@@ -528,7 +530,8 @@ int mana_mr_btree_lookup(struct mana_mr_btree *bt, uint16_t *idx,
+ int mana_mr_btree_insert(struct mana_mr_btree *bt, struct mana_mr_cache *entry);
+ int mana_mr_btree_init(struct mana_mr_btree *bt, int n, int socket);
+ void mana_mr_btree_free(struct mana_mr_btree *bt);
+-
++int mana_del_mr(struct mana_priv *priv, void *base, uint64_t len);
++int mana_new_mr(struct mana_priv *priv, void *base, uint64_t len);
+ /** Request timeout for IPC. */
+ #define MANA_MP_REQ_TIMEOUT_SEC 5
+ 
+diff --git a/drivers/net/mana/mr.c b/drivers/net/mana/mr.c
+index c4045141bc..7ab093d2fb 100644
+--- a/drivers/net/mana/mr.c
++++ b/drivers/net/mana/mr.c
+@@ -30,6 +30,108 @@ mana_mempool_chunk_cb(struct rte_mempool *mp __rte_unused, void *opaque,
+ 	range->len = range->end - range->start;
+ }
+ 
++
++int
++mana_new_mr(struct mana_priv *priv, void *base, uint64_t len)
++{
++	struct ibv_mr *ibv_mr;
++	struct mana_mr_cache mr;
++	int ret;
++
++	if (rte_eal_process_type() == RTE_PROC_SECONDARY) {
++		DP_LOG(ERR, "multiprocess not supported for adding/removing MRs");
++		return -1;
++	}
++
++	ibv_mr = ibv_reg_mr(priv->ib_pd, (void *)base, len, IBV_ACCESS_LOCAL_WRITE);
++	if (ibv_mr) {
++		DP_LOG(DEBUG, "MR lkey %u addr %p len %zu",
++		       ibv_mr->lkey, ibv_mr->addr, ibv_mr->length);
++
++		mr.lkey = ibv_mr->lkey;
++		mr.addr = (uintptr_t)ibv_mr->addr;
++		mr.len = ibv_mr->length;
++		mr.verb_obj = ibv_mr;
++
++		rte_spinlock_lock(&priv->mr_btree_lock);
++		ret = mana_mr_btree_insert(&priv->mr_btree, &mr);
++		rte_spinlock_unlock(&priv->mr_btree_lock);
++		if (ret) {
++			ibv_dereg_mr(ibv_mr);
++			DP_LOG(ERR, "Failed to add to global MR btree");
++			return ret;
++		}
++	} else {
++		DP_LOG(ERR, "MR failed at 0x%" PRIxPTR " len %lu",
++		       (uintptr_t)base, len);
++		return -errno;
++	}
++	return 0;
++}
++
++static int mana_mr_btree_del(struct mana_mr_btree *bt, uint16_t idx)
++{
++	struct mana_mr_cache *table;
++
++	table = bt->table;
++	memmove(&table[idx], &table[idx + 1], (bt->len - idx) * sizeof(struct mana_mr_cache));
++	bt->len--;
++
++	return 0;
++}
++
++int
++mana_del_mr(struct mana_priv *priv, void *base, uint64_t len)
++{
++	struct ibv_mr *ibv_mr = NULL;
++	uint16_t idx;
++	struct mana_mr_cache *mr;
++	int ret;
++
++	if (rte_eal_process_type() == RTE_PROC_SECONDARY) {
++		DP_LOG(ERR, "multiprocess not supported for adding/removing MRs");
++		return -1;
++	}
++
++	// Make sure that this dpdk instance is single-threaded.
++	if (rte_lcore_count() > 1) {
++		DRV_LOG(ERR, "Cannot delete MRs in multi-threaded dpdk instances");
++		return -EPERM;
++	}
++
++	for (uint16_t i = 0; i < priv->dev_data->nb_tx_queues; i++) {
++		struct mana_txq *txq = (struct mana_txq *)priv->dev_data->tx_queues[i];
++		ret = mana_mr_btree_lookup(&txq->mr_btree, &idx,
++					(uintptr_t)base, len, &mr);
++		if (!ret && mr)
++			mana_mr_btree_del(&txq->mr_btree, idx);
++	}
++
++	for (uint16_t i = 0; i < priv->dev_data->nb_rx_queues; i++) {
++		struct mana_rxq *rxq = (struct mana_rxq *)priv->dev_data->rx_queues[i];
++		ret = mana_mr_btree_lookup(&rxq->mr_btree, &idx,
++					(uintptr_t)base, len, &mr);
++		if (!ret && mr)
++			mana_mr_btree_del(&rxq->mr_btree, idx);
++	}
++
++	rte_spinlock_lock(&priv->mr_btree_lock);
++	ret = mana_mr_btree_lookup(&priv->mr_btree, &idx, (uintptr_t)base, len, &mr);
++	if (!ret && mr) {
++		ibv_mr = mr->verb_obj;
++		mana_mr_btree_del(&priv->mr_btree, idx);
++	}
++	rte_spinlock_unlock(&priv->mr_btree_lock);
++
++	if (ret)
++		return -1;
++
++	if (ibv_mr)
++		ibv_dereg_mr(ibv_mr);
++
++	return 0;
++}
++
+ /*
+  * Register all memory regions from pool.
+  */
+@@ -361,4 +463,4 @@ mana_mr_btree_insert(struct mana_mr_btree *bt, struct mana_mr_cache *entry)
+ 	       table, idx, entry->addr, entry->len);
+ 
+ 	return 0;
+-}
++}
+\ No newline at end of file
+-- 
+2.43.0
+

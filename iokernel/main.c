@@ -28,6 +28,7 @@ uint32_t nr_vfio_prealloc;
 bool stat_logging;
 bool allowed_cores_supplied;
 DEFINE_BITMAP(input_allowed_cores, NCPU);
+bool is_azure;
 
 struct init_entry {
 	const char *name;
@@ -295,6 +296,7 @@ int main(int argc, char *argv[])
 	if (strstr(utsname.release, "azure")) {
 		log_info("Detected Azure VM, using Azure ARP mode");
 		cfg.azure_arp_mode = true;
+		is_azure = true;
 	}
 
 	pthread_barrier_init(&init_barrier, NULL, 2);

@@ -63,6 +63,7 @@ int dpdk_argc;
 
 struct rte_eth_rss_conf rss_conf;
 bool rss_conf_present;
+static bool is_mana;
 
 #define DPDK_PORT 0
 
@@ -101,7 +102,11 @@ static inline int dpdk_port_init(uint8_t port, struct rte_mempool *mbuf_pool)
 	struct rte_eth_rxconf *rxconf;
 
 	/* Get default device configuration */
-	rte_eth_dev_info_get(port, &dev_info);
+	retval = rte_eth_dev_info_get(port, &dev_info);
+	if (unlikely(retval)) {
+		log_err("dpdk_port_init: failed to get eth dev info");
+		return retval;
+	}
 	rxconf = &dev_info.default_rxconf;
 	rxconf->rx_free_thresh = 64;
 
@@ -120,7 +125,15 @@ static inline int dpdk_port_init(uint8_t port, struct rte_mempool *mbuf_pool)
 	bool is_tap =
 	       !strncmp(dev_info.driver_name, "net_tap", strlen("net_tap"));
 
-	cfg.allow_loopback = true;
+	is_mana =
+	       !strncmp(dev_info.driver_name, "net_mana", strlen("net_mana"));
+
+	if (is_mana) {
+		cfg.allow_loopback = false;
+		cfg.azure_arp_mode = false;
+	} else {
+		cfg.allow_loopback = true;
+	}
 
 	// Enable internal loopbacking if using TAP.
 	// NOTE: other drivers likely need this enabled also.
@@ -270,7 +283,7 @@ int dpdk_init(void)
 		ARGV("--vdev=net_tap0");
 		ARGV("--allow");
 		ARGV("0000:00:00.0");
-	} else if (cfg.azure_arp_mode) {
+	} else if (is_azure) {
 		ARGV("--allow");
 		ARGV("0000:00:00.0");
 	} else if (nic_pci_addr_str) {
@@ -305,7 +318,11 @@ int dpdk_init(void)
 
 	if (!cfg.vfio_directpath) {
 		dp.port = DPDK_PORT;
-		rte_eth_dev_info_get(DPDK_PORT, &dev_info);
+		ret = rte_eth_dev_info_get(DPDK_PORT, &dev_info);
+		if (unlikely(ret)) {
+			log_err("dpdk_init: failed to get eth dev info");
+			return ret;
+		}
 		dp.device = dev_info.device;
 		dp.iova_mode_pa = rte_eal_iova_mode() == RTE_IOVA_PA;
 	}
@@ -327,7 +344,7 @@ int do_dpdk_dma_map(void *buf, size_t len, size_t pgsize, uintptr_t *physaddrs)
 		return -rte_errno;
 	}
 
-	if (!dp.iova_mode_pa) {
+	if (is_mana ||!dp.iova_mode_pa) {
 		// In IOVA VA mode, IOVAs are equal to VAs.
 		ret = rte_dev_dma_map(dp.device, buf, (rte_iova_t)buf, len);
 		if (unlikely(ret < 0)) {
