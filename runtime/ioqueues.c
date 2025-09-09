@@ -363,9 +363,6 @@ int ioqueues_register_iokernel(void)
 	hdr->sched_cfg.quantum_us = cfg_quantum_us;
 	hdr->thread_specs = ptr_to_shmptr(r, iok.threads, sizeof(*iok.threads) * maxks);
 
-	// Make sure it's an abstract namespace path.
-	assert(CONTROL_SOCK_PATH[0] == '\0');
-
 	/* register with iokernel */
 	BUILD_ASSERT(sizeof(CONTROL_SOCK_PATH) <= sizeof(addr.sun_path));
 	addr.sun_family = AF_UNIX;

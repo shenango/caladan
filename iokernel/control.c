@@ -642,9 +642,6 @@ int control_init(void)
 
 	addr.sun_family = AF_UNIX;
 
-	// Make sure it's an abstract namespace path.
-	assert(CONTROL_SOCK_PATH[0] == '\0');
-
 	BUILD_ASSERT(sizeof(CONTROL_SOCK_PATH) <= sizeof(addr.sun_path));
 	memcpy(addr.sun_path, CONTROL_SOCK_PATH, sizeof(CONTROL_SOCK_PATH));
 
@@ -654,12 +651,21 @@ int control_init(void)
 		return -errno;
 	}
 
+	// unlink the socket file if it exists
+	unlink(CONTROL_SOCK_PATH);
+
 	if (bind(sfd, (struct sockaddr *)&addr,
 		 sizeof(addr.sun_family) + sizeof(CONTROL_SOCK_PATH)) == -1) {
 		log_err("control: bind() failed %i [%s]", errno, strerror(errno));
 		close(sfd);
 		return -errno;
 	}
+
+    if (chmod(CONTROL_SOCK_PATH, 0777) == -1) {
+        perror("chmod");
+        close(sfd);
+        exit(EXIT_FAILURE);
+    }
 
 	if (listen(sfd, CTL_SOCK_BACKLOG) == -1) {
 		log_err("control: listen() failed[%s]", strerror(errno));
