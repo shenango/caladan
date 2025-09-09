@@ -1,6 +1,12 @@
 #!/bin/bash
 # run with sudo
 
+# check if we are running as root
+if [ "$(id -u)" != "0" ]; then
+  echo "This script must be run as root" 1>&2
+  exit 1
+fi
+
 # needed for the iokernel's shared memory
 sysctl -w kernel.shm_rmid_forced=1
 sysctl -w kernel.shmmax=18446744073692774399
