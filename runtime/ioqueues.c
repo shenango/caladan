@@ -184,6 +184,7 @@ static void ioqueue_alloc(struct queue_spec *q, size_t msg_count,
 
 int ioqueues_init_early(void)
 {
+	struct sockaddr_un addr;
 	void *shbuf;
 
 	shbuf = mem_map_shm_rdonly(IOKERNEL_INFO_KEY, NULL, IOKERNEL_INFO_SIZE,
@@ -206,6 +207,22 @@ int ioqueues_init_early(void)
 
 	if (iok.iok_info->transparent_hugepages)
 		cfg_transparent_hugepages_enabled = true;
+
+	BUILD_ASSERT(sizeof(CONTROL_SOCK_PATH) <= sizeof(addr.sun_path));
+	addr.sun_family = AF_UNIX;
+	memcpy(addr.sun_path, CONTROL_SOCK_PATH, sizeof(CONTROL_SOCK_PATH));
+
+	iok.fd = socket(AF_UNIX, SOCK_STREAM, 0);
+	if (iok.fd == -1) {
+		log_err("register_iokernel: socket() failed [%s]", strerror(errno));
+		return -1;
+	}
+
+	if (connect(iok.fd, (struct sockaddr *)&addr,
+	    sizeof(addr.sun_family) + sizeof(CONTROL_SOCK_PATH)) == -1) {
+		log_err("register_iokernel: connect() failed [%s]", strerror(errno));
+		return -1;
+	}
 
 	return 0;
 }
@@ -343,7 +360,6 @@ int ioqueues_register_iokernel(void)
 {
 	struct control_hdr *hdr;
 	struct shm_region *r = &netcfg.tx_region;
-	struct sockaddr_un addr;
 	int ret;
 
 	/* initialize control header */
@@ -369,21 +385,6 @@ int ioqueues_register_iokernel(void)
 	hdr->thread_specs = ptr_to_shmptr(r, iok.threads, sizeof(*iok.threads) * maxks);
 
 	/* register with iokernel */
-	BUILD_ASSERT(sizeof(CONTROL_SOCK_PATH) <= sizeof(addr.sun_path));
-	addr.sun_family = AF_UNIX;
-	memcpy(addr.sun_path, CONTROL_SOCK_PATH, sizeof(CONTROL_SOCK_PATH));
-
-	iok.fd = socket(AF_UNIX, SOCK_STREAM, 0);
-	if (iok.fd == -1) {
-		log_err("register_iokernel: socket() failed [%s]", strerror(errno));
-		goto fail;
-	}
-
-	if (connect(iok.fd, (struct sockaddr *)&addr,
-		 sizeof(addr.sun_family) + sizeof(CONTROL_SOCK_PATH)) == -1) {
-		log_err("register_iokernel: connect() failed [%s]", strerror(errno));
-		goto fail_close_fd;
-	}
 
 	ret = send_fd(iok.fd, iok.mem_fd);
 	if (ret) {
@@ -411,7 +412,6 @@ int ioqueues_register_iokernel(void)
 
 fail_close_fd:
 	close(iok.fd);
-fail:
 	ioqueues_shm_cleanup();
 	return -errno;
 }
