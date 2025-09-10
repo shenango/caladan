@@ -22,7 +22,14 @@ impl TcpQueue {
             port: local_addr.port(),
         };
         let mut queue = ptr::null_mut();
-        let ret = unsafe { ffi::tcp_listen(laddr, backlog, &mut queue as *mut _) };
+        let ret = unsafe {
+            ffi::__tcp_listen(
+                laddr,
+                backlog,
+                &mut queue as *mut _,
+                ptr::null_mut() as *mut ffi::bind_token_t,
+            )
+        };
         if ret < 0 {
             Err(io::Error::from_raw_os_error(-ret as i32))
         } else {
@@ -64,7 +71,15 @@ impl TcpConnection {
         };
 
         let mut conn = ptr::null_mut();
-        let ret = unsafe { ffi::tcp_dial(laddr, raddr, &mut conn as *mut _) };
+        let ret = unsafe {
+            ffi::__tcp_dial(
+                laddr,
+                raddr,
+                &mut conn as *mut _,
+                false,
+                ptr::null_mut() as *mut ffi::bind_token_t,
+            )
+        };
         if ret < 0 {
             Err(io::Error::from_raw_os_error(-ret as i32))
         } else {
@@ -74,7 +89,13 @@ impl TcpConnection {
 
     pub fn nonpartial_write(&self, buf: &[u8], nonblocking: bool) -> io::Result<usize> {
         isize_to_result(unsafe {
-            ffi::tcp_write3(self.0, buf.as_ptr() as *const c_void, buf.len() as _, nonblocking, true) as _
+            ffi::tcp_write3(
+                self.0,
+                buf.as_ptr() as *const c_void,
+                buf.len() as _,
+                nonblocking,
+                true,
+            ) as _
         })
     }
 
@@ -131,7 +152,13 @@ impl Read for TcpConnection {
 impl<'a> Write for &'a TcpConnection {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         isize_to_result(unsafe {
-            ffi::tcp_write3(self.0, buf.as_ptr() as *const c_void, buf.len() as _, false, false) as _
+            ffi::tcp_write3(
+                self.0,
+                buf.as_ptr() as *const c_void,
+                buf.len() as _,
+                false,
+                false,
+            ) as _
         })
     }
     fn flush(&mut self) -> io::Result<()> {
@@ -141,7 +168,13 @@ impl<'a> Write for &'a TcpConnection {
 impl Write for TcpConnection {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         isize_to_result(unsafe {
-            ffi::tcp_write3(self.0, buf.as_ptr() as *const c_void, buf.len() as _, false, false)
+            ffi::tcp_write3(
+                self.0,
+                buf.as_ptr() as *const c_void,
+                buf.len() as _,
+                false,
+                false,
+            )
         })
     }
     fn flush(&mut self) -> io::Result<()> {

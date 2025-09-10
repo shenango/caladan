@@ -180,20 +180,27 @@ static inline void udp_conn_put(udpconn_t *c)
 }
 
 /**
- * udp_dial - creates a UDP socket between a local and remote address
+ * udp_dial - creates a UDP socket between a local and remote address. If token
+ * is not NULL, it's associated laddr will be considered instead of @laddr.
+ * If this call succeeds (e,g, returns 0), then the token has been consumed
+ * and no longer belongs to the caller.
  * @laddr: the local UDP address
  * @raddr: the remote UDP address
  * @c_out: a pointer to store the UDP socket (if successful)
+ * @token: the token to use for the socket (may be NULL)
  *
  * Returns 0 if success, otherwise fail.
  */
-int udp_dial(struct netaddr laddr, struct netaddr raddr, udpconn_t **c_out)
+int __udp_dial(struct netaddr laddr, struct netaddr raddr, udpconn_t **c_out,
+	           bind_token_t *token)
 {
 	udpconn_t *c;
 	int ret;
 
 	/* only can support one local IP so far */
-	if (laddr.ip == 0)
+	if (token)
+		laddr = token->laddr;
+	else if (laddr.ip == 0)
 		laddr.ip = netcfg.addr;
 	else if (laddr.ip != netcfg.addr)
 		return -EINVAL;
@@ -212,7 +219,7 @@ int udp_dial(struct netaddr laddr, struct netaddr raddr, udpconn_t **c_out)
 	if (laddr.port == 0)
 		ret = trans_table_add_with_ephemeral_port(&c->e);
 	else
-		ret = trans_table_add(&c->e);
+		ret = __trans_table_add(&c->e, token);
 	if (ret) {
 		sfree(c);
 		return ret;
@@ -223,19 +230,25 @@ int udp_dial(struct netaddr laddr, struct netaddr raddr, udpconn_t **c_out)
 }
 
 /**
- * udp_listen - creates a UDP socket listening to a local address
+ * udp_listen - creates a UDP socket listening to a local address. If token is
+ * not NULL, it's associated laddr will be considered instead of @laddr. If this
+ * call succeeds (e,g, returns 0), then the token has been consumed and no
+ * longer belongs to the caller.
  * @laddr: the local UDP address
  * @c_out: a pointer to store the UDP socket (if successful)
+ * @token: the token to use for the socket (may be NULL)
  *
  * Returns 0 if success, otherwise fail.
  */
-int udp_listen(struct netaddr laddr, udpconn_t **c_out)
+int __udp_listen(struct netaddr laddr, udpconn_t **c_out, bind_token_t *token)
 {
 	udpconn_t *c;
 	int ret;
 
 	/* only can support one local IP so far */
-	if (laddr.ip == 0 || laddr.ip == MAKE_IP_ADDR(127, 0, 0, 1))
+	if (token)
+		laddr = token->laddr;
+	else if (laddr.ip == 0 || laddr.ip == MAKE_IP_ADDR(127, 0, 0, 1))
 		laddr.ip = netcfg.addr;
 	else if (laddr.ip != netcfg.addr)
 		return -EINVAL;
@@ -250,7 +263,7 @@ int udp_listen(struct netaddr laddr, udpconn_t **c_out)
 	if (laddr.port == 0)
 		ret = trans_table_add_with_ephemeral_port(&c->e);
 	else
-		ret = trans_table_add(&c->e);
+		ret = __trans_table_add(&c->e, token);
 	if (ret) {
 		sfree(c);
 		return ret;

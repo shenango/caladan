@@ -362,16 +362,20 @@ tcpconn_t *tcp_conn_alloc(void)
  * @c: the connection to attach
  * @laddr: the local network address
  * @raddr: the remote network address
+ * @token: the token to use for the connection (may be NULL)
  *
  * After calling this function, if successful, ingress packets and errors will
  * be delivered.
  */
-int tcp_conn_attach(tcpconn_t *c, struct netaddr laddr, struct netaddr raddr)
+int tcp_conn_attach(tcpconn_t *c, struct netaddr laddr, struct netaddr raddr,
+                    bind_token_t *token)
 {
 	int ret;
 	thread_t *th = NULL;
 
-	if (laddr.ip == 0)
+	if (token)
+		laddr = token->laddr;
+	else if (laddr.ip == 0)
 		 laddr.ip = netcfg.addr;
 	else if (laddr.ip != netcfg.addr)
 		return -EINVAL;
@@ -380,7 +384,7 @@ int tcp_conn_attach(tcpconn_t *c, struct netaddr laddr, struct netaddr raddr)
 	if (laddr.port == 0)
 		ret = trans_table_add_with_ephemeral_port(&c->e);
 	else
-		ret = trans_table_add(&c->e);
+		ret = __trans_table_add(&c->e, token);
 	if (ret)
 		return ret;
 
@@ -517,15 +521,9 @@ static void tcp_queue_release_ref(struct kref *ref)
 	rcu_free(&q->e.rcu, tcp_queue_release);
 }
 
-/**
- * tcp_listen - creates a TCP listening queue for a local address
- * @laddr: the local address to listen on
- * @backlog: the maximum number of unaccepted sockets to queue
- * @q_out: a pointer to store the newly created listening queue
- *
- * Returns 0 if successful, otherwise fails.
- */
-int tcp_listen(struct netaddr laddr, int backlog, tcpqueue_t **q_out)
+
+int __tcp_listen(struct netaddr laddr, int backlog, tcpqueue_t **q_out,
+                 bind_token_t *token)
 {
 	tcpqueue_t *q;
 	int ret;
@@ -533,8 +531,10 @@ int tcp_listen(struct netaddr laddr, int backlog, tcpqueue_t **q_out)
 	if (backlog < 1)
 		return -EINVAL;
 
+	if (token)
+		laddr = token->laddr;
 	/* only can support one local IP so far */
-	if (laddr.ip == 0 || laddr.ip == MAKE_IP_ADDR(127, 0, 0, 1))
+	else if (laddr.ip == 0 || laddr.ip == MAKE_IP_ADDR(127, 0, 0, 1))
 		laddr.ip = netcfg.addr;
 	else if (laddr.ip != netcfg.addr)
 		return -EINVAL;
@@ -559,7 +559,7 @@ int tcp_listen(struct netaddr laddr, int backlog, tcpqueue_t **q_out)
 	if (laddr.port == 0)
 		ret = trans_table_add_with_ephemeral_port(&q->e);
 	else
-		ret = trans_table_add(&q->e);
+		ret = __trans_table_add(&q->e, token);
 	if (ret) {
 		sfree(q);
 		return ret;
@@ -685,9 +685,8 @@ void tcp_qclose(tcpqueue_t *q)
 /*
  * Support for the TCP socket API
  */
-
-static int __tcp_dial(struct netaddr laddr, struct netaddr raddr,
-	                  tcpconn_t **c_out, bool nonblocking)
+int __tcp_dial(struct netaddr laddr, struct netaddr raddr,
+               tcpconn_t **c_out, bool nonblocking, bind_token_t *token)
 {
 	struct tcp_options opts;
 	tcpconn_t *c;
@@ -708,7 +707,7 @@ static int __tcp_dial(struct netaddr laddr, struct netaddr raddr,
 	 * Attach the connection to the transport layer. From this point onward
 	 * ingress packets can be dispatched to the connection.
 	 */
-	ret = tcp_conn_attach(c, laddr, raddr);
+	ret = tcp_conn_attach(c, laddr, raddr, token);
 	if (unlikely(ret)) {
 		sfree(c);
 		return ret;
@@ -757,34 +756,6 @@ static int __tcp_dial(struct netaddr laddr, struct netaddr raddr,
 
 	*c_out = c;
 	return 0;
-}
-
-/**
- * tcp_dial - opens a TCP connection, creating a new socket
- * @laddr: the local address
- * @raddr: the remote address
- * @c_out: a pointer to store the new connection
- *
- * Returns 0 if successful, otherwise fail.
- */
-int tcp_dial(struct netaddr laddr, struct netaddr raddr, tcpconn_t **c_out)
-{
-	return __tcp_dial(laddr, raddr, c_out, false);
-}
-
-/**
- * tcp_dial_nonblocking - opens a nonblocking TCP connection, creating a new
- * socket
- * @laddr: the local address
- * @raddr: the remote address
- * @c_out: a pointer to store the new connection
- *
- * Returns 0 if successful, otherwise fail.
- */
-int tcp_dial_nonblocking(struct netaddr laddr, struct netaddr raddr,
-	                     tcpconn_t **c_out)
-{
-	return __tcp_dial(laddr, raddr, c_out, true);
 }
 
 /**

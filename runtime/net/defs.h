@@ -121,6 +121,12 @@ enum {
 	TRANS_MATCH_5TUPLE,
 };
 
+static inline void assert_valid_match(int match)
+{
+	assert(match == TRANS_MATCH_3TUPLE ||
+	       match == TRANS_MATCH_5TUPLE);
+}
+
 struct trans_entry;
 
 struct trans_ops {
@@ -130,15 +136,32 @@ struct trans_ops {
 	void (*err) (struct trans_entry *e, int err);
 };
 
+/* tracks usage of port numbers (typedef'd as bind_token_t) */
+struct lport_entry {
+	// protected by @trans_lock
+	struct list_node link;
+	size_t nr_active_entries;
+	size_t nr_reserved_entries;
+
+	// fields that do not change after creation
+	struct netaddr laddr;
+	uint8_t proto;
+	bool reuse_port;
+};
+
 struct trans_entry {
-	int			match;
-	uint8_t			proto;
 	struct netaddr		laddr;
+	int8_t			match;
+	uint8_t			proto;
 	struct netaddr		raddr;
+	int16_t			pad;
 	struct rcu_hlist_node	link;
 	struct rcu_head		rcu;
 	const struct trans_ops	*ops;
+	bind_token_t		*bind_token;
 };
+
+BUILD_ASSERT(sizeof(struct trans_entry) == CACHE_LINE_SIZE);
 
 /**
  * trans_init_3tuple - initializes a transport layer entry (3-tuple match)
@@ -177,7 +200,20 @@ static inline void trans_init_5tuple(struct trans_entry *e, uint8_t proto,
 	e->ops = ops;
 }
 
-extern int trans_table_add(struct trans_entry *e);
+extern int __trans_table_add(struct trans_entry *e, bind_token_t *token);
+
+/**
+ * trans_table_add - adds an entry to the match table
+ * @e: the entry to add
+ *
+ * Returns 0 if successful, or -EADDRINUSE if a conflicting entry is already in
+ * the table, or -EINVAL if the local port is zero.
+ */
+static inline int trans_table_add(struct trans_entry *e)
+{
+	return __trans_table_add(e, NULL);
+}
+
 extern int trans_table_add_with_ephemeral_port(struct trans_entry *e);
 extern void trans_table_remove(struct trans_entry *e);
 

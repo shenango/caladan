@@ -27,7 +27,14 @@ impl UdpConnection {
         };
 
         let mut conn = ptr::null_mut();
-        let ret = unsafe { ffi::udp_dial(laddr, raddr, &mut conn as *mut _) };
+        let ret = unsafe {
+            ffi::__udp_dial(
+                laddr,
+                raddr,
+                &mut conn as *mut _,
+                ptr::null_mut() as *mut ffi::bind_token_t,
+            )
+        };
         if ret < 0 {
             Err(io::Error::from_raw_os_error(-ret as i32))
         } else {
@@ -41,7 +48,13 @@ impl UdpConnection {
             port: local_addr.port(),
         };
         let mut conn = ptr::null_mut();
-        let ret = unsafe { ffi::udp_listen(laddr, &mut conn as *mut _) };
+        let ret = unsafe {
+            ffi::__udp_listen(
+                laddr,
+                &mut conn as *mut _,
+                ptr::null_mut() as *mut ffi::bind_token_t,
+            )
+        };
         if ret < 0 {
             Err(io::Error::from_raw_os_error(-ret as i32))
         } else {

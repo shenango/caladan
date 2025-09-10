@@ -666,7 +666,7 @@ tcpconn_t *tcp_rx_listener(struct netaddr laddr, struct mbuf *m)
 	 * attach the connection to the transport layer. From this point onward
 	 * ingress packets can be dispatched to the connection.
 	 */
-	ret = tcp_conn_attach(c, laddr, raddr);
+	ret = tcp_conn_attach(c, laddr, raddr, NULL);
 	if (unlikely(ret)) {
 		sfree(c);
 		return NULL;

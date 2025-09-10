@@ -131,7 +131,7 @@ struct tcpconn {
 
 extern tcpconn_t *tcp_conn_alloc(void);
 extern int tcp_conn_attach(tcpconn_t *c, struct netaddr laddr,
-			   struct netaddr raddr);
+                           struct netaddr raddr, bind_token_t *token);
 extern void tcp_conn_ack(tcpconn_t *c, struct list_head *freeq);
 extern void tcp_conn_set_state(tcpconn_t *c, int new_state);
 extern void tcp_conn_fail(tcpconn_t *c, int err);

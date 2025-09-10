@@ -34,9 +34,22 @@ static inline unsigned int udp_get_payload_size(void)
 struct udpconn;
 typedef struct udpconn udpconn_t;
 
-extern int udp_dial(struct netaddr laddr, struct netaddr raddr,
-		    udpconn_t **c_out);
-extern int udp_listen(struct netaddr laddr, udpconn_t **c_out);
+
+extern int __udp_dial(struct netaddr laddr, struct netaddr raddr,
+		    udpconn_t **c_out, bind_token_t *token);
+extern int __udp_listen(struct netaddr laddr, udpconn_t **c_out, bind_token_t *token);
+
+static inline int udp_dial(struct netaddr laddr, struct netaddr raddr,
+	udpconn_t **c_out)
+{
+	return __udp_dial(laddr, raddr, c_out, NULL);
+}
+
+static inline int udp_listen(struct netaddr laddr, udpconn_t **c_out)
+{
+	return __udp_listen(laddr, c_out, NULL);
+}
+
 extern struct netaddr udp_local_addr(udpconn_t *c);
 extern struct netaddr udp_remote_addr(udpconn_t *c);
 extern int udp_set_buffers(udpconn_t *c, int read_mbufs, int write_mbufs);
