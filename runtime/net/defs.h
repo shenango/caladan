@@ -154,7 +154,8 @@ struct trans_entry {
 	int8_t			match;
 	uint8_t			proto;
 	struct netaddr		raddr;
-	int16_t			pad;
+	bool 			reuse_port;
+	int8_t			pad;
 	struct rcu_hlist_node	link;
 	struct rcu_head		rcu;
 	const struct trans_ops	*ops;
@@ -178,6 +179,7 @@ static inline void trans_init_3tuple(struct trans_entry *e, uint8_t proto,
 	e->proto = proto;
 	e->laddr = laddr;
 	e->ops = ops;
+	e->reuse_port = false;
 	memset(&e->raddr, 0, sizeof(e->raddr));
 }
 
@@ -198,6 +200,7 @@ static inline void trans_init_5tuple(struct trans_entry *e, uint8_t proto,
 	e->laddr = laddr;
 	e->raddr = raddr;
 	e->ops = ops;
+	e->reuse_port = false;
 }
 
 extern int __trans_table_add(struct trans_entry *e, bind_token_t *token);

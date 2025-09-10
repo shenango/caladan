@@ -233,6 +233,7 @@ int __trans_table_add(struct trans_entry *e, bind_token_t *token)
 
 	token->nr_active_entries++;
 	e->bind_token = token;
+	e->reuse_port = token->reuse_port;
 
 	rcu_hlist_add_head(&trans_tbl[idx], &e->link);
 	ret = 0;
@@ -312,10 +313,11 @@ static struct trans_entry *trans_lookup(struct mbuf *m, bool reverse)
 {
 	const struct ip_hdr *iphdr;
 	const struct l4_hdr *l4hdr;
-	struct trans_entry *e;
+	struct trans_entry *e, *matches[NCPU];
 	struct rcu_hlist_node *node;
 	struct netaddr laddr, raddr;
 	uint32_t hash;
+	size_t nmatches;
 
 	assert(rcu_read_lock_held());
 
@@ -351,17 +353,27 @@ static struct trans_entry *trans_lookup(struct mbuf *m, bool reverse)
 
 	/* attempt to find a 3-tuple match */
 	hash = trans_hash_3tuple(iphdr->proto, laddr);
+	nmatches = 0;
 	rcu_hlist_for_each(&trans_tbl[hash % TRANS_TBL_SIZE], node, false) {
 		e = rcu_hlist_entry(node, struct trans_entry, link);
 		if (e->match != TRANS_MATCH_3TUPLE)
 			continue;
-		if (e->proto == iphdr->proto &&
-		    e->laddr.ip == laddr.ip && e->laddr.port == laddr.port) {
+		if (e->proto != iphdr->proto)
+			continue;
+		if (e->laddr.ip != laddr.ip || e->laddr.port != laddr.port)
+			continue;
+		if (!e->reuse_port)
 			return e;
-		}
+		matches[nmatches++] = e;
+		if (unlikely(nmatches == NCPU))
+			break;
 	}
 
-	return NULL;
+	if (!nmatches)
+		return NULL;
+
+	// TODO(jsf): better socket selection function here?
+	return matches[this_thread_id() % nmatches];
 }
 
 /**
