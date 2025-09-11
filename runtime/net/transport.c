@@ -194,25 +194,23 @@ int __trans_table_add(struct trans_entry *e, bind_token_t *token)
 	idx %= TRANS_TBL_SIZE;
 
 	spin_lock_np(&trans_lock);
-	rcu_hlist_for_each(&trans_tbl[idx], node, true) {
-		pos = rcu_hlist_entry(node, struct trans_entry, link);
-		if (pos->match != e->match)
-			continue;
-		if (e->match == TRANS_MATCH_3TUPLE &&
-		    e->proto == pos->proto &&
-		    e->laddr.ip == pos->laddr.ip &&
-		    e->laddr.port == pos->laddr.port) {
-			goto out;
-		} else if (e->proto == pos->proto &&
-			   e->laddr.ip == pos->laddr.ip &&
-			   e->laddr.port == pos->laddr.port &&
-			   e->raddr.ip == pos->raddr.ip &&
-			   e->raddr.port == pos->raddr.port) {
-			goto out;
+
+	// Check for 5-tuple conflicts.
+	if (e->match == TRANS_MATCH_5TUPLE) {
+		rcu_hlist_for_each(&trans_tbl[idx], node, true) {
+			pos = rcu_hlist_entry(node, struct trans_entry, link);
+			if (pos->match == TRANS_MATCH_5TUPLE &&
+				e->proto == pos->proto &&
+				e->laddr.ip == pos->laddr.ip &&
+				e->laddr.port == pos->laddr.port &&
+				e->raddr.ip == pos->raddr.ip &&
+				e->raddr.port == pos->raddr.port) {
+				goto out;
+			}
 		}
 	}
 
-	/* make sure we don't conflict with a reserved port*/
+	// Check for 3 tuple conflicts and conflicts with reserved ports.
 	if (!token) {
 		// If there is no existing entry, add one to prevent someone from
 		// attempting to bind (reserve) the same port.
