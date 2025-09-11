@@ -33,6 +33,7 @@ struct thread {
 	struct thread_tf	tf;
 	struct list_node	link;
 	struct list_node	interruptible_link;
+	size_t			waitq_micros;
 	uint64_t	tlsvar;
 	uint64_t	fsbase;
 };

@@ -822,6 +822,7 @@ static __always_inline thread_t *__thread_create(void)
 	th->has_fsbase = false;
 	th->thread_ready = false;
 	th->thread_running = false;
+	th->waitq_micros = 0;
 	th->tlsvar = 0;
 	th->cur_kthread = NCPU;
 	// Can be used to detect newly created thread.

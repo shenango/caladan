@@ -738,9 +738,10 @@ int __tcp_dial(struct netaddr laddr, struct netaddr raddr,
 	/* wait until the connection is established or there is a failure */
 	while (!c->tx_closed && c->pcb.state < TCP_STATE_ESTABLISHED) {
 		ret = waitq_wait(&c->tx_wq, &c->lock);
-		if (!c->tx_closed && ret) {
+		if (ret && !c->tx_closed) {
 			spin_unlock_np(&c->lock);
-			return ret;
+			*c_out = c;
+			return -EINTR;
 		}
 	}
 
@@ -818,8 +819,7 @@ int tcp_dial_affinity(uint32_t in_aff, struct netaddr raddr, tcpconn_t **c_out)
 		ret = tcp_dial(laddr, raddr, &c);
 		if (ret == -EADDRINUSE)
 			continue;
-		if (!ret)
-			*c_out = c;
+		*c_out = c;
 		return ret;
 	}
 }
