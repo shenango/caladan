@@ -375,10 +375,10 @@ int tcp_conn_attach(tcpconn_t *c, struct netaddr laddr, struct netaddr raddr,
 
 	if (token)
 		laddr = token->laddr;
-	else if (laddr.ip == 0)
-		 laddr.ip = netcfg.addr;
-	else if (laddr.ip != netcfg.addr)
-		return -EINVAL;
+
+	ret = validate_and_normalize_laddr(&laddr, raddr.ip, true /* allow zero port */);
+	if (ret)
+		return ret;
 
 	trans_init_5tuple(&c->e, IPPROTO_TCP, &tcp_conn_ops, laddr, raddr);
 	if (laddr.port == 0)
@@ -484,7 +484,7 @@ static void tcp_queue_recv(struct trans_entry *e, struct mbuf *m)
 	spin_unlock_np(&q->l);
 
 	/* create a new connection */
-	c = tcp_rx_listener(e->laddr, m);
+	c = tcp_rx_listener(m);
 	if (!c) {
 		spin_lock_np(&q->l);
 		q->backlog++;
@@ -533,11 +533,6 @@ int __tcp_listen(struct netaddr laddr, int backlog, tcpqueue_t **q_out,
 
 	if (token)
 		laddr = token->laddr;
-	/* only can support one local IP so far */
-	else if (laddr.ip == 0 || laddr.ip == MAKE_IP_ADDR(127, 0, 0, 1))
-		laddr.ip = netcfg.addr;
-	else if (laddr.ip != netcfg.addr)
-		return -EINVAL;
 
 	q = smalloc(sizeof(*q));
 	if (!q)
@@ -699,10 +694,6 @@ int __tcp_dial(struct netaddr laddr, struct netaddr raddr,
 
 	c->nonblocking = nonblocking;
 
-	/* rewrite loopback address */
-	if (raddr.ip == MAKE_IP_ADDR(127, 0, 0, 1))
-		raddr.ip = netcfg.addr;
-
 	/*
 	 * Attach the connection to the transport layer. From this point onward
 	 * ingress packets can be dispatched to the connection.
@@ -773,10 +764,6 @@ int __tcp_dial(struct netaddr laddr, struct netaddr raddr,
  */
 int tcp_dial_conn_affinity(tcpconn_t *in, struct netaddr raddr, tcpconn_t **c_out)
 {
-	/* rewrite loopback address */
-	if (raddr.ip == MAKE_IP_ADDR(127, 0, 0, 1))
-		raddr.ip = netcfg.addr;
-
 	uint32_t in_aff = net_ops.get_flow_affinity(
 			  IPPROTO_TCP, in->e.laddr.port, in->e.raddr);
 	return tcp_dial_affinity(in_aff, raddr, c_out);
@@ -803,10 +790,6 @@ int tcp_dial_affinity(uint32_t in_aff, struct netaddr raddr, tcpconn_t **c_out)
 	tcpconn_t *c;
 
 	base_port = start_port = rand_crc32c(in_aff);
-
-	/* rewrite loopback address */
-	if (raddr.ip == MAKE_IP_ADDR(127, 0, 0, 1))
-		raddr.ip = netcfg.addr;
 
 	while (true) {
 		do {

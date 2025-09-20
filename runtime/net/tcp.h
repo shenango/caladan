@@ -177,7 +177,7 @@ struct tcp_options {
  */
 
 extern void tcp_rx_conn(struct trans_entry *e, struct mbuf *m);
-extern tcpconn_t *tcp_rx_listener(struct netaddr laddr, struct mbuf *m);
+extern tcpconn_t *tcp_rx_listener(struct mbuf *m);
 
 
 /*

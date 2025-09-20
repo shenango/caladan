@@ -51,6 +51,11 @@ struct netaddr get_netaddr(bind_token_t *token)
 	return token->laddr;
 }
 
+static bool is_valid_local_ip(uint32_t ip)
+{
+	return ip == 0 || ip == MAKE_IP_ADDR(127, 0, 0, 1) || ip == netcfg.addr;
+}
+
 /* lookup a port entry in the usage table */
 static struct lport_entry *lport_lookup(uint8_t proto, struct netaddr laddr,
                                         bool create)
@@ -102,7 +107,7 @@ static int __trans_reserve_port(struct netaddr laddr, uint8_t proto,
 
 	existing_entries = lport->nr_active_entries + lport->nr_reserved_entries;
 
-	if (existing_entries > 0 && !lport->reuse_port) {
+	if (existing_entries > 0 && (!lport->reuse_port || !reuse_port)) {
 		spin_unlock_np(&trans_lock);
 		return -EADDRINUSE;
 	}
@@ -125,9 +130,7 @@ int trans_reserve_port(struct netaddr *laddr, uint8_t proto, bool reuse_port,
 	int ret;
 
 	/* only can support one local IP so far */
-	if (laddr->ip == 0 || laddr->ip == MAKE_IP_ADDR(127, 0, 0, 1))
-		laddr->ip = netcfg.addr;
-	else if (laddr->ip != netcfg.addr)
+	if (!is_valid_local_ip(laddr->ip))
 		return -EINVAL;
 
 	if (laddr->port == 0) {
@@ -179,12 +182,13 @@ int __trans_table_add(struct trans_entry *e, bind_token_t *token)
 	int ret = -EADDRINUSE;
 
 	/* port zero is reserved for ephemeral port auto-assign */
-	if (e->laddr.port == 0)
+	if (e->laddr.port == 0 || !is_valid_local_ip(e->laddr.ip))
 		return -EINVAL;
 
 	assert(!token || token->laddr.ip == e->laddr.ip);
 	assert(!token || token->laddr.port == e->laddr.port);
 	assert(!token || token->proto == e->proto);
+	assert(e->laddr.ip != 0 || e->match == TRANS_MATCH_5TUPLE);
 
 	assert_valid_match(e->match);
 	if (e->match == TRANS_MATCH_3TUPLE)
@@ -307,6 +311,34 @@ struct l4_hdr {
 	uint16_t sport, dport;
 };
 
+static size_t trans_lookup_3tuple(struct netaddr laddr, uint8_t proto,
+                                  struct trans_entry **matches,
+                                  size_t max_matches)
+{
+	size_t nmatches = 0;
+	struct rcu_hlist_node *node;
+	struct trans_entry *e;
+	uint32_t hash;
+	assert_preempt_disabled();
+
+
+	hash = trans_hash_3tuple(proto, laddr);
+	rcu_hlist_for_each(&trans_tbl[hash % TRANS_TBL_SIZE], node, false) {
+		e = rcu_hlist_entry(node, struct trans_entry, link);
+		if (e->match != TRANS_MATCH_3TUPLE)
+			continue;
+		if (e->proto != proto)
+			continue;
+		if (e->laddr.ip != laddr.ip || e->laddr.port != laddr.port)
+			continue;
+		matches[nmatches++] = e;
+		if (!e->reuse_port || nmatches == max_matches)
+			break;
+	}
+
+	return nmatches;
+}
+
 static struct trans_entry *trans_lookup(struct mbuf *m, bool reverse)
 {
 	const struct ip_hdr *iphdr;
@@ -350,25 +382,16 @@ static struct trans_entry *trans_lookup(struct mbuf *m, bool reverse)
 	}
 
 	/* attempt to find a 3-tuple match */
-	hash = trans_hash_3tuple(iphdr->proto, laddr);
-	nmatches = 0;
-	rcu_hlist_for_each(&trans_tbl[hash % TRANS_TBL_SIZE], node, false) {
-		e = rcu_hlist_entry(node, struct trans_entry, link);
-		if (e->match != TRANS_MATCH_3TUPLE)
-			continue;
-		if (e->proto != iphdr->proto)
-			continue;
-		if (e->laddr.ip != laddr.ip || e->laddr.port != laddr.port)
-			continue;
-		if (!e->reuse_port)
-			return e;
-		matches[nmatches++] = e;
-		if (unlikely(nmatches == NCPU))
-			break;
+	nmatches = trans_lookup_3tuple(laddr, iphdr->proto, matches, NCPU);
+	if (!nmatches) {
+		laddr.ip = 0; // Check for INADDR_ANY
+		nmatches = trans_lookup_3tuple(laddr, iphdr->proto, matches, NCPU);
+		if (!nmatches)
+			return NULL;
 	}
 
-	if (!nmatches)
-		return NULL;
+	if (nmatches == 1)
+		return matches[0];
 
 	// TODO(jsf): better socket selection function here?
 	return matches[this_thread_id() % nmatches];

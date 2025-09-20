@@ -9,6 +9,7 @@
 #include <base/mem.h>
 #include <base/tcache.h>
 #include <base/gen.h>
+#include <base/log.h>
 #include <base/lrpc.h>
 #include <base/thread.h>
 #include <base/time.h>

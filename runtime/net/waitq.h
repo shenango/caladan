@@ -97,7 +97,7 @@ static inline __must_use_return int waitq_wait(waitq_t *q, spinlock_t *l)
 
 	bool signalled = status > 0;
 	bool timed_out = uses_timer && ctx.myth == NULL;
-	return timed_out ? -ETIMEDOUT : (signalled ? -RESTART_ERROR : 0);
+	return timed_out ? -EINTR : (signalled ? -RESTART_ERROR : 0);
 }
 
 /**

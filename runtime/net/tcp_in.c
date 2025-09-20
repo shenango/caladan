@@ -608,9 +608,9 @@ done:
 }
 
 /* handles ingress packets for TCP listener queues */
-tcpconn_t *tcp_rx_listener(struct netaddr laddr, struct mbuf *m)
+tcpconn_t *tcp_rx_listener(struct mbuf *m)
 {
-	struct netaddr raddr;
+	struct netaddr laddr, raddr;
 	const struct ip_hdr *iphdr;
 	const struct tcp_hdr *tcphdr;
 	const unsigned char *optp;
@@ -626,6 +626,8 @@ tcpconn_t *tcp_rx_listener(struct netaddr laddr, struct mbuf *m)
 		return NULL;
 
 	/* calculate local and remote network addresses */
+	laddr.ip = ntoh32(iphdr->daddr);
+	laddr.port = ntoh16(tcphdr->dport);
 	raddr.ip = ntoh32(iphdr->saddr);
 	raddr.port = ntoh16(tcphdr->sport);
 

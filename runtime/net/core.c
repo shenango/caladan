@@ -589,7 +589,8 @@ void net_tx_eth(struct mbuf *m, uint16_t type, const struct eth_addr *dhost, boo
 	net_tx_raw(m);
 }
 
-static void net_push_iphdr(struct mbuf *m, uint8_t proto, uint32_t daddr)
+static void net_push_iphdr(struct mbuf *m, uint8_t proto, uint32_t daddr,
+                           uint32_t saddr)
 {
 	struct ip_hdr *iphdr;
 
@@ -604,7 +605,7 @@ static void net_push_iphdr(struct mbuf *m, uint8_t proto, uint32_t daddr)
 	iphdr->ttl = 64;
 	iphdr->proto = proto;
 	iphdr->chksum = 0;
-	iphdr->saddr = hton32(netcfg.addr);
+	iphdr->saddr = hton32(saddr);
 	iphdr->daddr = hton32(daddr);
 
 	if (netcfg.no_tx_offloads)
@@ -675,18 +676,25 @@ static int net_tx_local_loopback(struct mbuf *m_in, uint8_t proto)
  * Returns 0 if successful. If successful, the mbuf will be freed when the
  * transmit completes. Otherwise, the mbuf still belongs to the caller.
  */
-int net_tx_ip(struct mbuf *m, uint8_t proto, uint32_t daddr)
+int net_tx_ip(struct mbuf *m, uint8_t proto, uint32_t daddr, uint32_t saddr)
 {
 	struct eth_addr dhost;
 	int ret;
 	bool local;
 
+	if (saddr == 0) {
+		if (daddr == MAKE_IP_ADDR(127, 0, 0, 1))
+			saddr = MAKE_IP_ADDR(127, 0, 0, 1);
+		else
+			saddr = netcfg.addr;
+	}
+
 	/* prepend the IP header */
-	net_push_iphdr(m, proto, daddr);
+	net_push_iphdr(m, proto, daddr, saddr);
 	mbuf_mark_network_offset(m);
 
 	/* route loopbacks */
-	if (daddr == netcfg.addr)
+	if (daddr == netcfg.addr || daddr == MAKE_IP_ADDR(127, 0, 0, 1))
 		return net_tx_local_loopback(m, proto);
 
 	/* ask NIC to calculate IP checksum */

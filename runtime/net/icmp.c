@@ -35,7 +35,7 @@ static void net_rx_icmp_echo(struct mbuf *m_in,
 	out_icmp_hdr->chksum = chksum_internet((char *)out_icmp_hdr, len);
 
 	/* send the echo reply */
-	net_tx_ip_or_free(m, IPPROTO_ICMP, ntoh32(in_iphdr->saddr));
+	net_tx_ip_or_free(m, IPPROTO_ICMP, ntoh32(in_iphdr->saddr), ntoh32(in_iphdr->daddr));
 	mbuf_free(m_in);
 }
 
@@ -98,5 +98,5 @@ int net_tx_icmp(struct mbuf *m, uint8_t type, uint8_t code, uint32_t daddr,
 	icmp_pkt->hdr.chksum = 0;
 	icmp_pkt->hdr.chksum = chksum_internet((char *)icmp_pkt, mbuf_length(m));
 
-	return net_tx_ip(m, IPPROTO_ICMP, daddr);
+	return net_tx_ip(m, IPPROTO_ICMP, daddr, netcfg.addr);
 }

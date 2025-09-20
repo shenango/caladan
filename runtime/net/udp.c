@@ -26,10 +26,6 @@ static int udp_send_raw(struct mbuf *m, size_t len,
 {
 	struct udp_hdr *udphdr;
 
-	/* rewrite loopback address */
-	if (raddr.ip == MAKE_IP_ADDR(127, 0, 0, 1))
-		raddr.ip = netcfg.addr;
-
 	/* write UDP header */
 	udphdr = mbuf_push_hdr(m, *udphdr);
 	udphdr->src_port = hton16(laddr.port);
@@ -40,7 +36,7 @@ static int udp_send_raw(struct mbuf *m, size_t len,
 	mbuf_mark_l4_ports(m, laddr.port, raddr.port);
 
 	/* send the IP packet */
-	return net_tx_ip(m, IPPROTO_UDP, raddr.ip);
+	return net_tx_ip(m, IPPROTO_UDP, raddr.ip, laddr.ip);
 }
 
 static inline size_t udp_headroom(void)
@@ -200,14 +196,10 @@ int __udp_dial(struct netaddr laddr, struct netaddr raddr, udpconn_t **c_out,
 	/* only can support one local IP so far */
 	if (token)
 		laddr = token->laddr;
-	else if (laddr.ip == 0)
-		laddr.ip = netcfg.addr;
-	else if (laddr.ip != netcfg.addr)
-		return -EINVAL;
 
-	/* rewrite loopback address */
-	if (raddr.ip == MAKE_IP_ADDR(127, 0, 0, 1))
-		raddr.ip = netcfg.addr;
+	ret = validate_and_normalize_laddr(&laddr, raddr.ip, true /* allow zero port */);
+	if (ret)
+		return ret;
 
 	c = smalloc(sizeof(*c));
 	if (!c)
@@ -244,14 +236,9 @@ int __udp_listen(struct netaddr laddr, udpconn_t **c_out, bind_token_t *token)
 {
 	udpconn_t *c;
 	int ret;
-
 	/* only can support one local IP so far */
 	if (token)
 		laddr = token->laddr;
-	else if (laddr.ip == 0 || laddr.ip == MAKE_IP_ADDR(127, 0, 0, 1))
-		laddr.ip = netcfg.addr;
-	else if (laddr.ip != netcfg.addr)
-		return -EINVAL;
 
 	c = smalloc(sizeof(*c));
 	if (!c)
@@ -517,9 +504,6 @@ ssize_t udp_writev_to2(udpconn_t *c, const struct iovec *iov, int iovcnt,
 		addr = c->e.raddr;
 	} else {
 		addr = *raddr;
-		/* rewrite loopback address */
-		if (addr.ip == MAKE_IP_ADDR(127, 0, 0, 1))
-			addr.ip = netcfg.addr;
 	}
 
 	spin_lock_np(&c->outq_lock);
@@ -602,9 +586,6 @@ ssize_t udp_write_to2(udpconn_t *c, const void *buf, size_t len,
 		addr = c->e.raddr;
 	} else {
 		addr = *raddr;
-		/* rewrite loopback address */
-		if (addr.ip == MAKE_IP_ADDR(127, 0, 0, 1))
-			addr.ip = netcfg.addr;
 	}
 
 	spin_lock_np(&c->outq_lock);
@@ -940,16 +921,10 @@ ssize_t udp_send(const void *buf, size_t len,
 
 	if (len > udp_get_payload_size())
 		return -EMSGSIZE;
-	if (laddr.ip == 0 || laddr.ip == MAKE_IP_ADDR(127, 0, 0, 1))
-		laddr.ip = netcfg.addr;
-	else if (laddr.ip != netcfg.addr)
-		return -EINVAL;
-	if (laddr.port == 0)
-		return -EINVAL;
 
-	/* rewrite loopback address */
-	if (raddr.ip == MAKE_IP_ADDR(127, 0, 0, 1))
-		raddr.ip = netcfg.addr;
+	ret = validate_and_normalize_laddr(&laddr, raddr.ip, false /* no zero port */);
+	if (ret)
+		return ret;
 
 	m = net_tx_alloc_mbuf(udp_headroom());
 	if (unlikely(!m))
@@ -975,16 +950,9 @@ ssize_t udp_sendv(const struct iovec *iov, int iovcnt,
 	int i, ret;
 	ssize_t len = 0;
 
-	if (laddr.ip == 0 || laddr.ip == MAKE_IP_ADDR(127, 0, 0, 1))
-		laddr.ip = netcfg.addr;
-	else if (laddr.ip != netcfg.addr)
-		return -EINVAL;
-	if (laddr.port == 0)
-		return -EINVAL;
-
-	/* rewrite loopback address */
-	if (raddr.ip == MAKE_IP_ADDR(127, 0, 0, 1))
-		raddr.ip = netcfg.addr;
+	ret = validate_and_normalize_laddr(&laddr, raddr.ip, false /* no zero port */);
+	if (ret)
+		return ret;
 
 	m = net_tx_alloc_mbuf_sz(udp_headroom(), len);
 	if (unlikely(!m))
