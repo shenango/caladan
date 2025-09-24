@@ -188,7 +188,6 @@ int __trans_table_add(struct trans_entry *e, bind_token_t *token)
 	assert(!token || token->laddr.ip == e->laddr.ip);
 	assert(!token || token->laddr.port == e->laddr.port);
 	assert(!token || token->proto == e->proto);
-	assert(e->laddr.ip != 0 || e->match == TRANS_MATCH_5TUPLE);
 
 	assert_valid_match(e->match);
 	if (e->match == TRANS_MATCH_3TUPLE)
