@@ -21,8 +21,8 @@
 
 unsigned int udp_payload_size;
 
-static int udp_send_raw(struct mbuf *m, size_t len,
-			struct netaddr laddr, struct netaddr raddr)
+static int udp_send_raw(struct mbuf *m, size_t len, struct netaddr laddr,
+                        struct netaddr raddr, const struct aux_tx_pkt_data *aux)
 {
 	struct udp_hdr *udphdr;
 
@@ -36,7 +36,7 @@ static int udp_send_raw(struct mbuf *m, size_t len,
 	mbuf_mark_l4_ports(m, laddr.port, raddr.port);
 
 	/* send the IP packet */
-	return net_tx_ip(m, IPPROTO_UDP, raddr.ip, laddr.ip);
+	return net_tx_ip(m, IPPROTO_UDP, raddr.ip, laddr.ip, aux);
 }
 
 static inline size_t udp_headroom(void)
@@ -391,7 +391,8 @@ ssize_t udp_read_from2(udpconn_t *c, void *buf, size_t len,
 }
 
 ssize_t udp_readv_from2(udpconn_t *c, const struct iovec *iov, int iovcnt,
-                      struct netaddr *raddr, bool peek, bool nonblocking)
+                      struct netaddr *raddr, bool peek, bool nonblocking,
+                      struct aux_rx_pkt_data *aux)
 {
 	ssize_t ret;
 	struct mbuf *m;
@@ -443,6 +444,13 @@ ssize_t udp_readv_from2(udpconn_t *c, const struct iovec *iov, int iovcnt,
 			break;
 	}
 
+	if (aux) {
+		struct ip_hdr *iphdr = mbuf_network_hdr(m, *iphdr);
+		aux->daddr = ntoh32(iphdr->daddr);
+		aux->tos = iphdr->tos;
+		aux->valid = true;
+	}
+
 	if (raddr) {
 		struct ip_hdr *iphdr = mbuf_network_hdr(m, *iphdr);
 		struct udp_hdr *udphdr = mbuf_transport_hdr(m, *udphdr);
@@ -485,7 +493,8 @@ static void udp_tx_release_mbuf(struct mbuf *m)
 }
 
 ssize_t udp_writev_to2(udpconn_t *c, const struct iovec *iov, int iovcnt,
-                     const struct netaddr *raddr, bool nonblocking)
+                     const struct netaddr *raddr, bool nonblocking,
+                     const struct aux_tx_pkt_data *aux)
 {
 	struct netaddr addr;
 	ssize_t ret;
@@ -548,7 +557,7 @@ ssize_t udp_writev_to2(udpconn_t *c, const struct iovec *iov, int iovcnt,
 	m->release = udp_tx_release_mbuf;
 	m->release_data = (unsigned long)c;
 
-	ret = udp_send_raw(m, len, c->e.laddr, addr);
+	ret = udp_send_raw(m, len, c->e.laddr, addr, aux);
 	if (unlikely(ret)) {
 		net_tx_release_mbuf(m);
 		return ret;
@@ -629,7 +638,7 @@ ssize_t udp_write_to2(udpconn_t *c, const void *buf, size_t len,
 	m->release = udp_tx_release_mbuf;
 	m->release_data = (unsigned long)c;
 
-	ret = udp_send_raw(m, len, c->e.laddr, addr);
+	ret = udp_send_raw(m, len, c->e.laddr, addr, NULL);
 	if (unlikely(ret)) {
 		net_tx_release_mbuf(m);
 		return ret;
@@ -934,7 +943,7 @@ ssize_t udp_send(const void *buf, size_t len,
 	payload = mbuf_put(m, len);
 	memcpy(payload, buf, len);
 
-	ret = udp_send_raw(m, len, laddr, raddr);
+	ret = udp_send_raw(m, len, laddr, raddr, NULL);
 	if (unlikely(ret)) {
 		mbuf_free(m);
 		return ret;
@@ -969,7 +978,7 @@ ssize_t udp_sendv(const struct iovec *iov, int iovcnt,
 		       iov[i].iov_base, iov[i].iov_len);
 	}
 
-	ret = udp_send_raw(m, len, laddr, raddr);
+	ret = udp_send_raw(m, len, laddr, raddr, NULL);
 	if (unlikely(ret)) {
 		mbuf_free(m);
 		return ret;

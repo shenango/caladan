@@ -12,6 +12,32 @@ struct netaddr {
 	uint16_t port;
 } __packed;
 
+// Some RX methods can request additional information from the network stack by
+// passing in a pointer to this struct. The provider should set valid to false
+// to detect whether the network stack filled in the fields.
+struct aux_rx_pkt_data {
+	/* network stack sets valid to true if it fills in these fields */
+	bool valid;
+
+	/* ip header packet info */
+	uint32_t daddr;
+	uint8_t tos;
+};
+
+// Some TX methods can provide additional information to the network stack by
+// passing in a pointer to this struct. The provider should set fields_present
+// to indicate which fields are present.
+struct aux_tx_pkt_data {
+	union {
+		struct {
+			unsigned int has_ecn:1;
+		};
+		unsigned int fields_present;
+	};
+	/* IP header ECN bits */
+	uint8_t ecn;
+};
+
 struct lport_entry;
 typedef struct lport_entry bind_token_t;
 

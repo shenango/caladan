@@ -98,5 +98,5 @@ int net_tx_icmp(struct mbuf *m, uint8_t type, uint8_t code, uint32_t daddr,
 	icmp_pkt->hdr.chksum = 0;
 	icmp_pkt->hdr.chksum = chksum_internet((char *)icmp_pkt, mbuf_length(m));
 
-	return net_tx_ip(m, IPPROTO_ICMP, daddr, netcfg.addr);
+	return net_tx_ip(m, IPPROTO_ICMP, daddr, netcfg.addr, NULL);
 }

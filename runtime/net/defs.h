@@ -80,9 +80,10 @@ static inline int validate_and_normalize_laddr(struct netaddr *laddr,
 
 extern void net_tx_release_mbuf(struct mbuf *m);
 extern void net_tx_eth(struct mbuf *m, uint16_t proto,
-		       const struct eth_addr *dhost, bool is_local);
+                       const struct eth_addr *dhost, bool is_local);
 extern int net_tx_ip(struct mbuf *m, uint8_t proto,
-		     uint32_t daddr, uint32_t saddr) __must_use_return;
+                     uint32_t daddr, uint32_t saddr,
+                     const struct aux_tx_pkt_data *aux) __must_use_return;
 extern int net_tx_icmp(struct mbuf *m, uint8_t type, uint8_t code,
 		uint32_t daddr, uint16_t id, uint16_t seq) __must_use_return;
 
@@ -112,7 +113,7 @@ extern size_t calculate_egress_buf_size(void);
 static inline void net_tx_ip_or_free(struct mbuf *m, uint8_t proto,
 				     uint32_t daddr, uint32_t saddr)
 {
-	if (unlikely(net_tx_ip(m, proto, daddr, saddr) != 0))
+	if (unlikely(net_tx_ip(m, proto, daddr, saddr, NULL) != 0))
 		mbuf_free(m);
 }
 

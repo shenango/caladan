@@ -590,7 +590,7 @@ void net_tx_eth(struct mbuf *m, uint16_t type, const struct eth_addr *dhost, boo
 }
 
 static void net_push_iphdr(struct mbuf *m, uint8_t proto, uint32_t daddr,
-                           uint32_t saddr)
+                           uint32_t saddr, const struct aux_tx_pkt_data *aux)
 {
 	struct ip_hdr *iphdr;
 
@@ -598,7 +598,12 @@ static void net_push_iphdr(struct mbuf *m, uint8_t proto, uint32_t daddr,
 	iphdr = mbuf_push_hdr(m, *iphdr);
 	iphdr->version = IPVERSION;
 	iphdr->header_len = 5;
-	iphdr->tos = IPTOS_DSCP_CS0 | IPTOS_ECN_NOTECT;
+	iphdr->tos = IPTOS_DSCP_CS0;
+	if (aux && aux->has_ecn) {
+		iphdr->tos |= IPTOS_ECN_MASK & aux->ecn;
+	} else {
+		iphdr->tos |= IPTOS_ECN_NOTECT;
+	}
 	iphdr->len = hton16(mbuf_length(m));
 	iphdr->id = 0; /* see RFC 6864 */
 	iphdr->off = hton16(IP_DF);
@@ -667,6 +672,8 @@ static int net_tx_local_loopback(struct mbuf *m_in, uint8_t proto)
  * @m: the mbuf to transmit
  * @proto: the transport protocol
  * @daddr: the destination IP address (in native byte order)
+ * @saddr: the source IP address (in native byte order)
+ * @aux: optional auxiliary transmission data, may be NULL
  *
  * The payload must start with the transport (L4) header. The IPv4 (L3) and
  * ethernet (L2) headers will be prepended by this function.
@@ -676,7 +683,8 @@ static int net_tx_local_loopback(struct mbuf *m_in, uint8_t proto)
  * Returns 0 if successful. If successful, the mbuf will be freed when the
  * transmit completes. Otherwise, the mbuf still belongs to the caller.
  */
-int net_tx_ip(struct mbuf *m, uint8_t proto, uint32_t daddr, uint32_t saddr)
+int net_tx_ip(struct mbuf *m, uint8_t proto, uint32_t daddr, uint32_t saddr,
+              const struct aux_tx_pkt_data *aux)
 {
 	struct eth_addr dhost;
 	int ret;
@@ -690,7 +698,7 @@ int net_tx_ip(struct mbuf *m, uint8_t proto, uint32_t daddr, uint32_t saddr)
 	}
 
 	/* prepend the IP header */
-	net_push_iphdr(m, proto, daddr, saddr);
+	net_push_iphdr(m, proto, daddr, saddr, aux);
 	mbuf_mark_network_offset(m);
 
 	/* route loopbacks */
