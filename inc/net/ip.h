@@ -325,7 +325,6 @@ struct ip_pseudo {
 /* 255: Reserved */
 /* BSD Private, local use, namespace incursion, no longer used */
 #define	IPPROTO_OLD_DIVERT	254		/* OLD divert pseudo-proto */
-#define	IPPROTO_MAX		256
 
 /*
  * The following IPPROTO constants are commented out because they are already
@@ -361,4 +360,5 @@ struct ip_pseudo {
 // #define	IPPROTO_PIM		103		/* Protocol Independent Mcast */
 // #define	IPPROTO_MPLS		137		/* MPLS-in-IP */
 // #define	IPPROTO_RAW		255		/* raw IP packet */
+// #define	IPPROTO_MAX             256
 
