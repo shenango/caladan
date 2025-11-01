@@ -63,16 +63,18 @@ sudo ./iokerneld
 
 ## Supported Platforms
 
-This code has been tested most thoroughly on Ubuntu 18.04 with kernel
-5.2.0 and Ubuntu 20.04 with kernel 5.4.0.
+This code was originally developed and tested on Ubuntu 18.04 with kernel
+5.2.0 and Ubuntu 20.04 with kernel 5.4.0. Most recently it has been confirmed
+to run on Ubuntu 22.04 (kernel 5.15) and Ubuntu 24.04 (kernel 6.8).
 
 ### NICs
-This code has been tested with Intel 82599ES 10 Gbits/s NICs,
-Mellanox ConnectX-3 Pro 10 Gbits/s NICs, and Mellanox Connect X-5 40 Gbits/s NICs.
-If you use Mellanox NICs, you should install the Mellanox OFED as described in [DPDK's
-documentation](https://doc.dpdk.org/guides/nics/mlx4.html). If you use
-Intel NICs, you should insert the IGB UIO module and bind your NIC
-interface to it (e.g., using the script `./dpdk/usertools/dpdk-setup.sh`).
+
+Caladan performs best using its own mlx5 driver which is compatible with
+ConnectX-4 and newer NVIDIA/Mellanox NICs. However, it can also use DPDK for
+networking in a lower performance configuration. Recently tested and confirmed
+working DPDK pmds include: ixgbe, i40e, ice, bnxt, mana, failsafe, mlx5, and
+tap; mlx4 is not supported. Please contact us if there is another PMD which you
+need help enabling.
 
 To enable Jumbo Frames for higher throughput, first enable them in Linux on the
 relevant interface like so:
@@ -83,15 +85,20 @@ Then use the (`host_mtu`) option in the config file of each runtime to set the
 MTU to the value you'd like, up to the size of the MTU set for the interface.
 
 #### Directpath
-Directpath allows runtime cores to directly send packets to/receive packets from the NIC, enabling
-higher throughput than when the IOKernel handles all packets.
-Directpath is currently only supported with Mellanox ConnectX-5 using Mellanox OFED v4.6 or newer.
-NIC firmware must include support for User Context Objects (DEVX) and Software Managed Steering Tables.
-For the ConnectX-5, the firmware version must be at least 16.26.1040. Additionally, directpath requires
-Linux kernel version 5.0.0 or newer.
+Directpath allows runtime cores to directly send packets to/receive packets
+from the NIC, enabling higher throughput than when the IOKernel handles all
+packets. Directpath is currently only supported with Mellanox ConnectX-4
+using Mellanox OFED v4.6 or newer. For best performance, NIC firmware
+must include support for User Context Objects (DEVX) and Software Managed
+Steering Tables. For the ConnectX-5, the firmware version must be at least
+16.26.1040. Additionally, directpath requires Linux kernel version 5.0.0 or
+newer.
 
-To enable directpath, add `enable_directpath` to the config file for all runtimes that should use directpath.
-Each runtime launched with directpath must currently run as root and have a unique IP address.
+To enable directpath, add `enable_directpath` to the config file for all
+runtimes that should use directpath, and inform the IOKernel of the NIC's
+PCI address by starting it with the extra arguments `nicpci <pci address>`.
+Each runtime launched with directpath must currently run as root and have a
+unique IP address.
 
 ### Storage
 This code has been tested with an Intel Optane SSD 900P Series NVMe device.

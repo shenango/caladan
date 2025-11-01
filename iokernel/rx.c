@@ -129,6 +129,9 @@ static void rx_one_pkt(struct rte_mbuf *buf)
 
 	/* use hardware assisted flow tagging to match packets to procs */
 	if (buf->ol_flags & RTE_MBUF_F_RX_FDIR_ID) {
+		if (unlikely(!(buf->ol_flags & RTE_MBUF_F_RX_RSS_HASH))) {
+			log_warn_once("no RSS hash, but FDIR ID is set");
+		}
 		STAT_INC(RX_FLOW_TAG_MATCH, 1);
 		mark_id = buf->hash.fdir.hi;
 		assert(mark_id >= 0 && mark_id < IOKERNEL_MAX_PROC);
@@ -154,8 +157,10 @@ static void rx_one_pkt(struct rte_mbuf *buf)
 		iphdr = rte_pktmbuf_mtod_offset(buf, struct rte_ipv4_hdr *,
 			sizeof(*ptr_mac_hdr));
 		dst_ip = rte_be_to_cpu_32(iphdr->dst_addr);
-		if (unlikely(!(buf->ol_flags & RTE_MBUF_F_RX_RSS_HASH)))
+		if (unlikely(!(buf->ol_flags & RTE_MBUF_F_RX_RSS_HASH))) {
 			STAT_INC(RX_HASH_MISSING, 1);
+			log_warn_once("RSS hash missing for IP packet");
+		}
 	} else if (ether_type == ETHTYPE_ARP) {
 		arphdr = rte_pktmbuf_mtod_offset(buf, struct rte_arp_hdr *,
 			sizeof(*ptr_mac_hdr));
@@ -199,6 +204,10 @@ static void rx_one_pkt(struct rte_mbuf *buf)
 
 		STAT_INC(RX_UNREGISTERED_MAC, 1);
 		goto fail_free;
+	}
+
+	if (ether_type == ETHTYPE_IP) {
+		log_warn_once("warning: flow tagging not functional");
 	}
 
 	if (!rx_send_pkt_to_runtime(p, buf)) {

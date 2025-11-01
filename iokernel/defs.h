@@ -25,9 +25,10 @@ enum {
 	IOK_NET_MODE_DPDK_TAP = 0,
 
 	// Medium performance.
+	IOK_NET_MODE_DPDK_ICE,
 	// IOK_NET_MODE_DPDK_GVE,
-	// IOK_NET_MODE_DPDK_MANA,
-	// IOK_NET_MODE_DPDK_BNXT,
+	IOK_NET_MODE_DPDK_MANA,
+	IOK_NET_MODE_DPDK_BNXT,
 	// IOK_NET_MODE_DPDK_IXGBE,
 	// IOK_NET_MODE_DPDK_I40E,
 
@@ -59,7 +60,6 @@ extern struct iokernel_cfg cfg;
 extern uint32_t nr_vfio_prealloc;
 extern unsigned int vfio_prealloc_nrqs;
 extern bool vfio_prealloc_rmp;
-extern int dataplane_mode;
 extern bool is_azure;
 
 /*
@@ -375,6 +375,7 @@ struct dataplane {
 	uint8_t			port;
 	bool			loopback_en;
 	bool			iova_mode_pa;
+	int			dataplane_mode;
 	struct rte_mempool	*rx_mbuf_pool;
 	struct shm_region	ingress_mbuf_region;
 

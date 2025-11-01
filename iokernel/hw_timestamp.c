@@ -95,7 +95,7 @@ int hw_timestamp_init(void)
 		return 0;
 	}
 
-	if (dataplane_mode != IOK_NET_MODE_DPDK_MLX5) {
+	if (dp.dataplane_mode != IOK_NET_MODE_DPDK_MLX5) {
 		cfg.no_hw_qdel = true;
 		return 0;
 	}

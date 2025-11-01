@@ -26,6 +26,61 @@ static struct lrpc_chan_in lrpc_control_to_data;
 extern struct rte_eth_rss_conf rss_conf;
 extern bool rss_conf_present;
 
+static int dp_clients_setup_flow_tags_ice(struct proc *p)
+{
+	int ret;
+
+	struct rte_flow_action actions[3];
+	struct rte_flow_action_mark mark_action;
+	struct rte_flow_action_queue act_q;
+	struct rte_flow_attr attr;
+	struct rte_flow_item pattern[3];
+	struct rte_flow_item_ipv4 ip;
+	struct rte_flow_item_ipv4 ip_mask;
+	uint16_t queue = 0;
+
+	if (!rss_conf_present)
+		return 0;
+
+	memset(&attr, 0, sizeof(attr));
+	attr.ingress = 1;
+
+	memset(&ip, 0, sizeof(ip));
+	ip.hdr.dst_addr = htobe32(p->ip_addr);
+
+	memset(&ip_mask, 0, sizeof(ip_mask));
+	ip_mask.hdr.dst_addr = UINT32_MAX;
+
+	memset(&act_q, 0, sizeof(act_q));
+	act_q.index = queue;
+
+	memset(&mark_action, 0, sizeof(mark_action));
+	mark_action.id = p->uniqid;
+
+	memset(pattern, 0, sizeof(pattern));
+	/* FDIR expects ETH + IPv4 pattern */
+	pattern[0].type = RTE_FLOW_ITEM_TYPE_ETH;
+	pattern[1].type = RTE_FLOW_ITEM_TYPE_IPV4;
+	pattern[1].spec = &ip;
+	pattern[1].mask = &ip_mask;
+	pattern[2].type = RTE_FLOW_ITEM_TYPE_END;
+
+	memset(actions, 0, sizeof(actions));
+	actions[0].type = RTE_FLOW_ACTION_TYPE_QUEUE;
+	actions[0].conf = &act_q;
+	actions[1].type = RTE_FLOW_ACTION_TYPE_MARK;
+	actions[1].conf = &mark_action;
+	actions[2].type = RTE_FLOW_ACTION_TYPE_END;
+
+	ret = rte_flow_validate(dp.port, &attr, pattern, actions, NULL);
+	if (unlikely(ret))
+		return ret;
+	p->flow = rte_flow_create(dp.port, &attr, pattern, actions, NULL);
+	if (unlikely(!p->flow))
+		return -1;
+	return 0;
+}
+
 static int dp_clients_setup_flow_tags(struct proc *p)
 {
 	int ret;
@@ -137,7 +192,10 @@ static void dp_clients_add_client(struct proc *p)
 			goto fail;
 		}
 
-		ret = dp_clients_setup_flow_tags(p);
+		if (dp.dataplane_mode == IOK_NET_MODE_DPDK_ICE)
+			ret = dp_clients_setup_flow_tags_ice(p);
+		else
+			ret = dp_clients_setup_flow_tags(p);
 		if (ret < 0)
 			log_warn_once("dp_clients: flow tags unavailable");
 	}

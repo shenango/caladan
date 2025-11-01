@@ -63,7 +63,6 @@ int dpdk_argc;
 
 struct rte_eth_rss_conf rss_conf;
 bool rss_conf_present;
-static bool is_mana;
 
 #define DPDK_PORT 0
 
@@ -116,19 +115,24 @@ static inline int dpdk_port_init(uint8_t port, struct rte_mempool *mbuf_pool)
 	       !strncmp(dev_info.driver_name, "net_mlx5", strlen("net_mlx5"));
 
 	if (is_mlx5) {
+		dp.dataplane_mode = IOK_NET_MODE_DPDK_MLX5;
+	} else if (!strncmp(dev_info.driver_name, "net_tap", strlen("net_tap"))) {
+		dp.dataplane_mode = IOK_NET_MODE_DPDK_TAP;
+	} else if (!strncmp(dev_info.driver_name, "net_ice", strlen("net_ice"))) {
+		dp.dataplane_mode = IOK_NET_MODE_DPDK_ICE;
+	} else if (!strncmp(dev_info.driver_name, "net_mana", strlen("net_mana"))) {
+		dp.dataplane_mode = IOK_NET_MODE_DPDK_MANA;
+	} else if (!strncmp(dev_info.driver_name, "net_bnxt", strlen("net_bnxt"))) {
+		dp.dataplane_mode = IOK_NET_MODE_DPDK_BNXT;
+	}
+
+	if (dp.dataplane_mode == IOK_NET_MODE_DPDK_MLX5) {
 		nb_rxd = MLX5_RX_RING_SIZE;
 		nb_txd = MLX5_TX_RING_SIZE;
 		port_conf.lpbk_mode = 1;
-		dataplane_mode = IOK_NET_MODE_DPDK_MLX5;
 	}
 
-	bool is_tap =
-	       !strncmp(dev_info.driver_name, "net_tap", strlen("net_tap"));
-
-	is_mana =
-	       !strncmp(dev_info.driver_name, "net_mana", strlen("net_mana"));
-
-	if (is_mana) {
+	if (dp.dataplane_mode == IOK_NET_MODE_DPDK_MANA) {
 		cfg.allow_loopback = false;
 		cfg.azure_arp_mode = false;
 	} else {
@@ -137,17 +141,16 @@ static inline int dpdk_port_init(uint8_t port, struct rte_mempool *mbuf_pool)
 
 	// Enable internal loopbacking if using TAP.
 	// NOTE: other drivers likely need this enabled also.
-	if (is_tap) {
+	if (dp.dataplane_mode == IOK_NET_MODE_DPDK_TAP) {
 		// the TAP driver copies the buffer before sending to emulate TX
 		// offloads. This is broken on recent versions that try to
 		// allocate a new buffer from the same mempool, since our TX
 		// mempool only attaches to external buffers.
 		cfg.tx_offloads_disabled = iok_info->no_tx_offloads = true;
-		dataplane_mode = IOK_NET_MODE_DPDK_TAP;
 	}
 
 	// bnxt requires packets to be at least 52 bytes.
-	if (!strncmp(dev_info.driver_name, "net_bnxt", strlen("net_bnxt")))
+	if (dp.dataplane_mode == IOK_NET_MODE_DPDK_BNXT)
 		iok_info->min_pkt_size = 52;
 
 	/* Configure the Ethernet device. */
@@ -188,7 +191,7 @@ static inline int dpdk_port_init(uint8_t port, struct rte_mempool *mbuf_pool)
 	/* Display the port MAC address. */
 	struct rte_ether_addr addr;
 	rte_eth_macaddr_get(port, &addr);
-	if (is_tap) {
+	if (dp.dataplane_mode == IOK_NET_MODE_DPDK_TAP) {
 		// When joining the TAP device to a Linux bridge interface,
 		// traffic from some sources are not properly delivered to the
 		// TAP device unless the MAC address is different from the
@@ -222,7 +225,7 @@ static inline int dpdk_port_init(uint8_t port, struct rte_mempool *mbuf_pool)
 	if (retval == 0) {
 		rss_conf_present = true;
 		iok_info->rss_key_len = rss_conf.rss_key_len;
-	} else if (!is_tap) {
+	} else if (dp.dataplane_mode != IOK_NET_MODE_DPDK_TAP) {
 		log_warn("Couldn't query RSS parameters");
 	}
 	return 0;
@@ -344,7 +347,7 @@ int do_dpdk_dma_map(void *buf, size_t len, size_t pgsize, uintptr_t *physaddrs)
 		return -rte_errno;
 	}
 
-	if (is_mana ||!dp.iova_mode_pa) {
+	if (dp.dataplane_mode == IOK_NET_MODE_DPDK_MANA || !dp.iova_mode_pa) {
 		// In IOVA VA mode, IOVAs are equal to VAs.
 		ret = rte_dev_dma_map(dp.device, buf, (rte_iova_t)buf, len);
 		if (unlikely(ret < 0)) {
@@ -425,7 +428,7 @@ int dpdk_late_init(void)
 {
 
 	if (cfg.vfio_directpath) {
-		dataplane_mode = IOK_NET_MODE_VFIO_MLX5;
+		dp.dataplane_mode = IOK_NET_MODE_VFIO_MLX5;
 		return 0;
 	}
 
