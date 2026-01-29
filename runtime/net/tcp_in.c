@@ -403,6 +403,9 @@ __tcp_rx_conn(tcpconn_t *c, struct mbuf *m, uint32_t ack, uint32_t snd_nxt,
 			opts.mss = c->pcb.rcv_mss;
 			opts.wscale = c->pcb.rcv_wscale;
 
+			/* scale the window now that we know the wscale */
+			win <<= c->pcb.snd_wscale;
+
 			if ((m->flags & TCP_ACK) > 0) {
 				c->pcb.snd_una = ack;
 				tcp_conn_ack(c, &q);
