@@ -62,7 +62,7 @@ void logk(int level, const char *fmt, ...)
 }
 
 #define MAX_CALL_DEPTH	256
-void logk_backtrace(void)
+__weak void logk_backtrace(void)
 {
 	void *buf[MAX_CALL_DEPTH];
 	const int calls = backtrace(buf, ARRAY_SIZE(buf));
