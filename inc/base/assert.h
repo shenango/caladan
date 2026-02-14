@@ -10,6 +10,11 @@
 extern void logk_bug(bool fatal, const char *expr,
 		     const char *file, int line, const char *func);
 
+extern void logk_bug_cmp(bool fatal, const char *op,
+			const char *expr_a, const char *expr_b,
+			long long val_a, long long val_b,
+			const char *file, int line, const char *func);
+
 /* this helper trys to check a run-time assertion at built-time if possible */
 #if !defined(__CHECKER__) && !defined(__cplusplus)
 #define __build_assert_if_constant(cond)			\
@@ -42,6 +47,84 @@ extern void logk_bug(bool fatal, const char *expr,
 			         __FILE__, __LINE__, __func__);	\
 			__builtin_unreachable();		\
 		}						\
+	} while (0)
+
+
+/**
+ * BUG_ON_NE / BUG_ON_EQ / BUG_ON_LT / BUG_ON_GT / BUG_ON_LE / BUG_ON_GE
+ * Fatal comparison checks; on failure print the expression and both values.
+ * Each argument is evaluated exactly once.
+ */
+#define BUG_ON_NE(a, b)							\
+	do {								\
+		__typeof__(a) __a = (a); __typeof__(b) __b = (b);	\
+		if (unlikely(__a != __b)) {				\
+			logk_bug_cmp(true, "!=", __cstr(a), __cstr(b),	\
+				     (long long)(intptr_t)__a,		\
+				     (long long)(intptr_t)__b,		\
+				     __FILE__, __LINE__, __func__);	\
+			__builtin_unreachable();				\
+		}							\
+	} while (0)
+
+#define BUG_ON_EQ(a, b)							\
+	do {								\
+		__typeof__(a) __a = (a); __typeof__(b) __b = (b);	\
+		if (unlikely(__a == __b)) {				\
+			logk_bug_cmp(true, "==", __cstr(a), __cstr(b),	\
+				     (long long)(intptr_t)__a,		\
+				     (long long)(intptr_t)__b,		\
+				     __FILE__, __LINE__, __func__);	\
+			__builtin_unreachable();				\
+		}							\
+	} while (0)
+
+#define BUG_ON_LT(a, b)							\
+	do {								\
+		__typeof__(a) __a = (a); __typeof__(b) __b = (b);	\
+		if (unlikely(__a < __b)) {				\
+			logk_bug_cmp(true, "<", __cstr(a), __cstr(b),	\
+				     (long long)(intptr_t)__a,		\
+				     (long long)(intptr_t)__b,		\
+				     __FILE__, __LINE__, __func__);	\
+			__builtin_unreachable();				\
+		}							\
+	} while (0)
+
+#define BUG_ON_GT(a, b)							\
+	do {								\
+		__typeof__(a) __a = (a); __typeof__(b) __b = (b);	\
+		if (unlikely(__a > __b)) {				\
+			logk_bug_cmp(true, ">", __cstr(a), __cstr(b),	\
+				     (long long)(intptr_t)__a,		\
+				     (long long)(intptr_t)__b,		\
+				     __FILE__, __LINE__, __func__);	\
+			__builtin_unreachable();				\
+		}							\
+	} while (0)
+
+#define BUG_ON_LE(a, b)							\
+	do {								\
+		__typeof__(a) __a = (a); __typeof__(b) __b = (b);	\
+		if (unlikely(__a <= __b)) {				\
+			logk_bug_cmp(true, "<=", __cstr(a), __cstr(b),	\
+				     (long long)(intptr_t)__a,		\
+				     (long long)(intptr_t)__b,		\
+				     __FILE__, __LINE__, __func__);	\
+			__builtin_unreachable();				\
+		}							\
+	} while (0)
+
+#define BUG_ON_GE(a, b)							\
+	do {								\
+		__typeof__(a) __a = (a); __typeof__(b) __b = (b);	\
+		if (unlikely(__a >= __b)) {				\
+			logk_bug_cmp(true, ">=", __cstr(a), __cstr(b),	\
+				     (long long)(intptr_t)__a,		\
+				     (long long)(intptr_t)__b,		\
+				     __FILE__, __LINE__, __func__);	\
+			__builtin_unreachable();				\
+		}							\
 	} while (0)
 
 /**

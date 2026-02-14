@@ -79,3 +79,20 @@ void logk_bug(bool fatal, const char *expr,
 	if (fatal)
 		init_shutdown(EXIT_FAILURE);
 }
+
+void logk_bug_cmp(bool fatal, const char *op,
+		  const char *expr_a, const char *expr_b,
+		  long long val_a, long long val_b,
+		  const char *file, int line, const char *func)
+{
+	char expr[256];
+	int ret;
+
+	ret = snprintf(expr, sizeof(expr), "(%s %s %s) with (%s=%lld, %s=%lld)",
+		       expr_a, op, expr_b, expr_a, (long long)val_a, expr_b, (long long)val_b);
+	if (ret < 0 || (size_t)ret >= sizeof(expr))
+		snprintf(expr, sizeof(expr), "(%s %s %s) with values %lld, %lld",
+			 expr_a, op, expr_b, (long long)val_a, (long long)val_b);
+
+	logk_bug(fatal, expr, file, line, func);
+}
