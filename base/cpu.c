@@ -121,5 +121,11 @@ int cpu_init(void)
 
 	log_info("cpu: detected %d cores, %d nodes (%d with mem)", cpu_count,
 		 numa_count, numa_count_with_mem);
+
+	/*
+	 * NUMA detection is not implemented so the runtime only requests memory on
+	 * a single node.
+	 */
+	numa_count_with_mem = 1;
 	return 0;
 }

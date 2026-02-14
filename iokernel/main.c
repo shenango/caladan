@@ -199,6 +199,7 @@ int main(int argc, char *argv[])
 			sched_ops = &simple_ops;
 		} else if (!strcmp(argv[1], "numa")) {
 			sched_ops = &numa_ops;
+			managed_numa_node = -1;
 		} else if (!strcmp(argv[1], "ias")) {
 			sched_ops = &ias_ops;
 		} else {
@@ -307,6 +308,7 @@ int main(int argc, char *argv[])
 		return ret;
 
 	iok_info->cycles_per_us = cycles_per_us;
+	iok_info->managed_numa_node = managed_numa_node;
 	iok_info->external_directpath_enabled = cfg.vfio_directpath;
 	iok_info->external_directpath_rmp = vfio_prealloc_rmp;
 	iok_info->transparent_hugepages = cfg_transparent_hugepages_enabled;

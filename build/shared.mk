@@ -35,7 +35,7 @@ endif
 RUNTIME_DEPS = $(ROOT_PATH)/libruntime.a $(ROOT_PATH)/libnet.a \
 	       $(ROOT_PATH)/libbase.a
 RUNTIME_LIBS = $(ROOT_PATH)/libruntime.a $(ROOT_PATH)/libnet.a \
-	       $(ROOT_PATH)/libbase.a -lpthread
+	       $(ROOT_PATH)/libbase.a -lpthread -lnuma
 
 # PKG_CONFIG_PATH
 PKG_CONFIG_PATH := $(ROOT_PATH)/rdma-core/build/lib/pkgconfig:$(PKG_CONFIG_PATH)

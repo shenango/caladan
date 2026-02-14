@@ -135,6 +135,7 @@ struct iokernel_info {
 	size_t			rss_key_len;
 	struct pci_addr		directpath_pci;
 	int			cycles_per_us;
+	int			managed_numa_node;
 	struct eth_addr		host_mac;
 	bool			external_directpath_enabled;
 	bool			external_directpath_rmp;

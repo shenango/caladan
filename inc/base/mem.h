@@ -62,3 +62,12 @@ mem_lookup_page_phys_addr(void *addr, size_t pgsize, physaddr_t *paddr)
 {
 	return mem_lookup_page_phys_addrs(addr, pgsize, pgsize, paddr);
 }
+
+/**
+ * mem_set_global_numa_node - sets the process-wide NUMA policy for mappings
+ * created after this call. Should be called before spawning additional threads.
+ * @node: the NUMA node to bind to
+ *
+ * Returns 0 if successful, or an error code if an error occurs.
+ */
+extern int mem_set_global_numa_node(int node);

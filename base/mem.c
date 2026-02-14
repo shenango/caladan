@@ -36,6 +36,15 @@ int shmctl(int shm_id, int cmd, struct shmid_ds* buf);
 int shmdt(const void *addr);
 int shmget(key_t key, size_t size, int flags);
 
+int mem_set_global_numa_node(int node)
+{
+	unsigned long mask = (1 << node);
+	int ret = set_mempolicy(MPOL_BIND, &mask, sizeof(mask) * 8);
+	if (ret)
+		return -errno;
+	return 0;
+}
+
 void touch_mapping(void *base, size_t len, size_t pgsize)
 {
 	char *pos;
@@ -88,10 +97,14 @@ __mem_map_anom(void *base, size_t len, size_t pgsize,
 	if ((intptr_t)addr < 0)
 		return MAP_FAILED;
 
+	/* NUMA detection is not implemented and the mask is always node 0. */
+	assert(mask && *mask == (1 << 0));
+#if 0
 	BUILD_ASSERT(sizeof(unsigned long) * 8 >= NNUMA);
 	if (syscall_mbind(addr, len, numa_policy, mask ? mask : NULL,
 		  mask ? NNUMA + 1 : 0, MPOL_MF_STRICT | MPOL_MF_MOVE))
 		goto fail;
+#endif
 
 	if (cfg_transparent_hugepages_enabled && (pgsize > PGSIZE_4KB)) {
 	  if (syscall_madvise(addr, len, MADV_HUGEPAGE))

@@ -168,6 +168,18 @@ int runtime_init(const char *cfgpath, thread_fn_t main_fn, void *arg)
 
 	cycles_per_us = iok.iok_info->cycles_per_us;
 
+	/*
+	 * If the IOKernel is constraining scheduling to a single NUMA node,
+	 * force all future mappings to use that node.
+	 */
+	if (iok.iok_info->managed_numa_node >= 0) {
+		ret = mem_set_global_numa_node(iok.iok_info->managed_numa_node);
+		if (unlikely(ret)) {
+			log_err("couldn't set global memory node, ret = %d", ret);
+			return ret;
+		}
+	}
+
 	ret = base_init();
 	if (ret) {
 		log_err("base library global init failed, ret = %d", ret);
