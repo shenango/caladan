@@ -14,6 +14,7 @@ test_runtime_mutexes
 test_runtime_rcu
 test_runtime_timer
 test_smalloc
+test_tcp_read
 test_thread
 test_udp_echo
 test_storage
