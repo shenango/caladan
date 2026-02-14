@@ -960,7 +960,7 @@ static void tcp_read_finish(tcpconn_t *c, struct mbuf *m)
  * Returns number of bytes caller may copy (capped at @len), or < 0 on error.
  * Returns with lock released; rx_exclusive is set so no other reader runs.
  */
-static ssize_t tcp_read_wait_peek(tcpconn_t *c, size_t len, size_t *nbufs,
+static ssize_t tcp_read_wait_peek(tcpconn_t *c, size_t len, size_t *qsize,
                                   bool nonblocking)
 {
 	int ret;
@@ -973,10 +973,10 @@ static ssize_t tcp_read_wait_peek(tcpconn_t *c, size_t len, size_t *nbufs,
 	if (unlikely(ret <= 0))
 		return ret;
 
-	*nbufs = 0;
+	*qsize = 0;
 	list_for_each(&c->rxq, m, link) {
 		readlen += mbuf_length(m);
-		*nbufs += 1;
+		*qsize += 1;
 		if (readlen >= len)
 			break;
 	}
@@ -996,6 +996,47 @@ static void tcp_read_finish_peek(tcpconn_t *c)
 	tcp_exclusive_finish(c);
 }
 
+/*
+ * copy_mbufs_to_buf - Copies exactly @len bytes from mbuf list @q and
+ * an optional extra mbuf @m_extra into @buf.
+ *
+ * @buf:     Destination buffer.
+ * @len:     Number of bytes to copy (must fit in @q + @m_extra).
+ * @q:       List of mbufs to copy from.
+ * @qsize:   Number of mbufs in @q.
+ * @m_extra: Extra mbuf if @len exceeds data in @q (may be NULL).
+ *
+ * Iterates through @q, copying to @buf until @len bytes copied or @q is
+ * exhausted. If more data is needed, uses @m_extra for the remainder.
+ * Caller guarantees enough data is present in @q and @m_extra.
+ */
+static inline void copy_mbufs_to_buf(void *buf, size_t len,
+                                     const struct list_head *q,
+                                     size_t qsize, struct mbuf *m_extra)
+{
+	const struct mbuf *m;
+	size_t readlen = 0;
+
+	m = list_top(q, struct mbuf, link);
+	while (m && readlen < len) {
+		size_t cpylen = MIN(len - readlen, mbuf_length(m));
+		memcpy(buf + readlen, mbuf_cdata(m), cpylen);
+		readlen += cpylen;
+		m = list_next(q, m, link);
+	}
+
+	/* we may have to consume only part of a buffer */
+	if (m_extra) {
+		size_t cpylen = len - readlen;
+		assert(cpylen < mbuf_length(m_extra));
+		memcpy(buf + readlen, mbuf_pull(m_extra, cpylen), cpylen);
+		m_extra->seg_seq += cpylen;
+		readlen += cpylen;
+	}
+
+	assert(readlen == len);
+}
+
 /**
  * tcp_read_peek - reads data from a TCP connection without consuming the data.
  * @c: the TCP connection
@@ -1009,27 +1050,16 @@ static void tcp_read_finish_peek(tcpconn_t *c)
 static ssize_t tcp_read_peek(tcpconn_t *c, void *buf, size_t len,
                              bool nonblocking)
 {
-	struct mbuf *m;
-	size_t nbufs, tocopy, readlen = 0;
+	size_t qsize;
 	ssize_t ret;
 
-	ret = tcp_read_wait_peek(c, len, &nbufs, nonblocking);
+	ret = tcp_read_wait_peek(c, len, &qsize, nonblocking);
 	if (ret <= 0)
 		return ret;
 
-	len = ret;
-
-	list_for_each(&c->rxq, m, link) {
-		tocopy = MIN(mbuf_length(m), len - readlen);
-		memcpy(buf + readlen, mbuf_data(m), tocopy);
-		readlen += tocopy;
-
-		if (len == readlen)
-			break;
-	}
-
+	copy_mbufs_to_buf(buf, ret, &c->rxq, qsize, NULL);
 	tcp_read_finish_peek(c);
-	return readlen;
+	return ret;
 }
 
 /**
@@ -1045,7 +1075,6 @@ static ssize_t tcp_read_peek(tcpconn_t *c, void *buf, size_t len,
 ssize_t tcp_read2(tcpconn_t *c, void *buf, size_t len, bool peek,
                   bool nonblocking)
 {
-	char *pos = buf;
 	size_t qsize;
 	struct list_head q;
 	struct mbuf *m;
@@ -1064,22 +1093,7 @@ ssize_t tcp_read2(tcpconn_t *c, void *buf, size_t len, bool peek,
 		return ret;
 
 	/* copy the data from the buffers */
-	while (true) {
-		struct mbuf *cur = list_pop(&q, struct mbuf, link);
-		if (!cur)
-			break;
-
-		memcpy(pos, mbuf_data(cur), mbuf_length(cur));
-		pos += mbuf_length(cur);
-		mbuf_free(cur);
-	}
-
-	/* we may have to consume only part of a buffer */
-	if (m) {
-		size_t cpylen = len - (uintptr_t)pos + (uintptr_t)buf;
-		memcpy(pos, mbuf_pull(m, cpylen), cpylen);
-		m->seg_seq += cpylen;
-	}
+	copy_mbufs_to_buf(buf, ret, &q, qsize, m);
 
 	/* wakeup any pending readers */
 	tcp_read_finish(c, m);
@@ -1098,9 +1112,24 @@ static size_t iov_len(const struct iovec *iov, int iovcnt)
 	return len;
 }
 
-static size_t copy_into_iov(const struct iovec *iov, int iovcnt,
+/**
+ * copy_into_iov - copy data from mbuf list (and optional m_extra) into iovec.
+ *
+ * @iov:       destination IO vector(s) to copy to
+ * @iovcnt:    number of IO vectors
+ * @maxbytes:  maximum number of bytes to copy
+ * @q:         list of mbufs to copy from
+ * @qsize:     number of mbufs in @q
+ * @m_extra:   additional mbuf, used if more bytes needed after q (may be NULL)
+ *
+ * Copies exactly @maxbytes bytes of data from the mbuf list @q, and if needed
+ * from @m_extra, into the @iov array. Correctly handles partial mbufs and
+ * partial vectors. Caller must ensure that @q and @m_extra have enough data.
+ *
+ */
+static void copy_into_iov(const struct iovec *iov, int iovcnt,
                             size_t maxbytes, const struct list_head *q,
-                            struct mbuf *m_extra)
+                            size_t qsize, struct mbuf *m_extra)
 {
 	const struct mbuf *m;
 	off_t mbuf_off = 0, iov_off = 0;
@@ -1139,8 +1168,8 @@ static size_t copy_into_iov(const struct iovec *iov, int iovcnt,
 		assert(mbuf_length(m_extra) > maxbytes - readlen);
 		do {
 			const struct iovec *vp = &iov[i];
-			size_t cpylen =
-			        MIN(vp->iov_len - iov_off, maxbytes - readlen);
+			size_t cpylen = vp->iov_len - iov_off;
+			assert(cpylen <= maxbytes - readlen);
 			memcpy((char *)vp->iov_base + iov_off,
 			       mbuf_pull(m_extra, cpylen), cpylen);
 			m_extra->seg_seq += cpylen;
@@ -1149,7 +1178,7 @@ static size_t copy_into_iov(const struct iovec *iov, int iovcnt,
 		} while (++i < iovcnt);
 	}
 
-	return readlen;
+	assert(readlen == maxbytes);
 }
 
 /**
@@ -1166,16 +1195,16 @@ static size_t copy_into_iov(const struct iovec *iov, int iovcnt,
 static ssize_t tcp_readv_peek(tcpconn_t *c, const struct iovec *iov, int iovcnt,
                               size_t total_len, bool nonblocking)
 {
-	size_t nbufs;
+	size_t qsize;
 	ssize_t len;
 
 	assert(total_len);
 
-	len = tcp_read_wait_peek(c, total_len, &nbufs, nonblocking);
+	len = tcp_read_wait_peek(c, total_len, &qsize, nonblocking);
 	if (len <= 0)
 		return len;
 
-	len = copy_into_iov(iov, iovcnt, len, &c->rxq, NULL);
+	copy_into_iov(iov, iovcnt, len, &c->rxq, qsize, NULL);
 	tcp_read_finish_peek(c);
 	return len;
 }
@@ -1209,11 +1238,11 @@ ssize_t tcp_readv2(tcpconn_t *c, const struct iovec *iov, int iovcnt, bool peek,
 	len = tcp_read_wait(c, len, &q, &qsize, &m, nonblocking);
 
 	/* check if connection was closed */
-	if (len <= 0) {
+	if (len <= 0)
 		return len;
-	}
 
-	len = copy_into_iov(iov, iovcnt, len, &q, m);
+	/* copy the data from the mbufs */
+	copy_into_iov(iov, iovcnt, len, &q, qsize, m);
 
 	/* wakeup any pending readers */
 	tcp_read_finish(c, m);
@@ -1229,6 +1258,7 @@ static int tcp_write_wait(tcpconn_t *c, size_t *winlen, bool nonblocking,
 {
 	int ret;
 	spin_lock_np(&c->lock);
+	nonblocking |= c->nonblocking;
 
 	/* block until there is an actionable event */
 	while (!c->tx_closed && (c->pcb.state < TCP_STATE_ESTABLISHED ||
@@ -1333,8 +1363,7 @@ ssize_t tcp_write3(tcpconn_t *c, const void *buf, size_t len, bool nonblocking,
 	ssize_t ret;
 
 	/* block until the data can be sent */
-	ret = tcp_write_wait(c, &winlen, c->nonblocking || nonblocking,
-	                     no_partial_write ? len : 0);
+	ret = tcp_write_wait(c, &winlen, nonblocking, no_partial_write ? len : 0);
 	if (ret)
 		return ret;
 
@@ -1365,7 +1394,7 @@ ssize_t tcp_writev2(tcpconn_t *c, const struct iovec *iov, int iovcnt,
 	int i;
 
 	/* block until the data can be sent */
-	ret = tcp_write_wait(c, &winlen, c->nonblocking || nonblocking, 0);
+	ret = tcp_write_wait(c, &winlen, nonblocking, 0);
 	if (ret)
 		return ret;
 
