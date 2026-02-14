@@ -64,6 +64,12 @@ extern int tcp_dial_affinity(uint32_t affinity, struct netaddr raddr,
 extern int tcp_dial_conn_affinity(tcpconn_t *in, struct netaddr raddr,
 		    tcpconn_t **c_out);
 
+/**
+ * tcp_set_default_window - sets the default TCP receive window for new conns
+ * @win: the window size (bytes); if 0, reset to default
+ */
+extern void tcp_set_default_window(uint32_t win);
+
 extern void tcp_set_nonblocking(tcpconn_t *c, bool nonblocking);
 
 /**

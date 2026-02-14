@@ -17,7 +17,7 @@
 
 /* adjustable constants */
 #define TCP_MIN_MSS		88
-#define TCP_WIN			0x1FFFF
+#define TCP_DEFAULT_WIN		0x1FFFF
 #define TCP_ACK_TIMEOUT		(10 * ONE_MS)
 #define TCP_CONNECT_TIMEOUT	(5 * ONE_SECOND) /* FIXME */
 #define TCP_OOQ_ACK_TIMEOUT	(300 * ONE_MS)

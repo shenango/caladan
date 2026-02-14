@@ -24,6 +24,17 @@ static thread_t *tcp_worker_th;
 
 static void tcp_retransmit(void *arg);
 
+/* default receive window for new connections */
+static uint32_t tcp_default_win = TCP_DEFAULT_WIN;
+
+void tcp_set_default_window(uint32_t win)
+{
+	if (win == 0)
+		win = TCP_DEFAULT_WIN;
+
+	tcp_default_win = win;
+}
+
 uint32_t tcp_get_input_bytes(tcpconn_t *c) {
        spin_lock_np(&c->lock);
        uint32_t b = c->winmax - c->pcb.rcv_wnd;
@@ -300,6 +311,7 @@ int tcp_get_status(tcpconn_t *c) {
 tcpconn_t *tcp_conn_alloc(void)
 {
 	tcpconn_t *c;
+	uint32_t win;
 
 	c = smalloc(sizeof(*c));
 	if (!c)
@@ -346,9 +358,10 @@ tcpconn_t *tcp_conn_alloc(void)
 	c->pcb.snd_una = c->pcb.iss;
 
 	/* initialize ingress PCB */
-	c->winmax = TCP_WIN;
-	c->pcb.rcv_wscale = tcp_scale_window(TCP_WIN);
-	c->pcb.rcv_wnd = TCP_WIN;
+	win = tcp_default_win;
+	c->winmax = win;
+	c->pcb.rcv_wscale = tcp_scale_window(win);
+	c->pcb.rcv_wnd = win;
 	c->pcb.rcv_mss = tcp_calculate_mss(net_get_mtu());
 
 	c->poll_src.set_fn = NULL;
