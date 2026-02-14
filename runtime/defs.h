@@ -739,3 +739,5 @@ extern void thread_cede(void);
 extern void thread_ready_locked(thread_t *th);
 extern void thread_ready_head_locked(thread_t *th);
 extern void join_kthread(struct kthread *k);
+extern void thread_finish_cede(void);
+extern void thread_finish_yield(void);

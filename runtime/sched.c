@@ -730,7 +730,26 @@ uint64_t thread_get_total_cycles(thread_t *th) {
 	return cycles;
 }
 
-static void thread_finish_cede(void)
+void thread_finish_yield(void)
+{
+	thread_t *curth = thread_self();
+	struct kthread *k = myk();
+
+	assert_preempt_disabled();
+
+	spin_lock(&k->lock);
+
+	/* check for softirqs */
+	softirq_run_locked(k);
+
+	curth->thread_ready = false;
+	curth->last_cpu = k->curr_cpu;
+	thread_ready_locked(curth);
+
+	schedule();
+}
+
+void thread_finish_cede(void)
 {
 	struct kthread *k = myk();
 	thread_t *myth = thread_self();

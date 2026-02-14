@@ -13,6 +13,7 @@ DECLARE_PERTHREAD(void *, uintr_stack);
 extern void preempt(void);
 extern void uintr_asm_return(void);
 
+extern bool uintr_enabled;
 extern size_t xsave_max_size;
 extern size_t xsave_features;
 
