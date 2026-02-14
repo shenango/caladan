@@ -57,7 +57,7 @@ static void stack_tcache_free(struct tcache *tc, int nr, void **items)
 
 	/* try to release the backing memory first */
 	for (i = 0; i < nr; i++)
-		stack_reclaim(container_of(items[i], struct stack, usable));
+		stack_reclaim(stack_from_tcache_handle(items[i]));
 
 	/* then make the stacks available for reallocation */
 	spin_lock(&stack_lock);
@@ -87,7 +87,7 @@ static int stack_tcache_alloc(struct tcache *tc, int nr, void **items)
 		s = stack_create(base);
 		if (unlikely(!s))
 			goto fail;
-		items[i] = s->usable;
+		items[i] = stack_to_tcache_handle(s);
 	}
 
 	return 0;

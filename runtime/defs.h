@@ -40,6 +40,8 @@
 #define RUNTIME_WATCHDOG_US		50
 #define RUNTIME_RX_BATCH_SIZE		32
 
+#define XSAVE_AREA_SIZE (24 * KB)
+#define XSAVE_AREA_PTR_SIZE (XSAVE_AREA_SIZE / sizeof(uintptr_t))
 
 /*
  * Thread support
@@ -72,6 +74,22 @@ struct stack {
 };
 
 DECLARE_PERTHREAD(struct tcache_perthread, stack_pt);
+DECLARE_PERTHREAD(void *, runtime_stack);
+
+static __always_inline void *stack_to_tcache_handle(struct stack *s)
+{
+	/*
+	 * use the bottom page of the stack (before the xsave area) for the tcache's
+	 * intrusive list. This way we don't fault in any more pages than we need.
+	 */
+	return (void *)((uintptr_t)(s + 1) - XSAVE_AREA_SIZE - PGSIZE_4KB);
+}
+
+static __always_inline struct stack *stack_from_tcache_handle(void *handle)
+{
+	uintptr_t addr = (uintptr_t)handle + PGSIZE_4KB + XSAVE_AREA_SIZE;
+	return (struct stack *)addr - 1;
+}
 
 /**
  * stack_alloc - allocates a stack
@@ -85,7 +103,7 @@ static inline struct stack *stack_alloc(void)
 	void *s = tcache_alloc(perthread_ptr(stack_pt));
 	if (unlikely(!s))
 		return NULL;
-	return container_of((uintptr_t (*)[STACK_PTR_SIZE])s, struct stack, usable);
+	return stack_from_tcache_handle(s);
 }
 
 /**
@@ -94,7 +112,7 @@ static inline struct stack *stack_alloc(void)
  */
 static inline void stack_free(struct stack *s)
 {
-	tcache_free(perthread_ptr(stack_pt), (void *)s->usable);
+	tcache_free(perthread_ptr(stack_pt), stack_to_tcache_handle(s));
 }
 
 #define RSP_ALIGNMENT	16
@@ -122,6 +140,17 @@ static inline uint64_t stack_init_to_rsp(struct stack *s, void (*exit_fn)(void))
 {
 	uint64_t rsp;
 
+	s->usable[STACK_PTR_SIZE - XSAVE_AREA_PTR_SIZE - 1] = (uintptr_t)exit_fn;
+	rsp = (uint64_t)&s->usable[STACK_PTR_SIZE - XSAVE_AREA_PTR_SIZE - 1];
+	assert_rsp_aligned(rsp);
+	return rsp;
+}
+
+static inline uint64_t runtime_stack_init_to_rsp(struct stack *s,
+                                                 void (*exit_fn)(void))
+{
+	uint64_t rsp;
+
 	s->usable[STACK_PTR_SIZE - 1] = (uintptr_t)exit_fn;
 	rsp = (uint64_t)&s->usable[STACK_PTR_SIZE - 1];
 	assert_rsp_aligned(rsp);
@@ -142,7 +171,7 @@ static inline uint64_t
 stack_init_to_rsp_with_buf(struct stack *s, void **buf, size_t buf_len,
 			   void (*exit_fn)(void))
 {
-	uint64_t rsp, pos = STACK_PTR_SIZE;
+	uint64_t rsp, pos = STACK_PTR_SIZE - XSAVE_AREA_PTR_SIZE;
 
 	/* reserve the buffer */
 	pos -= div_up(buf_len, sizeof(uint64_t));

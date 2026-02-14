@@ -24,7 +24,7 @@ DEFINE_PERTHREAD(thread_t *, __self);
 DEFINE_PERTHREAD_ALIAS(thread_t * const, __self, __const_self);
 
 /* a pointer to the top of the per-kthread (TLS) runtime stack */
-static DEFINE_PERTHREAD(void *, runtime_stack);
+DEFINE_PERTHREAD(void *, runtime_stack);
 DEFINE_PERTHREAD(uint64_t, runtime_fsbase);
 /* Flag to prevent watchdog from running */
 bool disable_watchdog;
@@ -1006,7 +1006,7 @@ int sched_init_thread(void)
 	if (!s)
 		return -ENOMEM;
 
-	perthread_store(runtime_stack, (void *)stack_init_to_rsp(s, runtime_top_of_stack));
+	perthread_store(runtime_stack, (void *)runtime_stack_init_to_rsp(s, runtime_top_of_stack));
 	perthread_store(runtime_fsbase, _readfsbase_u64());
 
 	return 0;
