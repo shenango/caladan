@@ -171,10 +171,19 @@ static inline unsigned char *mbuf_data(struct mbuf *m)
 }
 
 /**
+ * mbuf_cdata - returns the current data pointer for a const mbuf (read-only)
+ * @m: the packet
+ */
+static inline const unsigned char *mbuf_cdata(const struct mbuf *m)
+{
+	return m->data;
+}
+
+/**
  * mbuf_length - returns the current data length
  * @m: the packet
  */
-static inline unsigned int mbuf_length(struct mbuf *m)
+static inline unsigned int mbuf_length(const struct mbuf *m)
 {
 	return m->len;
 }

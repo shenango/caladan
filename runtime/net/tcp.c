@@ -35,13 +35,13 @@ void tcp_set_default_window(uint32_t win)
 	tcp_default_win = win;
 }
 
-uint32_t tcp_get_input_bytes(tcpconn_t *c) {
-       spin_lock_np(&c->lock);
-       uint32_t b = c->winmax - c->pcb.rcv_wnd;
-       spin_unlock_np(&c->lock);
-       return b;
+uint32_t tcp_get_input_bytes(tcpconn_t *c)
+{
+	spin_lock_np(&c->lock);
+	uint32_t b = c->winmax - c->pcb.rcv_wnd;
+	spin_unlock_np(&c->lock);
+	return b;
 }
-
 
 void tcp_timer_update(tcpconn_t *c)
 {
@@ -58,16 +58,20 @@ void tcp_timer_update(tcpconn_t *c)
 	if (c->ack_delayed)
 		next_timeout = MIN(next_timeout, c->ack_ts + TCP_ACK_TIMEOUT);
 	if (c->zero_wnd)
-		next_timeout = MIN(next_timeout, c->zero_wnd_ts + TCP_ZERO_WND_TIMEOUT);
+		next_timeout = MIN(next_timeout,
+		                   c->zero_wnd_ts + TCP_ZERO_WND_TIMEOUT);
 
 	if (!c->tx_exclusive) {
 		m = list_top(&c->txq, struct mbuf, link);
 		if (m)
-			next_timeout = MIN(next_timeout, m->timestamp + TCP_RETRANSMIT_TIMEOUT);
+			next_timeout =
+			        MIN(next_timeout,
+			            m->timestamp + TCP_RETRANSMIT_TIMEOUT);
 	}
 
 	if (!list_empty(&c->rxq_ooo))
-		next_timeout = MIN(next_timeout, microtime() + TCP_OOQ_ACK_TIMEOUT);
+		next_timeout =
+		        MIN(next_timeout, microtime() + TCP_OOQ_ACK_TIMEOUT);
 
 	store_release(&c->next_timeout, next_timeout);
 }
@@ -153,7 +157,6 @@ static void tcp_worker(void *arg)
 			continue;
 		}
 
-
 		list_for_each_safe(&tcp_conns, c, c_next, global_link) {
 			prefetch(c_next);
 			if (preempt_needed()) {
@@ -186,7 +189,8 @@ void tcp_free_rx_bufs(void)
 	spin_lock_np(&tcp_lock);
 
 	list_for_each(&tcp_conns, c, global_link) {
-		if (list_empty_volatile(&c->rxq_ooo) && list_empty_volatile(&c->rxq))
+		if (list_empty_volatile(&c->rxq_ooo) &&
+		    list_empty_volatile(&c->rxq))
 			continue;
 
 		spin_lock_np(&c->lock);
@@ -201,7 +205,6 @@ void tcp_free_rx_bufs(void)
 	mbuf_list_free(&mbufs);
 	waitq_release_finish(&waiters);
 }
-
 
 /**
  * tcp_conn_ack - removes acknowledged packets from TX queue
@@ -275,7 +278,6 @@ static const struct trans_ops tcp_conn_ops = {
 	.err = tcp_conn_err,
 };
 
-
 /*
  * Connection initialization
  */
@@ -292,7 +294,8 @@ static uint32_t tcp_scale_window(uint32_t maxwin)
 	return wscale;
 }
 
-int tcp_get_status(tcpconn_t *c) {
+int tcp_get_status(tcpconn_t *c)
+{
 
 	if (load_acquire(&c->pcb.state) < TCP_STATE_ESTABLISHED)
 		return -EINPROGRESS;
@@ -389,7 +392,8 @@ int tcp_conn_attach(tcpconn_t *c, struct netaddr laddr, struct netaddr raddr,
 	if (token)
 		laddr = token->laddr;
 
-	ret = validate_and_normalize_laddr(&laddr, raddr.ip, true /* allow zero port */);
+	ret = validate_and_normalize_laddr(&laddr, raddr.ip,
+	                                   true /* allow zero port */);
 	if (ret)
 		return ret;
 
@@ -534,7 +538,6 @@ static void tcp_queue_release_ref(struct kref *ref)
 	rcu_free(&q->e.rcu, tcp_queue_release);
 }
 
-
 int __tcp_listen(struct netaddr laddr, int backlog, tcpqueue_t **q_out,
                  bind_token_t *token)
 {
@@ -562,7 +565,6 @@ int __tcp_listen(struct netaddr laddr, int backlog, tcpqueue_t **q_out,
 
 	q->poll_src.set_fn = NULL;
 	q->poll_src.clear_fn = NULL;
-
 
 	if (laddr.port == 0)
 		ret = trans_table_add_with_ephemeral_port(&q->e);
@@ -689,12 +691,11 @@ void tcp_qclose(tcpqueue_t *q)
 	kref_put(&q->ref, tcp_queue_release_ref);
 }
 
-
 /*
  * Support for the TCP socket API
  */
-int __tcp_dial(struct netaddr laddr, struct netaddr raddr,
-               tcpconn_t **c_out, bool nonblocking, bind_token_t *token)
+int __tcp_dial(struct netaddr laddr, struct netaddr raddr, tcpconn_t **c_out,
+               bool nonblocking, bind_token_t *token)
 {
 	struct tcp_options opts;
 	tcpconn_t *c;
@@ -775,13 +776,13 @@ int __tcp_dial(struct netaddr laddr, struct netaddr raddr,
  * Note: in the future this can be better integrated with tcp_dial.
  * for now, it simply wraps it.
  */
-int tcp_dial_conn_affinity(tcpconn_t *in, struct netaddr raddr, tcpconn_t **c_out)
+int tcp_dial_conn_affinity(tcpconn_t *in, struct netaddr raddr,
+                           tcpconn_t **c_out)
 {
 	uint32_t in_aff = net_ops.get_flow_affinity(
-			  IPPROTO_TCP, in->e.laddr.port, in->e.raddr);
+	        IPPROTO_TCP, in->e.laddr.port, in->e.raddr);
 	return tcp_dial_affinity(in_aff, raddr, c_out);
 }
-
 
 /**
  * tcp_dial_affinity - opens a TCP connection with specific kthread affinity
@@ -806,7 +807,8 @@ int tcp_dial_affinity(uint32_t in_aff, struct netaddr raddr, tcpconn_t **c_out)
 
 	while (true) {
 		do {
-			out_aff = net_ops.get_flow_affinity(IPPROTO_TCP, ++base_port, raddr);
+			out_aff = net_ops.get_flow_affinity(IPPROTO_TCP,
+			                                    ++base_port, raddr);
 			if (base_port == start_port)
 				return -EAGAIN;
 		} while (out_aff != in_aff || base_port == 0);
@@ -819,7 +821,6 @@ int tcp_dial_affinity(uint32_t in_aff, struct netaddr raddr, tcpconn_t **c_out)
 		return ret;
 	}
 }
-
 
 /**
  * tcp_local_addr - gets the local address of a TCP connection
@@ -851,6 +852,8 @@ static int tcp_wait_rx(tcpconn_t *c, bool nonblocking)
 	int ret;
 	assert(spin_lock_held(&c->lock));
 
+	nonblocking |= c->nonblocking;
+
 	/* block until there is an actionable event */
 	while (!c->rx_closed && (c->rx_exclusive || list_empty(&c->rxq))) {
 		if (nonblocking) {
@@ -872,113 +875,9 @@ static int tcp_wait_rx(tcpconn_t *c, bool nonblocking)
 	return 1;
 }
 
-/**
- * tcp_read_peek - reads data from a TCP connection without consuming the data.
- * @c: the TCP connection
- * @buf: a buffer to store the read data
- * @len: the length of @buf
- * @nonblocking: true if this call should not block
- *
- * Returns the number of bytes read, 0 if the connection is closed, or < 0
- * if an error occurred.
- */
-static ssize_t tcp_read_peek(tcpconn_t *c, void *buf, size_t len,
-	                         bool nonblocking)
-{
-	int ret;
-	struct mbuf *m;
-	size_t tocopy, readlen = 0;
-
-	spin_lock_np(&c->lock);
-
-	ret = tcp_wait_rx(c, c->nonblocking || nonblocking);
-	if (unlikely(ret <= 0))
-		return ret;
-
-	list_for_each(&c->rxq, m, link) {
-		tocopy = MIN(mbuf_length(m), len - readlen);
-		memcpy(buf + readlen, mbuf_data(m), tocopy);
-		readlen += tocopy;
-
-		if (len == readlen)
-			break;
-	}
-
-	spin_unlock_np(&c->lock);
-	return readlen;
-}
-
-static size_t iov_len(const struct iovec *iov, int iovcnt)
-{
-	size_t len = 0;
-	int i;
-
-	for (i = 0; i < iovcnt; i++)
-		len += iov[i].iov_len;
-
-	return len;
-}
-
-/**
- * tcp_readv_peek - reads vectorized data from a TCP connection without
- * consuming the data.
- * @c: the TCP connection
- * @iov: a pointer to the IO vector
- * @iovcnt: the number of vectors in @iov
- * @nonblocking: true if this call should not block
- *
- * Returns the number of bytes read, 0 if the connection is closed, or < 0
- * if an error occurred.
- */
-static ssize_t tcp_readv_peek(tcpconn_t *c, const struct iovec *iov,
-			     int iovcnt, bool nonblocking)
-{
-	int ret, i = 0;
-	struct mbuf *m;
-	const struct iovec *vp;
-	size_t tocopy, readlen = 0;
-	off_t mbuf_off = 0, iov_off = 0;
-
-	assert(iovcnt > 0 && iov[0].iov_len > 0);
-
-	spin_lock_np(&c->lock);
-
-	ret = tcp_wait_rx(c, c->nonblocking || nonblocking);
-	if (unlikely(ret <= 0))
-		return ret;
-
-	m = list_top(&c->rxq, struct mbuf, link);
-	vp = &iov[0];
-
-	while (true) {
-		tocopy = MIN(vp->iov_len - iov_off, mbuf_length(m) - mbuf_off);
-		memcpy((char *)vp->iov_base + iov_off, mbuf_data(m) + mbuf_off, tocopy);
-
-		iov_off += tocopy;
-		mbuf_off += tocopy;
-		readlen += tocopy;
-
-		if (mbuf_off == mbuf_length(m)) {
-			m = list_next(&c->rxq, m, link);
-			if (m == NULL)
-				break;
-			mbuf_off = 0;
-		}
-
-		if (iov_off == vp->iov_len) {
-			if (++i == iovcnt)
-				break;
-			iov_off = 0;
-			vp = &iov[i];
-		}
-	}
-
-	spin_unlock_np(&c->lock);
-	return readlen;
-}
-
-static ssize_t tcp_read_wait(tcpconn_t *c, size_t len,
-			     struct list_head *q, struct mbuf **mout, bool nonblocking)
+static ssize_t tcp_read_wait(tcpconn_t *c, size_t len, struct list_head *q,
+                             size_t *qsize, struct mbuf **mout,
+                             bool nonblocking)
 {
 	int ret;
 	struct mbuf *m;
@@ -992,6 +891,7 @@ static ssize_t tcp_read_wait(tcpconn_t *c, size_t len,
 	if (unlikely(ret <= 0))
 		return ret;
 
+	*qsize = 0;
 	/* pop off the mbufs that will be read */
 	while (readlen < len) {
 		m = list_top(&c->rxq, struct mbuf, link);
@@ -1014,11 +914,12 @@ static ssize_t tcp_read_wait(tcpconn_t *c, size_t len,
 		list_del_from(&c->rxq, &m->link);
 		list_add_tail(q, &m->link);
 		readlen += mbuf_length(m);
+		*qsize += 1;
 	}
 
 	c->pcb.rcv_wnd += readlen;
 	if (wraps_gte(c->pcb.rcv_nxt + c->pcb.rcv_wnd,
-		      c->tx_last_ack + c->tx_last_win + c->winmax / 4)) {
+	              c->tx_last_ack + c->tx_last_win + c->winmax / 4)) {
 		do_ack = true;
 	}
 
@@ -1032,12 +933,9 @@ static ssize_t tcp_read_wait(tcpconn_t *c, size_t len,
 	return readlen;
 }
 
-static void tcp_read_finish(tcpconn_t *c, struct mbuf *m)
+static inline void tcp_exclusive_finish(tcpconn_t *c)
 {
 	struct list_head waiters;
-
-	if (!m)
-		return;
 
 	list_head_init(&waiters);
 	spin_lock_np(&c->lock);
@@ -1045,6 +943,93 @@ static void tcp_read_finish(tcpconn_t *c, struct mbuf *m)
 	waitq_release_start(&c->rx_wq, &waiters, &c->lock);
 	spin_unlock_np(&c->lock);
 	waitq_release_finish(&waiters);
+}
+
+static void tcp_read_finish(tcpconn_t *c, struct mbuf *m)
+{
+	if (m)
+		tcp_exclusive_finish(c);
+}
+
+/**
+ * tcp_read_wait_peek - wait for RX data and claim exclusive read without
+ * dequeueing. Caller may then iterate c->rxq and copy up to @len bytes (or the
+ * returned count). Does not update rcv_wnd or send acks. Caller must call
+ * tcp_read_finish_peek when done.
+ *
+ * Returns number of bytes caller may copy (capped at @len), or < 0 on error.
+ * Returns with lock released; rx_exclusive is set so no other reader runs.
+ */
+static ssize_t tcp_read_wait_peek(tcpconn_t *c, size_t len, size_t *nbufs,
+                                  bool nonblocking)
+{
+	int ret;
+	struct mbuf *m;
+	size_t readlen = 0;
+
+	spin_lock_np(&c->lock);
+
+	ret = tcp_wait_rx(c, nonblocking);
+	if (unlikely(ret <= 0))
+		return ret;
+
+	*nbufs = 0;
+	list_for_each(&c->rxq, m, link) {
+		readlen += mbuf_length(m);
+		*nbufs += 1;
+		if (readlen >= len)
+			break;
+	}
+
+	readlen = MIN(readlen, len);
+	c->rx_exclusive = true;
+	spin_unlock_np(&c->lock);
+	return readlen;
+}
+
+/**
+ * tcp_read_finish_peek - release exclusive peek; wake any waiters.
+ * Call after copying from c->rxq without the lock.
+ */
+static void tcp_read_finish_peek(tcpconn_t *c)
+{
+	tcp_exclusive_finish(c);
+}
+
+/**
+ * tcp_read_peek - reads data from a TCP connection without consuming the data.
+ * @c: the TCP connection
+ * @buf: a buffer to store the read data
+ * @len: the length of @buf
+ * @nonblocking: true if this call should not block
+ *
+ * Returns the number of bytes read, 0 if the connection is closed, or < 0
+ * if an error occurred.
+ */
+static ssize_t tcp_read_peek(tcpconn_t *c, void *buf, size_t len,
+                             bool nonblocking)
+{
+	struct mbuf *m;
+	size_t nbufs, tocopy, readlen = 0;
+	ssize_t ret;
+
+	ret = tcp_read_wait_peek(c, len, &nbufs, nonblocking);
+	if (ret <= 0)
+		return ret;
+
+	len = ret;
+
+	list_for_each(&c->rxq, m, link) {
+		tocopy = MIN(mbuf_length(m), len - readlen);
+		memcpy(buf + readlen, mbuf_data(m), tocopy);
+		readlen += tocopy;
+
+		if (len == readlen)
+			break;
+	}
+
+	tcp_read_finish_peek(c);
+	return readlen;
 }
 
 /**
@@ -1058,9 +1043,10 @@ static void tcp_read_finish(tcpconn_t *c, struct mbuf *m)
  * if an error occurred.
  */
 ssize_t tcp_read2(tcpconn_t *c, void *buf, size_t len, bool peek,
-	              bool nonblocking)
+                  bool nonblocking)
 {
 	char *pos = buf;
+	size_t qsize;
 	struct list_head q;
 	struct mbuf *m;
 	ssize_t ret;
@@ -1071,7 +1057,7 @@ ssize_t tcp_read2(tcpconn_t *c, void *buf, size_t len, bool peek,
 	list_head_init(&q);
 
 	/* wait for data to become available */
-	ret = tcp_read_wait(c, len, &q, &m, c->nonblocking || nonblocking);
+	ret = tcp_read_wait(c, len, &q, &qsize, &m, nonblocking);
 
 	/* check if connection was closed */
 	if (ret <= 0)
@@ -1101,6 +1087,99 @@ ssize_t tcp_read2(tcpconn_t *c, void *buf, size_t len, bool peek,
 	return ret;
 }
 
+static size_t iov_len(const struct iovec *iov, int iovcnt)
+{
+	size_t len = 0;
+	int i;
+
+	for (i = 0; i < iovcnt; i++)
+		len += iov[i].iov_len;
+
+	return len;
+}
+
+static size_t copy_into_iov(const struct iovec *iov, int iovcnt,
+                            size_t maxbytes, const struct list_head *q,
+                            struct mbuf *m_extra)
+{
+	const struct mbuf *m;
+	off_t mbuf_off = 0, iov_off = 0;
+	int i = 0;
+	size_t readlen = 0;
+
+	m = list_top(q, struct mbuf, link);
+
+	while (m && i < iovcnt && readlen < maxbytes) {
+		const struct iovec *vp = &iov[i];
+		size_t cpylen =
+		        MIN(vp->iov_len - iov_off, mbuf_length(m) - mbuf_off);
+		cpylen = MIN(cpylen, maxbytes - readlen);
+		memcpy((char *)vp->iov_base + iov_off, mbuf_cdata(m) + mbuf_off,
+		       cpylen);
+
+		iov_off += cpylen;
+		mbuf_off += cpylen;
+		readlen += cpylen;
+
+		if (mbuf_off == mbuf_length(m)) {
+			m = list_next(q, m, link);
+			mbuf_off = 0;
+		}
+
+		if (iov_off == vp->iov_len) {
+			i++;
+			iov_off = 0;
+		}
+	}
+
+	/* A partial mbuf exists because we didn't want to consume all of it.
+	 * This means that we will completely fill our remaining iovecs with this
+	 * one mbuf. */
+	if (m_extra) {
+		assert(mbuf_length(m_extra) > maxbytes - readlen);
+		do {
+			const struct iovec *vp = &iov[i];
+			size_t cpylen =
+			        MIN(vp->iov_len - iov_off, maxbytes - readlen);
+			memcpy((char *)vp->iov_base + iov_off,
+			       mbuf_pull(m_extra, cpylen), cpylen);
+			m_extra->seg_seq += cpylen;
+			iov_off = 0;
+			readlen += cpylen;
+		} while (++i < iovcnt);
+	}
+
+	return readlen;
+}
+
+/**
+ * tcp_readv_peek - reads vectorized data from a TCP connection without
+ * consuming the data.
+ * @c: the TCP connection
+ * @iov: a pointer to the IO vector
+ * @iovcnt: the number of vectors in @iov
+ * @nonblocking: true if this call should not block
+ *
+ * Returns the number of bytes read, 0 if the connection is closed, or < 0
+ * if an error occurred.
+ */
+static ssize_t tcp_readv_peek(tcpconn_t *c, const struct iovec *iov, int iovcnt,
+                              size_t total_len, bool nonblocking)
+{
+	size_t nbufs;
+	ssize_t len;
+
+	assert(total_len);
+
+	len = tcp_read_wait_peek(c, total_len, &nbufs, nonblocking);
+	if (len <= 0)
+		return len;
+
+	len = copy_into_iov(iov, iovcnt, len, &c->rxq, NULL);
+	tcp_read_finish_peek(c);
+	return len;
+}
+
 /**
  * tcp_readv - reads vectored data from a TCP connection
  * @c: the TCP connection
@@ -1112,89 +1191,48 @@ ssize_t tcp_read2(tcpconn_t *c, void *buf, size_t len, bool peek,
  * if an error occurred.
  */
 ssize_t tcp_readv2(tcpconn_t *c, const struct iovec *iov, int iovcnt, bool peek,
-	               bool nonblocking)
+                   bool nonblocking)
 {
 	struct list_head q;
 	struct mbuf *m;
 	ssize_t len;
-	off_t offset;
-	int i;
+	size_t qsize;
 
-	if (peek)
-		return tcp_readv_peek(c, iov, iovcnt, nonblocking);
-
-	list_head_init(&q);
-	offset = 0;
-	i = 0;
 	len = iov_len(iov, iovcnt);
 
+	if (peek)
+		return tcp_readv_peek(c, iov, iovcnt, len, nonblocking);
+
+	list_head_init(&q);
+
 	/* wait for data to become available */
-	len = tcp_read_wait(c, len, &q, &m, c->nonblocking || nonblocking);
+	len = tcp_read_wait(c, len, &q, &qsize, &m, nonblocking);
 
 	/* check if connection was closed */
-	if (len <= 0)
+	if (len <= 0) {
 		return len;
-
-	/* copy the data from the buffers */
-	while (true) {
-		struct mbuf *cur = list_pop(&q, struct mbuf, link);
-		if (!cur)
-			break;
-
-		do {
-			const struct iovec *vp = &iov[i];
-			size_t cpylen = MIN(vp->iov_len - offset,
-					    mbuf_length(cur));
-
-			memcpy((char *)vp->iov_base + offset,
-			       mbuf_pull(cur, cpylen), cpylen);
-
-			offset += cpylen;
-			if (offset == vp->iov_len) {
-				offset = 0;
-				i++;
-			}
-
-			assert(i <= iovcnt);
-		} while (mbuf_length(cur) > 0);
-		mbuf_free(cur);
 	}
 
-	/* we may have to consume only part of a buffer */
-	if (m) {
-		do {
-			const struct iovec *vp = &iov[i];
-			size_t cpylen = MIN(vp->iov_len - offset,
-					    mbuf_length(m));
-
-			memcpy((char *)vp->iov_base + offset,
-			       mbuf_pull(m, cpylen), cpylen);
-			m->seg_seq += cpylen;
-			offset += cpylen;
-			if (offset == vp->iov_len) {
-				offset = 0;
-				i++;
-			}
-
-			assert(mbuf_length(m) > 0);
-		} while (i < iovcnt);
-	}
+	len = copy_into_iov(iov, iovcnt, len, &q, m);
 
 	/* wakeup any pending readers */
 	tcp_read_finish(c, m);
 
+	/* free the list of consumed mbufs */
+	mbuf_list_free(&q);
+
 	return len;
 }
 
-static int tcp_write_wait(tcpconn_t *c, size_t *winlen, bool nonblocking, size_t min_winlen)
+static int tcp_write_wait(tcpconn_t *c, size_t *winlen, bool nonblocking,
+                          size_t min_winlen)
 {
 	int ret;
 	spin_lock_np(&c->lock);
 
 	/* block until there is an actionable event */
-	while (!c->tx_closed &&
-	       (c->pcb.state < TCP_STATE_ESTABLISHED || c->tx_exclusive ||
-		tcp_is_snd_full(c))) {
+	while (!c->tx_closed && (c->pcb.state < TCP_STATE_ESTABLISHED ||
+	                         c->tx_exclusive || tcp_is_snd_full(c))) {
 		/* arm window probing if needed */
 		if (!c->zero_wnd && tcp_is_snd_full(c)) {
 			c->zero_wnd = true;
@@ -1288,7 +1326,8 @@ static void tcp_write_finish(tcpconn_t *c)
  * Returns the number of bytes written (could be less than @len), or < 0
  * if there was a failure.
  */
-ssize_t tcp_write3(tcpconn_t *c, const void *buf, size_t len, bool nonblocking, bool no_partial_write)
+ssize_t tcp_write3(tcpconn_t *c, const void *buf, size_t len, bool nonblocking,
+                   bool no_partial_write)
 {
 	size_t winlen;
 	ssize_t ret;
@@ -1319,7 +1358,7 @@ ssize_t tcp_write3(tcpconn_t *c, const void *buf, size_t len, bool nonblocking, 
  * if there was a failure.
  */
 ssize_t tcp_writev2(tcpconn_t *c, const struct iovec *iov, int iovcnt,
-	                bool nonblocking)
+                    bool nonblocking)
 {
 	size_t winlen;
 	ssize_t sent = 0, ret;
@@ -1335,7 +1374,7 @@ ssize_t tcp_writev2(tcpconn_t *c, const struct iovec *iov, int iovcnt,
 		if (winlen <= 0)
 			break;
 		ret = tcp_tx_send(c, iov->iov_base, MIN(iov->iov_len, winlen),
-				  i == iovcnt - 1 && iov->iov_len <= winlen);
+		                  i == iovcnt - 1 && iov->iov_len <= winlen);
 		if (ret <= 0)
 			break;
 		winlen -= ret;
@@ -1579,9 +1618,8 @@ void tcpq_set_nonblocking(tcpqueue_t *q, bool nonblocking)
 	spin_unlock_np(&q->l);
 }
 
-
 void tcp_poll_install_cb(tcpconn_t *c, poll_notif_fn_t setfn,
-			                    poll_notif_fn_t clearfn, unsigned long data)
+                         poll_notif_fn_t clearfn, unsigned long data)
 {
 	unsigned int flags = 0;
 
@@ -1608,7 +1646,7 @@ void tcp_poll_install_cb(tcpconn_t *c, poll_notif_fn_t setfn,
 }
 
 void tcpq_poll_install_cb(tcpqueue_t *q, poll_notif_fn_t setfn,
-			                    poll_notif_fn_t clearfn, unsigned long data)
+                          poll_notif_fn_t clearfn, unsigned long data)
 {
 	unsigned int flags = 0;
 
