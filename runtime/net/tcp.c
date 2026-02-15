@@ -1098,6 +1098,9 @@ ssize_t tcp_read2(tcpconn_t *c, void *buf, size_t len, bool peek,
 	/* wakeup any pending readers */
 	tcp_read_finish(c, m);
 
+	/* free the list of consumed mbufs */
+	mbuf_list_free(&q);
+
 	return ret;
 }
 
