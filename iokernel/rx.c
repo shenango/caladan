@@ -378,7 +378,7 @@ static struct rte_mempool *rx_pktmbuf_pool_create_in_shm(const char *name,
 	rte_mempool_obj_iter(mp, rte_pktmbuf_init, NULL);
 	rte_mempool_obj_iter(mp, rx_pktmbuf_priv_init, NULL);
 
-	BUG_ON(rte_mempool_calc_obj_size(elt_size, 0, &objsz) != RX_ELT_SIZE);
+	BUG_ON_NE(rte_mempool_calc_obj_size(elt_size, 0, &objsz), RX_ELT_SIZE);
 	BUG_ON(objsz.header_size != RX_OBJ_HDR_SZ);
 
 	return mp;
@@ -403,7 +403,7 @@ int rx_init(void)
 	/* create a mempool in shared memory to hold the rx mbufs */
 	dp.rx_mbuf_pool = rx_pktmbuf_pool_create_in_shm("RX_MBUF_POOL",
 			IOKERNEL_NUM_MBUFS, MBUF_CACHE_SIZE,
-			sizeof(struct rx_priv_data), RTE_MBUF_DEFAULT_BUF_SIZE,
+			sizeof(struct rx_priv_data), ETH_MAX_LEN_JUMBO + RTE_PKTMBUF_HEADROOM,
 			rte_socket_id());
 
 	if (dp.rx_mbuf_pool == NULL) {

@@ -13,7 +13,7 @@
 #include <base/stddef.h>
 
 #define INGRESS_MBUF_SHM_KEY 0x696d736b /* "imsk" */
-#define INGRESS_MBUF_SHM_SIZE 0x20000000
+#define INGRESS_MBUF_SHM_SIZE 0x80000000
 
 #define IOKERNEL_INFO_KEY 0x696e666f /* "info" */
 #define IOKERNEL_INFO_SIZE PGSIZE_4KB

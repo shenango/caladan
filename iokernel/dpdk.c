@@ -50,8 +50,6 @@
 #define RX_RING_SIZE 256
 #define TX_RING_SIZE 256
 
-#define IOKERNEL_MTU 1500
-
 #define MLX5_RX_RING_SIZE 2048
 #define MLX5_TX_RING_SIZE 2048
 
@@ -68,7 +66,7 @@ bool rss_conf_present;
 
 static const struct rte_eth_conf port_conf_default = {
 	.rxmode = {
-		.mtu = IOKERNEL_MTU,
+		.mtu = IOKERNEL_MAX_MTU,
 		.offloads = RTE_ETH_RX_OFFLOAD_IPV4_CKSUM,
 		.mq_mode = RTE_ETH_MQ_RX_RSS | RTE_ETH_MQ_RX_RSS_FLAG,
 	},

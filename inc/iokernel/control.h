@@ -18,7 +18,7 @@
  * struct control_hdr, please increment the version number!
  */
 
-#define CONTROL_HDR_VERSION 13
+#define CONTROL_HDR_VERSION 14
 
 /* The abstract namespace path for the control socket. */
 #define CONTROL_SOCK_PATH	"/run/iokernel.sock"

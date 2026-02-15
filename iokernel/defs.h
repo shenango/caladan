@@ -76,6 +76,9 @@ extern bool is_azure;
 #define IOKERNEL_DMA_BURST_SIZE		64
 #define IOKERNEL_CONTROL_BURST_SIZE	4
 #define IOKERNEL_POLL_INTERVAL		10
+#define IOKERNEL_MAX_MTU		ETH_MAX_MTU
+#define IOKERNEL_MAX_RX_LEN		ETH_MAX_LEN_JUMBO
+
 
 /* Ensure that uint16_t can be used to index procs/cores */
 BUILD_ASSERT(NCPU < UINT16_MAX);
@@ -508,7 +511,8 @@ extern pthread_barrier_t init_barrier;
 extern int pin_thread(pid_t tid, int core);
 
 /* Constants are validated in rx.c */
-#define RX_ELT_SIZE	2496
+// align_up(64 obj hdr + 128 mbuf + 24 priv + 128 headroom + 9018 len, 64)
+#define RX_ELT_SIZE	9408
 #define RX_ELT_PER_PAGE	(PGSIZE_2MB / RX_ELT_SIZE)
 #define RX_OBJ_HDR_SZ	64
 

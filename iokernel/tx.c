@@ -62,34 +62,24 @@ static void tx_prepare_tx_mbuf(struct rte_mbuf *buf, struct pkt *pkt)
 	buf->pkt_len = pkt->cmd.len;
 	buf->data_len = pkt->cmd.len;
 
-	buf->ol_flags = 0;
-	if (pkt->cmd.olflags != 0 && !cfg.tx_offloads_disabled) {
-		if (pkt->cmd.olflags & OLFLAG_IP_CHKSUM)
-			buf->ol_flags |= RTE_MBUF_F_TX_IP_CKSUM;
-		if (pkt->cmd.olflags & OLFLAG_TCP_CHKSUM)
-			buf->ol_flags |= RTE_MBUF_F_TX_TCP_CKSUM;
-		if (pkt->cmd.olflags & OLFLAG_IPV4)
-			buf->ol_flags |= RTE_MBUF_F_TX_IPV4;
-		if (pkt->cmd.olflags & OLFLAG_IPV6)
-			buf->ol_flags |= RTE_MBUF_F_TX_IPV6;
-
-		buf->l4_len = sizeof(struct rte_tcp_hdr);
-		buf->l3_len = sizeof(struct rte_ipv4_hdr);
-		buf->l2_len = RTE_ETHER_HDR_LEN;
-	}
+	/* set offloads flags without branches */
+	uint64_t f = pkt->cmd.olflags * cfg.tx_offloads_disabled;
+	buf->ol_flags |= ((f & OLFLAG_IP_CHKSUM)  != 0) * RTE_MBUF_F_TX_IP_CKSUM;
+	buf->ol_flags |= ((f & OLFLAG_TCP_CHKSUM) != 0) * RTE_MBUF_F_TX_TCP_CKSUM;
+	buf->ol_flags |= ((f & OLFLAG_IPV4)       != 0) * RTE_MBUF_F_TX_IPV4;
+	buf->l4_len = sizeof(struct rte_tcp_hdr);
+	buf->l3_len = sizeof(struct rte_ipv4_hdr);
+	buf->l2_len = RTE_ETHER_HDR_LEN;
 
 	/* initialize the private data, used to send completion events */
 	priv_data = rte_mbuf_to_priv(buf);
 	priv_data->p = p;
 	priv_data->th = pkt->th;
 	priv_data->completion_data = pkt->compl;
-	priv_data->dst_ip = 0;
 
-	if (pkt->cmd.olflags & TXFLAG_LOCAL_HINT) {
-		buf->hash.rss = pkt->hash;
-		buf->ol_flags |= RTE_MBUF_F_RX_RSS_HASH;
-		priv_data->dst_ip = pkt->cmd.dst_ip;
-	}
+	buf->ol_flags |= ((pkt->cmd.olflags & TXFLAG_LOCAL_HINT) != 0) * RTE_MBUF_F_RX_RSS_HASH;
+	buf->hash.rss = pkt->hash;
+	priv_data->dst_ip = pkt->cmd.dst_ip;
 
 #ifdef MLX
 	/* initialize private data used by Mellanox driver to register memory */
