@@ -149,6 +149,7 @@ static void copy_batch_dma(struct rte_mbuf **src, struct rte_mbuf **dst, int n,
 	for (i = 0; i < n; i++) {
 		bytes = rte_pktmbuf_pkt_len(src[i]);
 		buf = rte_pktmbuf_append(dst[i], bytes);
+		assert(buf);
 		dst[i]->ol_flags = src[i]->ol_flags;
 		dst[i]->ol_flags |= RTE_MBUF_F_RX_IP_CKSUM_GOOD;
 		dst[i]->hash = src[i]->hash;

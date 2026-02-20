@@ -410,17 +410,6 @@ struct tx_pktmbuf_priv {
 	uint32_t	dst_ip;
 };
 
-/*
- * Logical cores assigned to linux and the control and dataplane threads
- */
-struct core_assignments {
-	uint8_t linux_core;
-	uint8_t ctrl_core;
-	uint8_t dp_core;
-};
-
-extern struct core_assignments core_assign;
-
 
 /*
  * Stats collected in the iokernel
