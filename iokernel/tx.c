@@ -62,8 +62,9 @@ static void tx_prepare_tx_mbuf(struct rte_mbuf *buf, struct pkt *pkt)
 	buf->pkt_len = pkt->cmd.len;
 	buf->data_len = pkt->cmd.len;
 
-	/* set offloads flags without branches */
-	uint64_t f = pkt->cmd.olflags * cfg.tx_offloads_disabled;
+	/* set offloads flags */
+	buf->ol_flags = 0;
+	uint64_t f = pkt->cmd.olflags * !cfg.tx_offloads_disabled;
 	buf->ol_flags |= ((f & OLFLAG_IP_CHKSUM)  != 0) * RTE_MBUF_F_TX_IP_CKSUM;
 	buf->ol_flags |= ((f & OLFLAG_TCP_CHKSUM) != 0) * RTE_MBUF_F_TX_TCP_CKSUM;
 	buf->ol_flags |= ((f & OLFLAG_IPV4)       != 0) * RTE_MBUF_F_TX_IPV4;
