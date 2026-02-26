@@ -1,13 +1,11 @@
 #[inline]
 pub fn cpu_relax() {
-    unsafe { core::arch::x86_64::_mm_pause() }
+    core::arch::x86_64::_mm_pause()
 }
 
 #[inline]
 pub fn cpu_serialize() {
-    unsafe {
-        core::arch::x86_64::__cpuid(0);
-    }
+    core::arch::x86_64::__cpuid(0);
 }
 
 #[inline]
