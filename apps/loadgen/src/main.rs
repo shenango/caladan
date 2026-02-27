@@ -19,6 +19,7 @@ use std::io::{Error, ErrorKind, Read, Write};
 use std::net::{Ipv4Addr, SocketAddrV4};
 use std::str::FromStr;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::mpsc::Sender;
 use std::sync::Arc;
 use std::sync::Once;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -642,11 +643,22 @@ fn process_result_final(
 
     let schedule_adherance = 100.0 * sent_count as f64 / (sent_count + sched_miss_count) as f64;
 
+    let elapsed = last_send - first_send;
+    let elapsed_micros = elapsed.as_micros();
+    let (sent_rps, resp_rps) = if elapsed_micros == 0 {
+        (0u64, 0u64)
+    } else {
+        (
+            (sent_count as u64 * 1_000_000) / elapsed_micros as u64,
+            (response_count as u64 * 1_000_000) / elapsed_micros as u64,
+        )
+    };
+
     println!(
         "{}, {}, {}, {}, {:.2}, {:.1}, {:.1}, {:.1}, {:.1}, {:.1}, {:.1}, {:.1}, {}, {}{}",
         sched.service.name(),
-        sent_count as u64 / (last_send - first_send).as_secs(),
-        response_count as u64 / (last_send - first_send).as_secs(),
+        sent_rps,
+        resp_rps,
         drop_count + full_stream_count,
         schedule_adherance,
         percentile(0.0),
@@ -900,12 +912,27 @@ fn run_client_worker(
     index: usize,
     live_mode_socket: Option<Arc<Connection>>,
     stat_conn: StatConn,
+    startup_status: Option<Sender<io::Result<()>>>,
 ) -> io::Result<Vec<Option<ScheduleResult>>> {
     let mut payload = Vec::with_capacity(KBUFSIZE);
     let (mut packets, sched_boundaries) = gen_packets_for_schedule(&schedules);
     let src_addr = SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), (100 + index) as u16);
     let live_mode = live_mode_socket.is_some();
-    let socket = live_mode_socket.unwrap_or(tport.dial(backend, Some(src_addr), addr)?);
+    let socket = match live_mode_socket {
+        Some(socket) => socket,
+        None => match tport.dial(backend, Some(src_addr), addr) {
+            Ok(socket) => socket,
+            Err(e) => {
+                if let Some(tx) = startup_status {
+                    let _ = tx.send(Err(io::Error::new(e.kind(), e.to_string())));
+                }
+                return Err(e);
+            }
+        },
+    };
+    if let Some(tx) = startup_status {
+        let _ = tx.send(Ok(()));
+    }
 
     let packets_per_thread = packets.len();
     let socket2 = socket.clone();
@@ -1093,6 +1120,7 @@ fn run_live_client(config: AppConfig, barrier_group: &mut lockstep::Group) {
                         client_idx,
                         Some(sock.clone()),
                         StatConn::None,
+                        None,
                     )
                 })
             })
@@ -1291,7 +1319,7 @@ fn run_sample(
 
     let schedules = Arc::new(schedules);
     let wg = FanInOutWaitGroup::new(3 * nthreads);
-
+    let (startup_tx, startup_rx) = std::sync::mpsc::channel::<io::Result<()>>();
     // Dial stat connection.
     let (stat_conn, stat_thread) = if do_runtime_stat {
         let stat_addr = SocketAddrV4::new(*addrs[0].ip(), RUNTIME_STAT_PORT);
@@ -1316,14 +1344,34 @@ fn run_sample(
                 0 => stat_conn.clone(),
                 _ => StatConn::None,
             };
+            let startup_tx = startup_tx.clone();
 
             backend.spawn_thread(move || {
                 run_client_worker(
-                    proto, backend, addr, tport, wg, schedules, client_idx, None, stat_conn,
+                    proto,
+                    backend,
+                    addr,
+                    tport,
+                    wg,
+                    schedules,
+                    client_idx,
+                    None,
+                    stat_conn,
+                    Some(startup_tx),
                 )
             })
         })
         .collect();
+    drop(startup_tx);
+
+    for _ in 0..nthreads {
+        if let Err(e) = startup_rx
+            .recv()
+            .expect("worker startup channel unexpectedly closed")
+        {
+            panic!("loadgen worker failed during startup: {}", e);
+        }
+    }
 
     backend.sleep(Duration::from_secs(CLIENT_WAIT_SECONDS));
     wg.leader_catch_all().leader_rearm(nthreads);
