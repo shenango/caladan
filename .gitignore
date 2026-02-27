@@ -7,3 +7,5 @@ iokerneld
 .cproject
 .project
 ._*
+.cargo-local
+.rustup-local
