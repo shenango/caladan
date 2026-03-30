@@ -1405,6 +1405,8 @@ ssize_t tcp_writev2(tcpconn_t *c, const struct iovec *iov, int iovcnt,
 	for (i = 0; i < iovcnt; i++, iov++) {
 		if (winlen <= 0)
 			break;
+		if (!iov->iov_len)
+			continue;
 		ret = tcp_tx_send(c, iov->iov_base, MIN(iov->iov_len, winlen),
 		                  i == iovcnt - 1 && iov->iov_len <= winlen);
 		if (ret <= 0)
