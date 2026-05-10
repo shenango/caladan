@@ -397,7 +397,7 @@ static inline struct kthread *myk(void)
 /**
  * myk_stable - returns the per-kernel-thread data, may used a cached value
  */
-static inline struct kthread *myk_stable(void)
+static __always_inline __nofp struct kthread *myk_stable(void)
 {
 	return &ks[perthread_read_stable(thread_id)];
 }
