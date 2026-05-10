@@ -35,7 +35,7 @@ endif
 RUNTIME_DEPS = $(ROOT_PATH)/libruntime.a $(ROOT_PATH)/libnet.a \
 	       $(ROOT_PATH)/libbase.a
 RUNTIME_LIBS = $(ROOT_PATH)/libruntime.a $(ROOT_PATH)/libnet.a \
-	       $(ROOT_PATH)/libbase.a -lpthread -lnuma
+	       $(ROOT_PATH)/libbase.a -lpthread -l:libnuma.a
 
 # PKG_CONFIG_PATH
 PKG_CONFIG_PATH := $(ROOT_PATH)/rdma-core/build/lib/pkgconfig:$(PKG_CONFIG_PATH)
@@ -46,9 +46,7 @@ PKG_CONFIG_PATH := $(ROOT_PATH)/spdk/build/lib/pkgconfig:$(PKG_CONFIG_PATH)
 MLX5_INC = -I$(ROOT_PATH)/rdma-core/build/include
 MLX5_LIBS = -L$(ROOT_PATH)/rdma-core/build/lib/
 MLX5_LIBS += -L$(ROOT_PATH)/rdma-core/build/lib/statics/
-MLX5_LIBS += -L$(ROOT_PATH)/rdma-core/build/util/
-MLX5_LIBS += -L$(ROOT_PATH)/rdma-core/build/ccan/
-MLX5_LIBS += -l:libmlx5.a -l:libibverbs.a -lnl-3 -lnl-route-3 -lrdma_util -lccan
+MLX5_LIBS += -l:libmlx5.a -l:libibverbs.a
 
 # parse configuration options
 ifeq ($(CONFIG_DEBUG),y)

@@ -82,6 +82,7 @@ fn linker_arguments(root_dir: &Path) -> anyhow::Result<()> {
     for searchd in search_paths {
         println!("cargo::rustc-link-search={}", searchd.to_str().unwrap());
     }
+    println!("cargo::rustc-link-search=/usr/lib/x86_64-linux-gnu/");
     for static_lib in static_libs {
         println!("cargo::rustc-link-lib=static={}", static_lib);
     }
