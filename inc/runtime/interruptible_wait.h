@@ -24,7 +24,10 @@ static inline bool prepare_interruptible(thread_t *th)
 // Can only be called once, must be synchronized with signal lock.
 static inline bool deliver_interrupt(thread_t *th)
 {
-	if (atomic8_fetch_and_add_relaxed(&th->interrupt_state, 1) > 0) {
+	uint8_t prev = atomic8_fetch_and_add_relaxed(&th->interrupt_state, 1);
+
+	/* Only wake threads that called prepare_interruptible(). */
+	if (prev & PREPARED_FLAG) {
 		thread_ready(th);
 		return true;
 	}

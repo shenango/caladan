@@ -742,7 +742,6 @@ void thread_finish_yield(void)
 	/* check for softirqs */
 	softirq_run_locked(k);
 
-	curth->thread_ready = false;
 	curth->last_cpu = k->curr_cpu;
 	thread_ready_locked(curth);
 
