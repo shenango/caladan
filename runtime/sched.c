@@ -624,7 +624,7 @@ void thread_ready_locked(thread_t *th)
 void thread_ready_head_locked(thread_t *th)
 {
 	struct kthread *k = myk();
-	thread_t *oldestth;
+	thread_t *newestth;
 
 	assert_preempt_disabled();
 	assert_spin_lock_held(&k->lock);
@@ -633,10 +633,10 @@ void thread_ready_head_locked(thread_t *th)
 
 	if (k->rq_head != k->rq_tail)
 		th->ready_tsc = k->rq[k->rq_tail % RUNTIME_RQ_SIZE]->ready_tsc;
-	oldestth = k->rq[--k->rq_tail % RUNTIME_RQ_SIZE];
-	k->rq[k->rq_tail % RUNTIME_RQ_SIZE] = th;
+	newestth = k->rq[(k->rq_head - 1) % RUNTIME_RQ_SIZE];
+	k->rq[--k->rq_tail % RUNTIME_RQ_SIZE] = th;
 	if (unlikely(k->rq_head - k->rq_tail > RUNTIME_RQ_SIZE)) {
-		list_add(&k->rq_overflow, &oldestth->link);
+		list_add(&k->rq_overflow, &newestth->link);
 		k->rq_head--;
 		STAT(RQ_OVERFLOW)++;
 	}
