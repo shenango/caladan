@@ -274,10 +274,20 @@ static int directpath_setup_port(void)
 
 static void qp_fill_iokspec(struct thread *th, struct qp *qp)
 {
-	struct hwq *h = &th->directpath_hwq;
+	int i;
 
-	h->hwq_type = HWQ_INVALID;
-	h->enabled = false;
+	/* vfio directpath queues are polled via the directpath ctx, not a
+	 * runtime-registered cq spec; defensively disable any such spec */
+	for (i = 0; i < NR_CQS; i++) {
+		struct cq_mon *m = &th->cqs[i];
+
+		if (m->ring && (m->hwq_type == HWQ_MLX5 ||
+				m->hwq_type == HWQ_MLX5_QSTEER)) {
+			m->ring = NULL;
+			th->cq_enabled_mask &= ~BIT(i);
+			th->cq_exo_mask &= ~BIT(i);
+		}
+	}
 }
 
 static unsigned int ctx_max_doorbells(struct directpath_ctx *dp)

@@ -90,19 +90,7 @@ BUILD_ASSERT(IOKERNEL_MAX_PROC < UINT16_MAX);
 
 struct proc;
 
-struct hwq {
-	bool			enabled;
-	void			*descriptor_table;
-	uint32_t		*consumer_idx;
-	uint32_t		descriptor_log_size;
-	uint32_t		nr_descriptors;
-	uint32_t		parity_byte_offset;
-	uint32_t		parity_bit_mask;
-	uint32_t		hwq_type;
-	uint32_t		last_tail;
-	uint32_t		last_head;
-	uint64_t		busy_since;
-};
+#include "cq_mon.h"
 
 
 struct thread_metrics {
@@ -127,6 +115,14 @@ struct thread {
 
 	uint64_t		rxq_busy_since;
 
+	/* bit i set if cqs[i] is registered */
+	uint8_t			cq_enabled_mask;
+	/* bit i set if cqs[i] has exogenous arrivals (network RX) and must
+	 * be inspected even with nothing outstanding */
+	uint8_t			cq_exo_mask;
+	/* last poll saw in-flight cq requests; don't unpoll this kthread */
+	bool			cq_attention;
+
 	struct lrpc_chan_out	rxq;
 
 	/* useful metrics for scheduling policies */
@@ -144,9 +140,8 @@ struct thread {
 	uint16_t		at_idx;
 	uint16_t		ts_idx;
 
-	/* legacy directpath queues */
-	struct hwq		directpath_hwq;
-	struct hwq		storage_hwq;
+	/* monitored device completion queues, one per registered cq_spec */
+	struct cq_mon		cqs[NR_CQS];
 };
 
 BUILD_ASSERT(offsetof(struct thread, rxq.send_tail) <= CACHE_LINE_SIZE);
@@ -169,19 +164,6 @@ static inline void thread_disable_sched_poll(struct thread *th)
 static inline bool thread_sched_should_poll(struct thread *th, uint64_t now)
 {
 	return th->next_poll_tsc <= now;
-}
-
-static inline bool hwq_busy(struct hwq *h, uint32_t cq_idx)
-{
-	uint32_t idx, parity, hd_parity;
-	unsigned char *addr;
-
-	idx = cq_idx & (h->nr_descriptors - 1);
-	parity = !!(cq_idx & h->nr_descriptors);
-	addr = h->descriptor_table + (idx << h->descriptor_log_size) + h->parity_byte_offset;
-	hd_parity = !!(ACCESS_ONCE(*addr) & h->parity_bit_mask);
-
-	return parity == hd_parity;
 }
 
 struct proc {

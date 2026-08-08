@@ -138,7 +138,8 @@ int storage_write(const void *payload, uint64_t lba, uint32_t lba_count)
 		goto done_np;
 	}
 
-	q->outstanding_reqs++;
+	if (q->outstanding_reqs++ == 0)
+		ACCESS_ONCE(*q->cq_outstanding) = 1;
 	thread_park_and_unlock_np(&q->lock);
 
 	preempt_disable();
@@ -200,7 +201,8 @@ int storage_read(void *dest, uint64_t lba, uint32_t lba_count)
 		goto done_np;
 	}
 
-	q->outstanding_reqs++;
+	if (q->outstanding_reqs++ == 0)
+		ACCESS_ONCE(*q->cq_outstanding) = 1;
 	thread_park_and_unlock_np(&q->lock);
 	memcpy(dest, spdk_payload, req_size);
 	preempt_disable();
@@ -223,6 +225,8 @@ static int storage_softirq_one(struct storage_q *q)
 
 	ret = spdk_nvme_qpair_process_completions(q->spdk_qp_handle, RUNTIME_RX_BATCH_SIZE);
 	q->outstanding_reqs -= ret;
+	if (!q->outstanding_reqs)
+		ACCESS_ONCE(*q->cq_outstanding) = 0;
 	return ret;
 }
 
@@ -253,11 +257,12 @@ void storage_softirq(void *arg)
 int storage_init_thread(void)
 {
 	struct kthread *k = myk();
-	struct hardware_queue_spec *hs = &iok.threads[kthread_idx(k)].storage_hwq;
+	struct cq_spec *cs;
 	struct storage_q *q = &k->storage_q;
 	thread_t *th;
 
 	uint32_t max_xfer_size, entries, depth, *consumer_idx;
+	unsigned int cq_slot;
 	shmptr_t cq_shm;
 	struct spdk_nvme_cpl *cpl;
 	struct spdk_nvme_io_qpair_opts opts;
@@ -265,6 +270,10 @@ int storage_init_thread(void)
 
 	if (!cfg_storage_enabled)
 		return 0;
+
+	cs = iok_cq_alloc_spec(k, &cq_slot);
+	if (!cs)
+		return -ENOMEM;
 
 	th = thread_create(storage_softirq, k);
 	if (!th)
@@ -302,7 +311,8 @@ int storage_init_thread(void)
 		return -1;
 	}
 
-	nvme_setup_shenango(qp_handle, &consumer_idx,  &k->q_ptrs->storage_tail);
+	nvme_setup_shenango(qp_handle, &consumer_idx,
+			    &k->q_ptrs->cq_tails[cq_slot]);
 
 	/* intialize struct storage_q */
 	spin_lock_init(&q->lock);
@@ -310,22 +320,22 @@ int storage_init_thread(void)
 	q->spdk_qp_handle = qp_handle;
 	q->hq.descriptor_table = cpl;
 	q->hq.consumer_idx = consumer_idx;
-	q->hq.shadow_tail = &k->q_ptrs->storage_tail;
+	q->hq.shadow_tail = &k->q_ptrs->cq_tails[cq_slot];
 	q->hq.descriptor_log_size = __builtin_ctz(sizeof(*cpl));
 	BUILD_ASSERT(is_power_of_two(sizeof(*cpl)));
 	q->hq.nr_descriptors = opts.io_queue_size;
 	q->hq.parity_byte_offset = offsetof(struct spdk_nvme_cpl, status);
 	q->hq.parity_bit_mask = 0x1;
+	q->cq_outstanding = &k->q_ptrs->cq_outstanding[cq_slot];
 
 	/* inform iokernel of queue info */
-	hs->descriptor_table = cq_shm;
-	hs->consumer_idx = ptr_to_shmptr(
-		&netcfg.tx_region, &k->q_ptrs->storage_tail, sizeof(uint32_t));
-	hs->descriptor_log_size = q->hq.descriptor_log_size;
-	hs->nr_descriptors = q->hq.nr_descriptors;
-	hs->parity_byte_offset = q->hq.parity_byte_offset;
-	hs->parity_bit_mask = q->hq.parity_bit_mask;
-	hs->hwq_type = HWQ_SPDK_NVME;
+	cs->descriptor_table = cq_shm;
+	cs->descriptor_log_size = q->hq.descriptor_log_size;
+	cs->nr_descriptors = q->hq.nr_descriptors;
+	cs->done_byte_offset = q->hq.parity_byte_offset;
+	cs->done_bit_mask = q->hq.parity_bit_mask;
+	cs->done_mode = CQ_DONE_PARITY;
+	cs->hwq_type = HWQ_SPDK_NVME;
 
 	tcache_init_perthread(storage_buf_tcache,
 			      perthread_ptr(storage_buf_pt));

@@ -134,36 +134,45 @@ err:
 	return ret;
 }
 
-static int control_init_hwq(struct shm_region *r,
-	  struct hardware_queue_spec *hs, struct hwq *h)
+static int control_init_cq(struct shm_region *r, struct cq_spec *cs,
+	  struct cq_mon *m)
 {
-	if (hs->hwq_type == HWQ_INVALID) {
-		h->enabled = false;
-		h->busy_since = UINT64_MAX;
+	if (cs->done_mode == CQ_DONE_INVALID || cs->hwq_type == HWQ_INVALID) {
+		m->ring = NULL;
+		m->busy_since = UINT64_MAX;
 		return 0;
 	}
 
-	h->descriptor_table = shmptr_to_ptr(r, hs->descriptor_table, (1 << hs->descriptor_log_size) * hs->nr_descriptors);
-	h->consumer_idx = shmptr_to_ptr(r, hs->consumer_idx, sizeof(*h->consumer_idx));
-	h->descriptor_log_size = hs->descriptor_log_size;
-	h->nr_descriptors = hs->nr_descriptors;
-	h->parity_byte_offset = hs->parity_byte_offset;
-	h->parity_bit_mask = hs->parity_bit_mask;
-	h->hwq_type = hs->hwq_type;
-	h->enabled = true;
-
-	if (!h->descriptor_table || !h->consumer_idx)
+	if (cs->done_mode != CQ_DONE_PARITY && cs->done_mode != CQ_DONE_NONZERO)
 		return -EINVAL;
 
-	if (!is_power_of_two(h->nr_descriptors))
+	if (cs->hwq_type >= NR_HWQ)
 		return -EINVAL;
 
-	if (h->parity_byte_offset > (1 << h->descriptor_log_size))
+	if (!is_power_of_two(cs->nr_descriptors))
 		return -EINVAL;
 
-	h->busy_since = UINT64_MAX;
-	h->last_head = 0;
-	h->last_tail = 0;
+	/* largest supported completion-ring slot is 4KB */
+	if (cs->descriptor_log_size > 12)
+		return -EINVAL;
+
+	if (cs->done_byte_offset >= (1u << cs->descriptor_log_size))
+		return -EINVAL;
+
+	m->ring = shmptr_to_ptr(r, cs->descriptor_table,
+		(size_t)cs->nr_descriptors << cs->descriptor_log_size);
+	if (!m->ring)
+		return -EINVAL;
+
+	m->nr_descriptors = cs->nr_descriptors;
+	m->done_byte_offset = cs->done_byte_offset;
+	m->done_bit_mask = cs->done_bit_mask;
+	m->done_mode = cs->done_mode;
+	m->log_slot_size = cs->descriptor_log_size;
+	m->hwq_type = cs->hwq_type;
+	m->busy_since = UINT64_MAX;
+	m->last_head = 0;
+	m->last_tail = 0;
 
 	return 0;
 }
@@ -302,16 +311,28 @@ static struct proc *control_create_proc(int mem_fd, size_t len,
 		if (!th->q_ptrs)
 			goto fail;
 
-		ret = control_init_hwq(&reg, &s->direct_rxq, &th->directpath_hwq);
-		if (ret)
-			goto fail;
+		for (int j = 0; j < NR_CQS; j++) {
+			struct cq_mon *m = &th->cqs[j];
 
-		ret = control_init_hwq(&reg, &s->storage_hwq, &th->storage_hwq);
-		if (ret)
-			goto fail;
+			ret = control_init_cq(&reg, &s->cqs[j], m);
+			if (ret)
+				goto fail;
 
-		p->has_directpath |= th->directpath_hwq.enabled;
-		p->has_storage |= th->storage_hwq.enabled;
+			if (!m->ring)
+				continue;
+
+			th->cq_enabled_mask |= BIT(j);
+
+			if (m->hwq_type == HWQ_MLX5 ||
+			    m->hwq_type == HWQ_MLX5_QSTEER) {
+				/* network RX arrivals are exogenous: always
+				 * inspect, never gate on cq_outstanding */
+				th->cq_exo_mask |= BIT(j);
+				p->has_directpath = true;
+			} else if (m->hwq_type == HWQ_SPDK_NVME) {
+				p->has_storage = true;
+			}
+		}
 	}
 
 	if (cfg.azure_arp_mode && !p->has_directpath) {

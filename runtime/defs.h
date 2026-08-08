@@ -206,6 +206,9 @@ struct iokernel_control {
 extern struct iokernel_control iok;
 extern void *iok_shm_alloc(size_t size, size_t alignment, shmptr_t *shm_out);
 extern struct runtime_info *runtime_info;
+struct kthread;
+extern struct cq_spec *iok_cq_alloc_spec(struct kthread *k,
+					 unsigned int *slot_out);
 
 /*
  * Direct hardware queue support
@@ -260,7 +263,8 @@ struct storage_q {
 
 	struct hardware_q hq;
 
-	unsigned long pad[1];
+	/* mirrors (outstanding_reqs != 0) into q_ptrs->cq_outstanding */
+	uint8_t *cq_outstanding;
 };
 
 #else

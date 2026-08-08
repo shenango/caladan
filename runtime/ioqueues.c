@@ -53,6 +53,32 @@ static size_t calculate_egress_pool_size(void)
 }
 
 struct iokernel_control iok;
+
+/**
+ * iok_cq_alloc_spec - reserve a completion-queue monitoring slot for a
+ * subsystem on kthread @k, storing the slot index in @slot_out
+ *
+ * The caller fills the spec, publishes the queue's consumer tail in
+ * k->q_ptrs->cq_tails[slot], and maintains its in-flight byte in
+ * k->q_ptrs->cq_outstanding[slot].
+ *
+ * Returns NULL if all NR_CQS slots are taken.
+ */
+struct cq_spec *iok_cq_alloc_spec(struct kthread *k, unsigned int *slot_out)
+{
+	struct thread_spec *ts = &iok.threads[kthread_idx(k)];
+	unsigned int i;
+
+	for (i = 0; i < NR_CQS; i++) {
+		if (ts->cqs[i].done_mode == CQ_DONE_INVALID) {
+			*slot_out = i;
+			return &ts->cqs[i];
+		}
+	}
+
+	log_err("ioqueues: out of completion-queue spec slots");
+	return NULL;
+}
 bool cfg_prio_is_lc;
 unsigned int cfg_request_hardware_queues = DIRECTPATH_REQUEST_NONE;
 uint64_t cfg_ht_punish_us;

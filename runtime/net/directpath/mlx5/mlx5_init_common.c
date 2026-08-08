@@ -117,10 +117,20 @@ int mlx5_init_thread(void)
 {
 	int ret;
 	struct kthread *k = myk();
-	struct hardware_queue_spec *hs;
+	struct cq_spec *cs = NULL;
+	unsigned int cq_slot = 0;
 	struct mlx5_rxq *v = &rxqs[kthread_idx(k)];
 
-	v->shadow_tail = &k->q_ptrs->directpath_rx_tail;
+	if (netcfg.directpath_mode == DIRECTPATH_MODE_EXTERNAL) {
+		/* the iokernel polls vfio directpath queues via its own
+		 * directpath context, using this tail for stride accounting */
+		v->shadow_tail = &k->q_ptrs->directpath_rx_tail;
+	} else {
+		cs = iok_cq_alloc_spec(k, &cq_slot);
+		if (!cs)
+			return -ENOMEM;
+		v->shadow_tail = &k->q_ptrs->cq_tails[cq_slot];
+	}
 
 	if (cfg_directpath_strided)
 		v->poll_th = thread_create(mlx5_softirq_strided, v);
@@ -136,17 +146,15 @@ int mlx5_init_thread(void)
 	if (netcfg.directpath_mode == DIRECTPATH_MODE_EXTERNAL)
 		return 0;
 
-	hs = &iok.threads[kthread_idx(k)].direct_rxq;
-	hs->descriptor_log_size = __builtin_ctz(sizeof(struct mlx5_cqe64));
-	hs->nr_descriptors = v->cq.cnt;
-	hs->descriptor_table = ptr_to_shmptr(&netcfg.tx_region,
-		v->cq.cqes, (1 << hs->descriptor_log_size) * hs->nr_descriptors);
-	hs->parity_byte_offset = offsetof(struct mlx5_cqe64, op_own);
-	hs->parity_bit_mask = MLX5_CQE_OWNER_MASK;
-	hs->hwq_type = netcfg.directpath_mode == DIRECTPATH_MODE_QUEUE_STEERING ?
+	cs->descriptor_log_size = __builtin_ctz(sizeof(struct mlx5_cqe64));
+	cs->nr_descriptors = v->cq.cnt;
+	cs->descriptor_table = ptr_to_shmptr(&netcfg.tx_region,
+		v->cq.cqes, (1 << cs->descriptor_log_size) * cs->nr_descriptors);
+	cs->done_byte_offset = offsetof(struct mlx5_cqe64, op_own);
+	cs->done_bit_mask = MLX5_CQE_OWNER_MASK;
+	cs->done_mode = CQ_DONE_PARITY;
+	cs->hwq_type = netcfg.directpath_mode == DIRECTPATH_MODE_QUEUE_STEERING ?
 		HWQ_MLX5_QSTEER : HWQ_MLX5;
-	hs->consumer_idx = ptr_to_shmptr(&netcfg.tx_region, v->shadow_tail,
-	                                 sizeof(uint32_t));
 
 	return 0;
 }

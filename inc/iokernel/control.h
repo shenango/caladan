@@ -18,26 +18,49 @@
  * struct control_hdr, please increment the version number!
  */
 
-#define CONTROL_HDR_VERSION 14
+#define CONTROL_HDR_VERSION 15
 
 /* The abstract namespace path for the control socket. */
 #define CONTROL_SOCK_PATH	"/run/iokernel.sock"
 
+/* max device completion queues the iokernel monitors per kthread */
+#define NR_CQS 8
+
 /* describes a queue */
 struct q_ptrs {
+	/* first cache line: work indicators the iokernel reads on every
+	 * poll of this kthread */
 	uint32_t		rxq_wb; /* must be first */
 	uint32_t		rq_head;
 	uint32_t		rq_tail;
 	uint32_t		directpath_rx_tail;
 	uint64_t		next_timer_tsc;
-	uint32_t		storage_tail;
-	uint32_t		pad1;
+	/* cq_outstanding[i] is 1 while completion queue i (see
+	 * thread_spec::cqs) has requests in flight, and 0 otherwise. One
+	 * byte per queue so writers need no atomics; the union allows one
+	 * combined load. Strictly 0 or 1, never a count: cq_due_mask()
+	 * gathers bit 0 of each byte, so any other value reads as not-due
+	 * for that queue. */
+	union {
+		uint8_t		cq_outstanding[NR_CQS];
+		uint64_t	cq_outstanding_word;
+	};
 	uint64_t		oldest_tsc;
 	uint64_t		rcu_gen;
 	uint64_t		run_start_tsc;
 	uint64_t		directpath_strides_consumed;
 
-	/* second cache line contains information written by the scheduler */
+	/* second cache line: consumer tails for the monitored completion
+	 * queues (indexed by thread_spec::cqs slot), kept off the
+	 * scheduler-written line below to avoid bouncing it; the union lets
+	 * the iokernel snapshot all tails with a few wide loads */
+	union {
+		uint32_t	cq_tails[NR_CQS];
+		uint64_t	cq_tails_words[NR_CQS / 2];
+	};
+	uint8_t			pad2[64 - sizeof(uint32_t) * NR_CQS];
+
+	/* third cache line contains information written by the scheduler */
 	uint64_t		curr_grant_gen;
 	uint64_t		cede_gen;
 	uint64_t		yield_rcu_gen;
@@ -45,8 +68,10 @@ struct q_ptrs {
 	uint64_t		pad3[4];
 };
 
-BUILD_ASSERT(sizeof(struct q_ptrs) == 2 * CACHE_LINE_SIZE);
+BUILD_ASSERT(sizeof(struct q_ptrs) == 3 * CACHE_LINE_SIZE);
+BUILD_ASSERT(offsetof(struct q_ptrs, cq_tails) % CACHE_LINE_SIZE == 0);
 BUILD_ASSERT(offsetof(struct q_ptrs, curr_grant_gen) % CACHE_LINE_SIZE == 0);
+BUILD_ASSERT(offsetof(struct q_ptrs, cq_outstanding) % sizeof(uint64_t) == 0);
 
 struct congestion_info {
 	float			load;
@@ -64,17 +89,29 @@ enum {
 	HWQ_MLX5,
 	HWQ_MLX5_QSTEER,
 	HWQ_SPDK_NVME,
+	HWQ_GENERIC_CQ,	/* request/response ring with no special handling */
 	NR_HWQ,
 };
 
-struct hardware_queue_spec {
+/* how the iokernel decides whether the completion-ring slot at the consumer
+ * tail has been written by the device but not yet consumed by the runtime */
+enum {
+	CQ_DONE_INVALID = 0,	/* spec slot unused */
+	CQ_DONE_PARITY,		/* done bit's phase flips on each ring wrap */
+	CQ_DONE_NONZERO,	/* done bits nonzero until cleared for reuse */
+};
+
+/* describes a device completion queue monitored by the iokernel; its tail
+ * and in-flight byte are published in q_ptrs at the index of this spec in
+ * thread_spec::cqs */
+struct cq_spec {
 	shmptr_t		descriptor_table;
-	shmptr_t		consumer_idx;
 	uint32_t		descriptor_log_size;
 	uint32_t		nr_descriptors;
-	uint32_t		parity_byte_offset;
-	uint32_t		parity_bit_mask;
-	uint32_t		hwq_type;
+	uint32_t		done_byte_offset; /* byte in slot w/ done bits */
+	uint8_t			done_bit_mask;
+	uint8_t			done_mode;	  /* CQ_DONE_* */
+	uint8_t			hwq_type;	  /* HWQ_* */
 };
 
 /* describes a runtime kernel thread */
@@ -86,8 +123,7 @@ struct thread_spec {
 	pid_t			tid;
 	int32_t			park_efd;
 
-	struct hardware_queue_spec	direct_rxq;
-	struct hardware_queue_spec	storage_hwq;
+	struct cq_spec		cqs[NR_CQS];
 };
 
 enum {
