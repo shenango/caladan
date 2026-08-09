@@ -457,8 +457,13 @@ int mlx5_verbs_init_context(bool uses_qsteering)
 	struct mlx5dv_context query_attrs = {0};
 	struct mlx5dv_striding_rq_caps *caps;
 	struct pci_addr pci_addr;
+	static const struct pci_addr no_pci_addr;
+	bool have_pci_addr;
 
 	BUG_ON(setenv("MLX5_SINGLE_THREADED", "1", 1));
+
+	have_pci_addr = memcmp(&nic_pci_addr, &no_pci_addr,
+			       sizeof(nic_pci_addr)) != 0;
 
 	dev_list = ibv_get_device_list(NULL);
 	if (!dev_list) {
@@ -467,8 +472,11 @@ int mlx5_verbs_init_context(bool uses_qsteering)
 	}
 
 	for (i = 0; dev_list[i]; i++) {
-		if (strncmp(ibv_get_device_name(dev_list[i]), "mlx5", 4))
-			continue;
+		if (!have_pci_addr) {
+			if (strncmp(ibv_get_device_name(dev_list[i]), "mlx5", 4))
+				continue;
+			break;
+		}
 
 		if (ibv_device_to_pci_addr(dev_list[i], &pci_addr)) {
 			log_warn("failed to read pci addr for %s, skipping",

@@ -107,11 +107,11 @@ int hw_timestamp_init(void)
 	}
 
 	for (i = 0; dev_list[i]; i++) {
-		if (strncmp(ibv_get_device_name(dev_list[i]), "mlx5", 4))
-			continue;
-
-		if (!nic_pci_addr_str)
+		if (!nic_pci_addr_str) {
+			if (strncmp(ibv_get_device_name(dev_list[i]), "mlx5", 4))
+				continue;
 			break;
+		}
 
 		if (ibv_device_to_pci_addr(dev_list[i], &pci_addr)) {
 			log_warn("failed to read pci addr for %s, skipping",
